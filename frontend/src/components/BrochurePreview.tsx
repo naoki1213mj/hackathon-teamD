@@ -20,7 +20,7 @@ export function BrochurePreview({ contents }: BrochurePreviewProps) {
           srcDoc={htmlContent.content}
           title="ブローシャプレビュー"
           className="h-96 w-full bg-white"
-          sandbox="allow-same-origin"
+          sandbox=""
         />
       </div>
     </div>

@@ -1,5 +1,6 @@
 """FastAPI エントリポイント。ルーター統合・CORS・静的ファイル配信を行う。"""
 
+import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -11,13 +12,29 @@ from fastapi.staticfiles import StaticFiles
 from src.api.chat import router as chat_router
 from src.api.health import router as health_router
 
+logger = logging.getLogger(__name__)
+
+
+def _configure_observability() -> None:
+    """Application Insights の OpenTelemetry トレーシングを設定する"""
+    conn_str = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+    if not conn_str:
+        logger.info("APPLICATIONINSIGHTS_CONNECTION_STRING 未設定: Observability スキップ")
+        return
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        configure_azure_monitor(connection_string=conn_str)
+        logger.info("Application Insights Observability 有効化")
+    except ImportError:
+        logger.warning("azure-monitor-opentelemetry 未インストール: Observability スキップ")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """アプリケーション起動・終了時のライフサイクル管理"""
-    # 起動処理（将来的に Azure クライアント初期化等を追加）
+    _configure_observability()
     yield
-    # 終了処理
 
 
 app = FastAPI(

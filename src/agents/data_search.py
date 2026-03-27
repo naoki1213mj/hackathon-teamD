@@ -1,37 +1,102 @@
 """Agent1: データ検索エージェント。Fabric Lakehouse から販売・顧客データを検索・分析する。"""
 
+import csv
 import json
+from pathlib import Path
 
 from agent_framework import AzureOpenAIResponsesClient, tool
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
 
-# --- モックデータ（Fabric Lakehouse 未接続時のフォールバック） ---
+# --- デモデータ読み込み（Fabric Lakehouse 未接続時は CSV から読み込む） ---
 
-MOCK_SALES_DATA = [
-    {"plan_name": "沖縄3泊4日ファミリープラン", "destination": "沖縄", "season": "spring",
-     "revenue": 358400, "pax": 4, "customer_segment": "ファミリー", "booking_count": 45},
-    {"plan_name": "沖縄リゾートステイ", "destination": "沖縄", "season": "spring",
-     "revenue": 198000, "pax": 2, "customer_segment": "カップル", "booking_count": 32},
-    {"plan_name": "北海道ラベンダー畑ツアー", "destination": "北海道", "season": "summer",
-     "revenue": 275000, "pax": 3, "customer_segment": "ファミリー", "booking_count": 28},
-    {"plan_name": "京都 紅葉めぐり", "destination": "京都", "season": "autumn",
-     "revenue": 156000, "pax": 2, "customer_segment": "シニア", "booking_count": 55},
-    {"plan_name": "箱根温泉週末プラン", "destination": "箱根", "season": "winter",
-     "revenue": 89000, "pax": 2, "customer_segment": "カップル", "booking_count": 62},
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _load_csv(filename: str) -> list[dict]:
+    """CSV ファイルからデータを読み込む"""
+    filepath = DATA_DIR / filename
+    if not filepath.exists():
+        return []
+    with open(filepath, encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _get_sales_data() -> list[dict]:
+    """販売履歴データを取得する（CSV → 集約済みサマリ）"""
+    rows = _load_csv("sales_history.csv")
+    if not rows:
+        return _FALLBACK_SALES
+    # プラン×目的地×季節で集約
+    agg: dict[str, dict] = {}
+    for r in rows:
+        key = r["plan_name"]
+        if key not in agg:
+            season = ""
+            dest = r.get("destination", "")
+            # departure_date から季節を推定
+            dep = r.get("departure_date", "")
+            if dep:
+                month = int(dep.split("-")[1]) if "-" in dep else 0
+                if month in (3, 4, 5):
+                    season = "spring"
+                elif month in (6, 7, 8):
+                    season = "summer"
+                elif month in (9, 10, 11):
+                    season = "autumn"
+                else:
+                    season = "winter"
+            agg[key] = {
+                "plan_name": key,
+                "destination": dest,
+                "season": season,
+                "revenue": 0,
+                "pax": 0,
+                "customer_segment": r.get("customer_segment", ""),
+                "booking_count": 0,
+            }
+        agg[key]["revenue"] += int(r.get("revenue", 0))
+        agg[key]["pax"] += int(r.get("pax", 0))
+        agg[key]["booking_count"] += 1
+    return list(agg.values())
+
+
+def _get_reviews() -> list[dict]:
+    """顧客レビューデータを取得する"""
+    rows = _load_csv("customer_reviews.csv")
+    if not rows:
+        return _FALLBACK_REVIEWS
+    return [
+        {
+            "plan_name": r["plan_name"],
+            "rating": int(r["rating"]),
+            "comment": r["comment"],
+        }
+        for r in rows
+    ]
+
+
+# フォールバック用の最小データ
+_FALLBACK_SALES = [
+    {
+        "plan_name": "沖縄3泊4日ファミリープラン",
+        "destination": "沖縄",
+        "season": "spring",
+        "revenue": 358400,
+        "pax": 4,
+        "customer_segment": "ファミリー",
+        "booking_count": 45,
+    },
 ]
 
-MOCK_REVIEWS = [
+_FALLBACK_REVIEWS = [
     {"plan_name": "沖縄3泊4日ファミリープラン", "rating": 5, "comment": "子どもが大喜びでした。美ら海水族館が最高！"},
-    {"plan_name": "沖縄3泊4日ファミリープラン", "rating": 4, "comment": "ホテルは清潔で良かったが、移動が多かった"},
-    {"plan_name": "沖縄3泊4日ファミリープラン", "rating": 3, "comment": "価格に対して食事の質がイマイチ"},
-    {"plan_name": "沖縄リゾートステイ", "rating": 5, "comment": "プールもビーチも最高のリゾート体験"},
-    {"plan_name": "北海道ラベンダー畑ツアー", "rating": 4, "comment": "景色が素晴らしかった。食事も美味しい"},
 ]
 
 
 # --- ツール定義 ---
+
 
 @tool
 async def search_sales_history(
@@ -46,8 +111,7 @@ async def search_sales_history(
         season: 季節フィルタ（spring/summer/autumn/winter）
         region: 地域フィルタ（例: 「沖縄」「北海道」）
     """
-    # TODO: Fabric SQL EP 経由のクエリに置き換え
-    results = MOCK_SALES_DATA
+    results = _get_sales_data()
     if season:
         results = [r for r in results if r["season"] == season]
     if region:
@@ -66,8 +130,7 @@ async def search_customer_reviews(
         plan_name: プラン名でフィルタ
         min_rating: 最低評価でフィルタ（1〜5）
     """
-    # TODO: Fabric SQL EP 経由のクエリに置き換え
-    results = MOCK_REVIEWS
+    results = _get_reviews()
     if plan_name:
         results = [r for r in results if plan_name in r["plan_name"]]
     if min_rating is not None:

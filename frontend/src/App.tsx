@@ -13,9 +13,11 @@ import { RegulationResults } from './components/RegulationResults'
 import { SafetyBadge } from './components/SafetyBadge'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ToolEventBadges } from './components/ToolEventBadges'
+import { MarkdownView } from './components/MarkdownView'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
+import { exportPlanMarkdown, exportBrochureHtml, exportAllAsJson } from './lib/export'
 
 function App() {
   const { state, sendMessage, approve, reset } = useSSE()
@@ -58,15 +60,7 @@ function App() {
                     📝 施策生成エージェント
                   </span>
                 </div>
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  {planContent.content.split('\n').map((line, i) => {
-                    if (line.startsWith('# ')) return <h2 key={i}>{line.slice(2)}</h2>
-                    if (line.startsWith('## ')) return <h3 key={i}>{line.slice(3)}</h3>
-                    if (line.startsWith('- ')) return <li key={i}>{line.slice(2)}</li>
-                    if (line.trim()) return <p key={i}>{line}</p>
-                    return <br key={i} />
-                  })}
-                </div>
+                <MarkdownView content={planContent.content} />
               </div>
             )}
 
@@ -99,25 +93,43 @@ function App() {
               </div>
             </div>
           ) : (
+            <>
             <ArtifactTabs tabs={[
               {
                 key: 'plan',
                 label: `📝 ${t('tab.plan')}`,
                 content: planContent ? (
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    {planContent.content.split('\n').map((line, i) => {
-                      if (line.startsWith('# ')) return <h2 key={i}>{line.slice(2)}</h2>
-                      if (line.startsWith('## ')) return <h3 key={i}>{line.slice(3)}</h3>
-                      if (line.startsWith('- ')) return <li key={i}>{line.slice(2)}</li>
-                      if (line.trim()) return <p key={i}>{line}</p>
-                      return <br key={i} />
-                    })}
-                  </div>
+                  <MarkdownView content={planContent.content} />
                 ) : null,
               },
               { key: 'brochure', label: `🎨 ${t('tab.brochure')}`, content: <BrochurePreview contents={state.textContents} /> },
               { key: 'images', label: `🖼️ ${t('tab.images')}`, content: <ImageGallery images={state.images} /> },
             ]} />
+
+            {/* エクスポートボタン群 */}
+            {state.status === 'completed' && (
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  onClick={() => exportPlanMarkdown(state.textContents)}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                >
+                  📄 企画書 (.md)
+                </button>
+                <button
+                  onClick={() => exportBrochureHtml(state.textContents)}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                >
+                  🎨 ブローシャ (.html)
+                </button>
+                <button
+                  onClick={() => exportAllAsJson(state.textContents, state.images, state.conversationId)}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                >
+                  📦 一括エクスポート (.json)
+                </button>
+              </div>
+            )}
+            </>
           )}
         </div>
       </main>

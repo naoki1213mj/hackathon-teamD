@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ApprovalRequest } from '../hooks/useSSE'
+import { MarkdownView } from './MarkdownView'
 
 interface PlanApprovalProps {
   request: ApprovalRequest
@@ -18,15 +19,8 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
       </h3>
 
       {request.plan_markdown && (
-        <div className="prose prose-sm max-w-none rounded-lg bg-white p-4 text-gray-700
-                        dark:bg-gray-800 dark:prose-invert dark:text-gray-300">
-          {request.plan_markdown.split('\n').map((line, i) => {
-            if (line.startsWith('# ')) return <h2 key={i} className="text-lg font-bold">{line.slice(2)}</h2>
-            if (line.startsWith('## ')) return <h3 key={i} className="text-base font-semibold">{line.slice(3)}</h3>
-            if (line.startsWith('- ')) return <li key={i}>{line.slice(2)}</li>
-            if (line.trim()) return <p key={i}>{line}</p>
-            return <br key={i} />
-          })}
+        <div className="rounded-lg bg-white p-4 dark:bg-gray-800">
+          <MarkdownView content={request.plan_markdown} />
         </div>
       )}
 
