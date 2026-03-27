@@ -1,0 +1,9 @@
+{
+  "resourceGroup": "rg-",
+  "logAnalytics": "log-",
+  "appInsights": "appi-",
+  "containerRegistry": "cr",
+  "keyVault": "kv-",
+  "containerAppsEnv": "cae-",
+  "containerApp": "ca-"
+}
