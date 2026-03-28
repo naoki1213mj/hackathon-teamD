@@ -140,6 +140,53 @@ module aiFoundryAppAccess 'modules/ai-project-app-access.bicep' = {
   }
 }
 
+// Azure API Management (AI Gateway)
+module apim 'modules/api-management.bicep' = {
+  name: 'api-management'
+  scope: rg
+  params: {
+    name: '${abbrs.apim}${resourceToken}'
+    location: location
+    tags: tags
+    appInsightsId: appInsights.outputs.id
+    appInsightsInstrumentationKey: appInsights.outputs.instrumentationKey
+  }
+}
+
+// APIM MI に Foundry へのアクセス権を付与
+module aiFoundryApimAccess 'modules/ai-project-app-access.bicep' = {
+  name: 'ai-foundry-apim-access'
+  scope: rg
+  params: {
+    aiFoundryName: aiFoundry.outputs.name
+    principalId: apim.outputs.principalId
+  }
+}
+
+// Azure Functions MCP サーバー (Flex Consumption)
+module functionApp 'modules/function-app.bicep' = {
+  name: 'function-app'
+  scope: rg
+  params: {
+    name: '${abbrs.functionApp}${resourceToken}'
+    location: location
+    tags: tags
+    storageAccountName: '${abbrs.funcStorage}${resourceToken}'
+    appInsightsConnectionString: appInsights.outputs.connectionString
+  }
+}
+
+// Logic Apps (承認後自動アクション)
+module logicApp 'modules/logic-app.bicep' = {
+  name: 'logic-app'
+  scope: rg
+  params: {
+    name: '${abbrs.logicApp}${resourceToken}'
+    location: location
+    tags: tags
+  }
+}
+
 // 出力
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = acr.outputs.name
@@ -148,5 +195,8 @@ output AZURE_AI_PROJECT_ENDPOINT string = aiProjectEndpoint
 output AZURE_AI_PROJECT_NAME string = aiProject.outputs.name
 output AZURE_AI_FOUNDRY_NAME string = aiFoundry.outputs.name
 output MODEL_NAME string = defaultModelDeploymentName
+output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
+output AZURE_FUNCTION_APP_NAME string = functionApp.outputs.name
+output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name
 output AZURE_RESOURCE_GROUP string = rg.name
 output SERVICE_WEB_ENDPOINTS array = [containerApp.outputs.uri]

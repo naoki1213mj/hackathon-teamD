@@ -6,6 +6,10 @@
   "keyVault": "kv-",
   "aiFoundry": "ais",
   "aiProject": "aip-",
+  "apim": "apim-",
+  "functionApp": "func-",
+  "funcStorage": "stfn",
+  "logicApp": "logic-",
   "containerAppsEnv": "cae-",
   "containerApp": "ca-"
 }
