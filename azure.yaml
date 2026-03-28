@@ -10,6 +10,7 @@ services:
     language: python
     docker:
       path: Dockerfile
+      remoteBuild: true
 
 infra:
   provider: bicep

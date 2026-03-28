@@ -10,9 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.12",
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.2",
-    "lightningcss-win32-x64-msvc": "^1.32.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0"

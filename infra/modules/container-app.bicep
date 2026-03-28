@@ -9,6 +9,9 @@ param imageName string
 param keyVaultName string
 param appInsightsConnectionString string
 
+// ACR イメージを使う場合のみ registry 参照が必要
+var isAcrImage = contains(imageName, '.azurecr.io')
+
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
   name: containerRegistryName
 }
@@ -30,12 +33,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8000
         transport: 'auto'
       }
-      registries: [
+      registries: isAcrImage ? [
         {
           server: acr.properties.loginServer
           identity: 'system'
         }
-      ]
+      ] : []
     }
     template: {
       containers: [
