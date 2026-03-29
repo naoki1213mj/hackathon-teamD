@@ -3,8 +3,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
 import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
+import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50

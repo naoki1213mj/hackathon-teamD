@@ -36,7 +36,7 @@ jobs:
           node-version: "22"
 
       - name: Install frontend dependencies
-        run: cd frontend && npm ci
+        run: cd frontend && npm ci --omit=optional
 
       - name: Frontend lint
         run: cd frontend && npm run lint
