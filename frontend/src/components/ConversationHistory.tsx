@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 
 interface Conversation {
   id: string
@@ -28,8 +28,10 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
     }
   }, [])
 
-  useEffect(() => {
-    if (isOpen) {
+  const toggle = useCallback(() => {
+    const next = !isOpen
+    setIsOpen(next)
+    if (next) {
       loadConversations()
     }
   }, [isOpen, loadConversations])
@@ -38,7 +40,7 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
     <div className="relative">
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggle}
         className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
         title={t('history.title')}
       >
