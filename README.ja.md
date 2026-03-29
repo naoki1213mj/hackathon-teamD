@@ -8,9 +8,12 @@
 
 ## 現在の実装状況
 
-- 実装済み: FastAPI SSE パイプライン、4 エージェントの基本実装、レスポンシブな React UI、テーマ切替、多言語 UI、APIM/Functions/Logic Apps の IaC、readiness エンドポイント、本番相当環境での Content Safety fail-close 化。
-- 実装進行中: APIM を強制経路にする実行時統合、MCP ツールの本実装、Voice Live の実接続、Foundry 側により寄せたワークフロー実行。
-- target architecture と現状の差分は [docs/reviews/2026-03-29-comprehensive-review.md](docs/reviews/2026-03-29-comprehensive-review.md) で管理しています。
+- **コアパイプライン**: FastAPI SSE + 4 エージェント (Agent Framework rc5) + Sequential Workflow — Azure 上で E2E 動作確認済み (Content Safety 有効)
+- **インフラ**: Bicep 15 モジュール (Foundry, APIM, Functions, Logic Apps, Cosmos DB, VNet, Key Vault)
+- **フロントエンド**: React 18 コンポーネント、i18n (日英中)、ダーク/ライトモード、レスポンシブ
+- **CI/CD**: GitHub Actions 3 ワークフロー (CI ✅ / Security ✅ / Deploy ✅)
+- **v3.7 機能**: Cosmos DB 会話履歴永続化、デモリプレイ API、VNet 統合
+- **要件定義書**: [docs/requirements_v3.7.md](docs/requirements_v3.7.md)
 
 ## アーキテクチャ
 

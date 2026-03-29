@@ -10,9 +10,12 @@ A multi-agent pipeline where travel company marketing staff give natural languag
 
 ## Current Status
 
-- Implemented: FastAPI SSE pipeline, four agent modules, responsive React UI, theme toggle, i18n, APIM/Functions/Logic Apps IaC, readiness endpoint, and production-aware fail-close behavior for Content Safety.
-- In progress: enforced APIM runtime routing, full MCP implementations for PDF and M365 actions, real Voice Live integration, and broader runtime alignment with Foundry-managed workflows.
-- The repository contains both shipping code and scaffolding for v3.5 features. The current gap between target architecture and implementation is tracked in [docs/reviews/2026-03-29-comprehensive-review.md](docs/reviews/2026-03-29-comprehensive-review.md).
+- **Core pipeline**: FastAPI SSE + 4 agents (Agent Framework rc5) + Sequential Workflow — E2E verified on Azure (Content Safety enabled)
+- **Infrastructure**: 15 Bicep modules (Foundry, APIM, Functions, Logic Apps, Cosmos DB, VNet, Key Vault)
+- **Frontend**: 18 React components, i18n (ja/en/zh), dark/light mode, responsive layout
+- **CI/CD**: 3 GitHub Actions workflows (CI ✅ / Security ✅ / Deploy ✅)
+- **v3.7 features**: Cosmos DB conversation history, demo replay API, VNet integration
+- **Requirements**: [docs/requirements_v3.7.md](docs/requirements_v3.7.md)
 
 ## アーキテクチャ
 
