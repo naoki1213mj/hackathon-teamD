@@ -4,7 +4,7 @@
 
 旅行会社のマーケ担当者が自然言語で指示すると、企画書・販促ブローシャ・バナー画像を全自動生成するマルチエージェントパイプライン。Microsoft Foundry + Azure のフル PaaS 構成。
 
-要件定義書: `docs/requirements_v3.md`
+要件定義書: `docs/requirements_v3.7.md`
 
 ## ハッカソン情報
 
@@ -74,30 +74,40 @@
 
 ```
 travel-marketing-agents/
-├── src/                          # バックエンド (Python)
-│   ├── agents/                   # 4 つのエージェント定義
-│   │   ├── data_search.py        # Agent1
-│   │   ├── marketing_plan.py     # Agent2
-│   │   ├── regulation_check.py   # Agent3
-│   │   └── brochure_gen.py       # Agent4
-│   ├── workflows/                # Foundry Workflows 定義
-│   ├── tools/                    # @tool 関数
+├── src/                          # バックエンド (Python 3.14)
+│   ├── agents/                   # 5 エージェント定義
+│   │   ├── data_search.py        # Agent1: データ検索（CSV + フォールバック）
+│   │   ├── marketing_plan.py     # Agent2: 施策生成（+ Web Search ツール）
+│   │   ├── regulation_check.py   # Agent3: 規制チェック（+ 安全情報ツール）
+│   │   ├── brochure_gen.py       # Agent4: ブローシャ + 画像生成
+│   │   └── quality_review.py     # Agent5: 品質レビュー（§14.8）
+│   ├── workflows/                # SequentialBuilder で 4 エージェント接続
 │   ├── api/                      # FastAPI ルーター
-│   │   ├── chat.py               # /api/chat (SSE)
-│   │   └── health.py             # /api/health
-│   ├── middleware/                # Content Safety 等
+│   │   ├── chat.py               # /api/chat (SSE) + 会話保存
+│   │   ├── conversations.py      # /api/conversations + /api/replay
+│   │   └── health.py             # /api/health + /api/ready
+│   ├── middleware/                # Content Safety（Prompt Shield + Text Analysis）
+│   ├── conversations.py          # Cosmos DB / インメモリ会話管理
+│   ├── hosted_agent.py           # Foundry Hosted Agent エントリポイント
 │   ├── config.py                 # 設定（TypedDict + load_settings）
 │   └── main.py                   # FastAPI エントリポイント
-├── frontend/                     # フロントエンド (React)
-│   ├── src/
-│   │   ├── components/           # §6.2 の 16 コンポーネント群
-│   │   ├── hooks/                # useSSE, useTheme, useI18n
-│   │   ├── lib/                  # i18n.ts, sse-client.ts
-│   │   └── App.tsx
-│   ├── package.json
-│   └── vite.config.ts
-├── functions/                    # Azure Functions MCP サーバー
-├── infra/                        # Bicep IaC
+├── frontend/                     # フロントエンド (React 19)
+│   └── src/
+│       ├── components/           # 19 コンポーネント（ConversationHistory 追加）
+│       ├── hooks/                # useSSE, useTheme, useI18n
+│       └── lib/                  # i18n.ts, sse-client.ts, export.ts
+├── functions/                    # Azure Functions MCP サーバー (Python 3.13)
+├── infra/                        # Bicep IaC（16 モジュール）
+│   ├── main.bicep
+│   └── modules/                  # VNet, Cosmos DB, APIM, Functions 等
+├── data/                         # デモデータ + demo-replay.json
+├── regulations/                  # レギュレーション文書
+├── tests/                        # pytest（53 テスト）
+├── Dockerfile                    # マルチステージ（Container Apps 用）
+├── Dockerfile.agent              # Hosted Agent 用
+├── azure.yaml                    # azd 設定
+└── .github/workflows/            # CI + Deploy + Security
+```
 │   ├── main.bicep
 │   └── modules/
 ├── tests/                        # pytest
