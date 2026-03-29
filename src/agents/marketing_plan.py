@@ -30,6 +30,7 @@ async def search_market_trends(query: str) -> str:
         "- サステナブルツーリズム（エコツアー）への関心が高まる"
     )
 
+
 INSTRUCTIONS = """\
 あなたは旅行マーケティングの施策立案エージェントです。
 Agent1（データ検索エージェント）の分析結果を受け取り、以下の構成で Markdown 形式の企画書を生成してください。

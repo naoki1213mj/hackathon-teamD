@@ -101,6 +101,7 @@ module aiProject 'modules/ai-project.bicep' = {
 var aiProjectEndpoint = 'https://${aiFoundry.outputs.name}.services.ai.azure.com/api/projects/${aiProject.outputs.name}'
 
 // VNet（Container Apps + Private Endpoints）
+// 注: 既存の CAE には VNet を追加できないため、新規デプロイ時のみ有効
 module vnet 'modules/vnet.bicep' = {
   name: 'vnet'
   scope: rg
@@ -111,7 +112,8 @@ module vnet 'modules/vnet.bicep' = {
   }
 }
 
-// Container Apps Environment（VNet 統合）
+// Container Apps Environment
+// VNet 統合は新規作成時のみ適用（既存 CAE への追加は不可）
 module containerAppsEnv 'modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
   scope: rg
@@ -120,7 +122,6 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
     location: location
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
-    subnetId: vnet.outputs.containerAppsSubnetId
   }
 }
 

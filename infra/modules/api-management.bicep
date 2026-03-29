@@ -70,35 +70,13 @@ resource aiGatewayApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' 
   }
 }
 
-// トークン制限ポリシー（グローバル）
-resource globalPolicy 'Microsoft.ApiManagement/service/policies@2024-06-01-preview' = {
-  parent: apim
+// AI Gateway API ポリシー（API レベル）
+resource aiGatewayApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = if (!empty(foundryEndpoint)) {
+  parent: aiGatewayApi
   name: 'policy'
   properties: {
     format: 'xml'
-    value: '''
-      <policies>
-        <inbound>
-          <base />
-          <rate-limit calls="60" renewal-period="60" />
-          <set-header name="X-Request-Id" exists-action="skip">
-            <value>@(context.RequestId.ToString())</value>
-          </set-header>
-        </inbound>
-        <backend>
-          <base />
-        </backend>
-        <outbound>
-          <base />
-          <set-header name="X-Gateway" exists-action="override">
-            <value>travel-marketing-ai-gateway</value>
-          </set-header>
-        </outbound>
-        <on-error>
-          <base />
-        </on-error>
-      </policies>
-    '''
+    value: '<policies><inbound><base /><rate-limit calls="60" renewal-period="60" /><set-header name="X-Request-Id" exists-action="skip"><value>@(context.RequestId.ToString())</value></set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Gateway" exists-action="override"><value>travel-marketing-ai-gateway</value></set-header></outbound><on-error><base /></on-error></policies>'
   }
 }
 

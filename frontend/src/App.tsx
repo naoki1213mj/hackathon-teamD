@@ -1,6 +1,7 @@
 import { AnalysisView } from './components/AnalysisView'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { BrochurePreview } from './components/BrochurePreview'
+import { ConversationHistory } from './components/ConversationHistory'
 import { ErrorRetry } from './components/ErrorRetry'
 import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
@@ -47,6 +48,7 @@ function App() {
             <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{t('app.subtitle')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+          <ConversationHistory onSelect={(id) => sendMessage(`前回の会話 ${id} を参照`)} t={t} />
           <SafetyBadge result={state.safetyResult} t={t} />
           <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
           <ThemeToggle theme={theme} onChange={setTheme} t={t} />

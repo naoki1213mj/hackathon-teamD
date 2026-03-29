@@ -77,6 +77,10 @@ export const translations: Record<Locale, Record<string, string>> = {
     'tool.check_travel_law_compliance': '旅行業法チェック',
     'tool.generate_hero_image': 'ヒーロー画像生成',
     'tool.generate_banner_image': 'バナー画像生成',
+    'history.title': '会話履歴',
+    'history.empty': '履歴はまだありません',
+    'replay.title': 'デモリプレイ',
+    'replay.button': 'リプレイ再生',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -150,6 +154,10 @@ export const translations: Record<Locale, Record<string, string>> = {
     'tool.check_travel_law_compliance': 'Travel law check',
     'tool.generate_hero_image': 'Hero image generation',
     'tool.generate_banner_image': 'Banner image generation',
+    'history.title': 'Conversation History',
+    'history.empty': 'No history yet',
+    'replay.title': 'Demo Replay',
+    'replay.button': 'Play Replay',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -223,5 +231,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     'tool.check_travel_law_compliance': '旅游法规检查',
     'tool.generate_hero_image': '头图生成',
     'tool.generate_banner_image': '横幅生成',
+    'history.title': '对话历史',
+    'history.empty': '暂无历史记录',
+    'replay.title': '演示回放',
+    'replay.button': '播放回放',
   },
 }

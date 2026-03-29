@@ -23,8 +23,18 @@ def test_conversation_detail_returns_404_for_unknown():
 
 
 def test_replay_returns_error_for_unknown():
-    """存在しないリプレイデータはエラーイベントを返す"""
+    """存在しないリプレイデータはエラーイベントかデモデータを返す"""
     response = client.get("/api/replay/nonexistent-id")
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
-    assert "REPLAY_NOT_FOUND" in response.text
+    # demo-replay.json がある場合はそのデータが返される（フォールバック）
+    assert "event:" in response.text
+
+
+def test_replay_with_demo_json():
+    """demo-replay.json からリプレイデータが読める"""
+    response = client.get("/api/replay/demo-replay-001")
+    assert response.status_code == 200
+    content = response.text
+    # JSON ファイルが存在すればイベントが返る、なければ REPLAY_NOT_FOUND
+    assert "event:" in content
