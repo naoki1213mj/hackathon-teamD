@@ -1,10 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>Travel Marketing AI</title>
+    <script>
+      (function () {
+        const savedTheme = localStorage.getItem('theme') || 'system'
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        const resolvedTheme = savedTheme === 'system' ? (systemDark ? 'dark' : 'light') : savedTheme
+        document.documentElement.classList.toggle('dark', resolvedTheme === 'dark')
+        document.documentElement.dataset.theme = resolvedTheme
+        document.documentElement.style.colorScheme = resolvedTheme
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

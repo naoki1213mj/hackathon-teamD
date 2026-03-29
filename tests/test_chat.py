@@ -1,10 +1,19 @@
 """チャットエンドポイントのバリデーションテスト"""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _force_mock_pipeline(monkeypatch):
+    """テスト中は Azure 接続を無効化してモック経路を通す。"""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
 
 
 def test_chat_returns_sse_stream():
@@ -49,6 +58,18 @@ def test_approve_with_approval_returns_post_approval_events():
     assert "event: done" in content
 
 
+def test_approve_accepts_english_approval_keyword():
+    """英語の承認語でも承認フローとして扱う"""
+    response = client.post(
+        "/api/chat/test-thread/approve",
+        json={"conversation_id": "test-thread", "response": "approve"},
+    )
+    assert response.status_code == 200
+    content = response.text
+    assert "regulation-check-agent" in content
+    assert "brochure-gen-agent" in content
+
+
 def test_approve_with_revision_returns_revised_plan():
     """修正指示すると Agent2 再実行の SSE イベントが返る"""
     response = client.post(
@@ -58,7 +79,7 @@ def test_approve_with_revision_returns_revised_plan():
     assert response.status_code == 200
     content = response.text
     assert "marketing-plan-agent" in content
-    assert "event: approval_request" in content
+    assert "event: text" in content
 
 
 def test_chat_refine_with_conversation_id():

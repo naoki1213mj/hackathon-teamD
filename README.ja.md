@@ -6,6 +6,12 @@
 
 旅行会社のマーケ担当者が自然言語で指示すると、4 つの AI エージェントが順次処理し、**企画書 (Markdown)・販促ブローシャ (HTML)・バナー画像 (PNG)・紹介動画 (MP4)** を全自動で生成するパイプライン。
 
+## 現在の実装状況
+
+- 実装済み: FastAPI SSE パイプライン、4 エージェントの基本実装、レスポンシブな React UI、テーマ切替、多言語 UI、APIM/Functions/Logic Apps の IaC、readiness エンドポイント、本番相当環境での Content Safety fail-close 化。
+- 実装進行中: APIM を強制経路にする実行時統合、MCP ツールの本実装、Voice Live の実接続、Foundry 側により寄せたワークフロー実行。
+- target architecture と現状の差分は [docs/reviews/2026-03-29-comprehensive-review.md](docs/reviews/2026-03-29-comprehensive-review.md) で管理しています。
+
 ## アーキテクチャ
 
 ```
@@ -101,6 +107,87 @@ azd deploy   # 2回目以降: コードのみ
 ```
 
 > **注**: Docker Desktop は不要です。`azd up` は ACR リモートビルド (`az acr build`) を使用します。
+
+> **注**: 本番デプロイは CI 成功と readiness チェックを前提にしています。必須設定が不足している場合は deploy が失敗します。
+
+*** Add File: c:\Users\nmatsumoto\projects\hackathon-teamD\docs\reviews\2026-03-29-comprehensive-review.md
+# Comprehensive Review and Improvement Plan
+
+## Scope
+
+- Architecture review
+- Security review
+- Code review
+- CI/CD review
+- UI/UX review
+- Test review
+- Documentation review
+
+## Findings Summary
+
+### Critical
+
+- The current runtime still does not fully enforce the target APIM and Foundry-managed execution path.
+- Content Safety previously allowed fail-open behavior when configuration was missing.
+- Production deployment could bypass CI through manual dispatch.
+
+### High
+
+- Theme and locale behavior in the frontend were inconsistent, and many visible strings were not localized.
+- The voice input UI looked real even though it only sent placeholder text.
+- Docker frontend dependency installation was not reproducible.
+- Security audits in GitHub Actions did not fail the pipeline.
+- Health checks were liveness-only and too weak for deployment gating.
+
+### Medium
+
+- Artifact tab selection could render an empty preview area.
+- Exported brochure HTML was not sanitized before download.
+- README files described target architecture without clearly separating current implementation state.
+- Tests focused on imports and happy paths, but did not assert production-like configuration behavior.
+
+## Implementation Plan
+
+### Phase 1
+
+- Harden backend runtime behavior for production-like environments.
+- Add readiness reporting and fix approval parsing correctness.
+
+### Phase 2
+
+- Refresh the frontend shell for responsive layout, stronger hierarchy, and honest feature affordances.
+- Sync theme and locale to the document root.
+
+### Phase 3
+
+- Strengthen CI/CD gates.
+- Fail dependency audits, remove CI bypass, and validate readiness during deployment.
+- Improve Docker build reproducibility.
+
+### Phase 4
+
+- Align README and review docs with the actual implementation state.
+- Continue closing the gap between current runtime behavior and the v3.5 target architecture.
+
+## Changes Implemented In This Iteration
+
+- Production-aware fail-close behavior for Prompt Shield and Text Analysis when Content Safety is required.
+- `GET /api/ready` endpoint for production configuration validation.
+- Language-independent approval keyword handling.
+- Fixed syntax-level correctness in the approval follow-up path.
+- Responsive, more modern frontend shell with stronger theme behavior and broader translation coverage.
+- Honest voice preview UI instead of sending placeholder text as if it were a transcript.
+- Artifact tab fallback behavior and safer brochure HTML export.
+- CI now runs frontend lint, deploy no longer bypasses CI through manual dispatch, security audits fail the workflow, and deploy includes readiness checks.
+- Docker frontend stage now uses `npm ci` with the committed lock file.
+
+## Next Recommended Work
+
+1. Route runtime model traffic through APIM instead of direct project endpoint access.
+2. Replace MCP placeholders with real Teams, SharePoint, and PDF flows.
+3. Add component-level frontend tests and deploy smoke tests beyond readiness.
+4. Wire production secrets and Content Safety endpoint delivery through Key Vault and IaC.
+5. Continue reducing the gap between local SequentialBuilder execution and Foundry-managed workflow execution.
 
 ## プロジェクト構成
 

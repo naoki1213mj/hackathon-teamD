@@ -4,6 +4,33 @@
 
 import type { ImageContent, TextContent } from '../hooks/useSSE'
 
+function sanitizeHtmlForExport(html: string): string {
+  const documentFragment = new DOMParser().parseFromString(html, 'text/html')
+  const blockedTags = ['script', 'iframe', 'form', 'object', 'embed', 'base', 'meta']
+
+  blockedTags.forEach(tagName => {
+    documentFragment.querySelectorAll(tagName).forEach(node => node.remove())
+  })
+
+  documentFragment.querySelectorAll('*').forEach(node => {
+    Array.from(node.attributes).forEach(attribute => {
+      const attributeName = attribute.name.toLowerCase()
+      const attributeValue = attribute.value.trim().toLowerCase()
+      if (attributeName.startsWith('on')) {
+        node.removeAttribute(attribute.name)
+      }
+      if (
+        (attributeName === 'href' || attributeName === 'src') &&
+        (attributeValue.startsWith('javascript:') || attributeValue.startsWith('data:text/html'))
+      ) {
+        node.removeAttribute(attribute.name)
+      }
+    })
+  })
+
+  return documentFragment.documentElement.outerHTML
+}
+
 function downloadBlob(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType })
   const url = URL.createObjectURL(blob)
@@ -36,7 +63,7 @@ export function exportPlanMarkdown(contents: TextContent[]) {
 export function exportBrochureHtml(contents: TextContent[]) {
   const brochure = contents.find(c => c.agent === 'brochure-gen-agent' && c.content_type === 'html')
   if (!brochure) return
-  downloadBlob(brochure.content, 'brochure.html', 'text/html;charset=utf-8')
+  downloadBlob(sanitizeHtmlForExport(brochure.content), 'brochure.html', 'text/html;charset=utf-8')
 }
 
 /** 画像を PNG としてダウンロード */

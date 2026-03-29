@@ -8,23 +8,28 @@ interface SafetyBadgeProps {
 export function SafetyBadge({ result, t }: SafetyBadgeProps) {
   if (!result) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1
-                       text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-        ⚪ {t('safety.checking')}
+      <span className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-xs text-[var(--text-muted)]">
+        <span className="h-2 w-2 rounded-full bg-slate-400" />
+        {t('safety.checking')}
       </span>
     )
   }
 
   const isSafe = result.status === 'safe'
+  const isError = result.status === 'error'
 
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs
+    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs
       ${isSafe
-        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-        : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300'
+        : isError
+          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-300'
+          : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300'
       }`}
     >
-      {isSafe ? '🟢' : '🔴'} {isSafe ? t('safety.safe') : t('safety.warning')}
+      <span className={`h-2 w-2 rounded-full ${isSafe ? 'bg-emerald-500' : isError ? 'bg-amber-500' : 'bg-red-500'}`} />
+      <span>{isSafe ? t('safety.safe') : isError ? t('safety.error') : t('safety.warning')}</span>
+      <span className="text-[10px] opacity-80">H{result.hate} S{result.self_harm} X{result.sexual} V{result.violence}</span>
     </span>
   )
 }

@@ -3,16 +3,17 @@ import { MarkdownView } from './MarkdownView'
 
 interface AnalysisViewProps {
   contents: TextContent[]
+  t: (key: string) => string
 }
 
-export function AnalysisView({ contents }: AnalysisViewProps) {
+export function AnalysisView({ contents, t }: AnalysisViewProps) {
   const analysisContent = contents.find(c => c.agent === 'data-search-agent')
   if (!analysisContent) return null
 
   return (
-    <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
-      <h3 className="mb-2 text-sm font-medium text-blue-800 dark:text-blue-300">
-        📊 データ分析結果
+    <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-5">
+      <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">
+        {t('section.analysis')}
       </h3>
       <MarkdownView content={analysisContent.content} />
     </div>

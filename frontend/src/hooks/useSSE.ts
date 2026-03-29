@@ -41,7 +41,7 @@ export interface SafetyResult {
   self_harm: number
   sexual: number
   violence: number
-  status: 'safe' | 'warning'
+  status: 'safe' | 'warning' | 'error'
 }
 
 export interface PipelineMetrics {

@@ -27,39 +27,52 @@ function App() {
   const { locale, setLocale, t } = useI18n()
 
   const isRunning = state.status === 'running'
+  const isCompleted = state.status === 'completed'
   const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
+  const statusLabel = t(`status.${state.status}`)
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      {/* ヘッダー */}
-      <header className="flex items-center justify-between border-b border-gray-200 px-6 py-3 dark:border-gray-800">
-        <div>
-          <h1 className="text-lg font-semibold">✈️ {t('app.title')}</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t('app.subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
+      <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:px-8">
+      <header className="rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-5 py-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">{t('app.kicker')}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('app.title')}</h1>
+              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
+                {statusLabel}
+              </span>
+            </div>
+            <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{t('app.subtitle')}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
           <SafetyBadge result={state.safetyResult} t={t} />
-          <LanguageSwitcher locale={locale} onChange={setLocale} />
-          <ThemeToggle theme={theme} onChange={setTheme} />
+          <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
+          <ThemeToggle theme={theme} onChange={setTheme} t={t} />
+          </div>
         </div>
       </header>
 
-      {/* メイン: 2カラム */}
-      <main className="flex flex-1 overflow-hidden">
-        {/* 左カラム: チャット */}
-        <div className="flex w-1/2 flex-col border-r border-gray-200 dark:border-gray-800">
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <main className="mt-4 grid flex-1 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+        <section className="flex min-h-[0] flex-col rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] shadow-[0_18px_55px_rgba(15,23,42,0.06)] backdrop-blur">
+          <div className="border-b border-[var(--panel-border)] px-5 py-4">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('panel.workflow')}</h2>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('panel.workflow.subtitle')}</p>
+          </div>
+
+          <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">
             {state.status !== 'idle' && (
               <PipelineStepper progress={state.agentProgress} t={t} />
             )}
-            <ToolEventBadges events={state.toolEvents} />
-            <AnalysisView contents={state.textContents} />
+            <ToolEventBadges events={state.toolEvents} t={t} />
+            <AnalysisView contents={state.textContents} t={t} />
 
             {planContent && (
-              <div className="rounded-lg bg-white p-4 dark:bg-gray-900">
-                <div className="mb-2">
-                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900 dark:text-blue-300">
-                    📝 施策生成エージェント
+              <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-5">
+                <div className="mb-3">
+                  <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
+                    {t('section.planAgent')}
                   </span>
                 </div>
                 <MarkdownView content={planContent.content} />
@@ -69,34 +82,58 @@ function App() {
             {state.status === 'approval' && state.approvalRequest && (
               <PlanApproval request={state.approvalRequest} onApprove={approve} t={t} />
             )}
-            <RegulationResults contents={state.textContents} />
+            <RegulationResults contents={state.textContents} t={t} />
             {state.error && (
-              <ErrorRetry error={state.error} onRetry={reset} retryLabel={t('error.retry')} />
+              <ErrorRetry error={state.error} onRetry={reset} retryLabel={t('error.retry')} t={t} />
             )}
-            <MetricsBar metrics={state.metrics} t={t} />
+            <MetricsBar metrics={state.metrics} t={t} locale={locale} />
           </div>
 
-          <div className="border-t border-gray-200 p-4 dark:border-gray-800">
-            <div className="flex items-center gap-2">
+          <div className="border-t border-[var(--panel-border)] px-5 py-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('panel.composer')}</h3>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">{t('panel.composer.subtitle')}</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1">
                 {state.status === 'completed' ? (
-                  <RefineChat onSubmit={sendMessage} disabled={isRunning} placeholder={t('refine.placeholder')} sendLabel={t('input.send')} />
+                  <RefineChat
+                    onSubmit={sendMessage}
+                    disabled={isRunning}
+                    placeholder={t('refine.placeholder')}
+                    sendLabel={t('input.send')}
+                    label={t('refine.label')}
+                  />
                 ) : (
-                  <InputForm onSubmit={sendMessage} disabled={isRunning} placeholder={t('input.placeholder')} sendLabel={t('input.send')} />
+                  <InputForm
+                    onSubmit={sendMessage}
+                    disabled={isRunning}
+                    placeholder={t('input.placeholder')}
+                    sendLabel={t('input.send')}
+                    label={t('input.label')}
+                  />
                 )}
               </div>
-              <VoiceInput onTranscript={sendMessage} disabled={isRunning} />
+              <VoiceInput disabled={isRunning} t={t} />
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* 右カラム: 成果物プレビュー */}
-        <div className="flex w-1/2 flex-col overflow-y-auto p-6">
+        <section className="flex min-h-[0] flex-col rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] shadow-[0_18px_55px_rgba(15,23,42,0.06)] backdrop-blur">
+          <div className="border-b border-[var(--panel-border)] px-5 py-4">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('panel.preview')}</h2>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('panel.preview.subtitle')}</p>
+          </div>
+
+          <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5">
           {state.status === 'idle' ? (
-            <div className="flex flex-1 items-center justify-center">
-              <div className="text-center">
-                <p className="text-5xl">✈️</p>
-                <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">{t('input.placeholder')}</p>
+            <div className="flex h-full min-h-80 items-center justify-center rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] px-8 py-12">
+              <div className="max-w-sm text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">Preview</p>
+                <h3 className="mt-4 text-2xl font-semibold tracking-tight">{t('preview.empty.title')}</h3>
+                <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{t('preview.empty.subtitle')}</p>
               </div>
             </div>
           ) : (
@@ -109,53 +146,55 @@ function App() {
                   <MarkdownView content={planContent.content} />
                 ) : null,
               },
-              { key: 'brochure', label: `🎨 ${t('tab.brochure')}`, content: <BrochurePreview contents={state.textContents} /> },
-              { key: 'images', label: `🖼️ ${t('tab.images')}`, content: <ImageGallery images={state.images} /> },
+              { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
+              { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
               { key: 'video', label: `🎬 ${t('tab.video') || '動画'}`, content: (
-                <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 dark:border-gray-700">
+                <div className="flex items-center justify-center rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] p-12">
                   <div className="text-center">
                     <p className="text-3xl">🎬</p>
-                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">販促紹介動画 (Photo Avatar + Voice Live)</p>
-                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Preview 機能</p>
+                    <p className="mt-3 text-sm font-medium text-[var(--text-primary)]">{t('tab.video')}</p>
+                    <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('tab.video.description')}</p>
                   </div>
                 </div>
               )},
-            ]} />
+            ]} t={t} />
 
-            {/* エクスポートボタン群 */}
-            {state.status === 'completed' && (
-              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            {isCompleted && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--panel-border)] pt-4">
                 <VersionSelector
                   versions={state.versions.map((_, i) => i + 1)}
                   current={state.currentVersion}
                   onChange={restoreVersion}
+                  t={t}
                 />
                 <div className="ml-auto flex gap-2">
                 <button
                   onClick={() => exportPlanMarkdown(state.textContents)}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
                 >
-                  📄 企画書 (.md)
+                  {t('export.plan')}
                 </button>
                 <button
                   onClick={() => exportBrochureHtml(state.textContents)}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
                 >
-                  🎨 ブローシャ (.html)
+                  {t('export.brochure')}
                 </button>
                 <button
                   onClick={() => exportAllAsJson(state.textContents, state.images, state.conversationId)}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  className="rounded-full border border-[var(--panel-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-strong)] transition-colors hover:opacity-90"
                 >
-                  📦 一括エクスポート (.json)
+                  {t('export.bundle')}
                 </button>
                 </div>
               </div>
             )}
             </>
           )}
-        </div>
+          </div>
+        </section>
       </main>
+      </div>
     </div>
   )
 }

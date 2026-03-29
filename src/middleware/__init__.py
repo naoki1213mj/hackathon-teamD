@@ -4,6 +4,8 @@ import logging
 import os
 from dataclasses import dataclass
 
+from src.config import is_production_environment
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,15 +25,23 @@ class SafetyScores:
     self_harm: int = 0
     sexual: int = 0
     violence: int = 0
+    check_failed: bool = False
+
+
+def _content_safety_required() -> bool:
+    """現在の環境で Content Safety を必須とするかを返す。"""
+    return is_production_environment()
 
 
 async def check_prompt_shield(user_input: str) -> ShieldResult:
     """Prompt Shield でユーザー入力をチェックする（層1）"""
     endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
     if not endpoint:
-        # Content Safety 未設定の場合はスキップ（開発環境用）
+        if _content_safety_required():
+            logger.error("CONTENT_SAFETY_ENDPOINT が未設定のため Prompt Shield をブロック")
+            return ShieldResult(is_safe=False, details={"reason": "missing_endpoint"})
         logger.warning("CONTENT_SAFETY_ENDPOINT が未設定のため Prompt Shield をスキップ")
-        return ShieldResult(is_safe=True)
+        return ShieldResult(is_safe=True, details={"reason": "skipped_local"})
 
     try:
         from azure.ai.contentsafety import ContentSafetyClient
@@ -51,17 +61,22 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
     except ImportError:
         logger.warning("azure-ai-contentsafety がインストールされていません")
-        return ShieldResult(is_safe=True)
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "client_unavailable"})
+        return ShieldResult(is_safe=True, details={"reason": "client_unavailable"})
     except Exception:
         logger.exception("Prompt Shield チェックでエラーが発生")
         # fail-closed: チェック不能時は安全側に倒す
-        return ShieldResult(is_safe=False)
+        return ShieldResult(is_safe=False, details={"reason": "check_failed"})
 
 
 async def analyze_content(text: str) -> SafetyScores:
     """Text Analysis で出力コンテンツをチェックする（層4）"""
     endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
     if not endpoint:
+        if _content_safety_required():
+            logger.error("CONTENT_SAFETY_ENDPOINT が未設定のため Text Analysis をブロック")
+            return SafetyScores(check_failed=True)
         logger.warning("CONTENT_SAFETY_ENDPOINT が未設定のため Text Analysis をスキップ")
         return SafetyScores()
 
@@ -89,6 +104,11 @@ async def analyze_content(text: str) -> SafetyScores:
             elif cat.category == "Violence":
                 scores.violence = cat.severity
         return scores
+    except ImportError:
+        logger.warning("azure-ai-contentsafety がインストールされていません")
+        if _content_safety_required():
+            return SafetyScores(check_failed=True)
+        return SafetyScores()
     except Exception:
         logger.exception("Text Analysis でエラーが発生")
-        return SafetyScores()
+        return SafetyScores(check_failed=True)

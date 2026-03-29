@@ -1,10 +1,10 @@
 # Stage 1: フロントエンドビルド
 FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ ./
-RUN chmod +x node_modules/.bin/* && npm run build
+RUN node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build
 
 # Stage 2: Python バックエンド + 静的ファイル配信
 FROM python:3.14-slim

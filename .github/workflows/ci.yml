@@ -9,6 +9,7 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -21,10 +22,10 @@ jobs:
           python-version: "3.14"
 
       - name: Install Python dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Ruff lint
-        run: uv run ruff check src/
+        run: uv run ruff check .
 
       - name: pytest
         run: uv run python -m pytest tests/ -v
@@ -36,6 +37,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: cd frontend && npm ci
+
+      - name: Frontend lint
+        run: cd frontend && npm run lint
 
       - name: TypeScript check
         run: cd frontend && npx tsc --noEmit

@@ -2,23 +2,25 @@ interface VersionSelectorProps {
   versions: number[]
   current: number
   onChange: (version: number) => void
+  t: (key: string) => string
 }
 
-export function VersionSelector({ versions, current, onChange }: VersionSelectorProps) {
+export function VersionSelector({ versions, current, onChange, t }: VersionSelectorProps) {
   if (versions.length <= 1) return null
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-500 dark:text-gray-400">バージョン:</span>
+      <span className="text-xs text-[var(--text-muted)]">{t('version.label')}:</span>
       <div className="flex gap-1">
         {versions.map(v => (
           <button
             key={v}
+            type="button"
             onClick={() => onChange(v)}
-            className={`rounded px-2 py-0.5 text-xs
+            className={`rounded-full px-2.5 py-1 text-xs font-medium
               ${v === current
-                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                : 'bg-[var(--panel-strong)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
           >
             v{v}

@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -13,6 +16,10 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-arm64-msvc": "1.0.0-rc.12",
+    "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

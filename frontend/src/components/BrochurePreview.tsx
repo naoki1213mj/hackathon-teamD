@@ -2,9 +2,10 @@ import type { TextContent } from '../hooks/useSSE'
 
 interface BrochurePreviewProps {
   contents: TextContent[]
+  t: (key: string) => string
 }
 
-export function BrochurePreview({ contents }: BrochurePreviewProps) {
+export function BrochurePreview({ contents, t }: BrochurePreviewProps) {
   const htmlContent = contents.find(
     c => c.agent === 'brochure-gen-agent' && c.content_type === 'html'
   )
@@ -12,14 +13,14 @@ export function BrochurePreview({ contents }: BrochurePreviewProps) {
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-        🎨 ブローシャプレビュー
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+        {t('section.brochure')}
       </h3>
-      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+      <div className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-white">
         <iframe
           srcDoc={htmlContent.content}
-          title="ブローシャプレビュー"
-          className="h-96 w-full bg-white"
+          title={t('section.brochure')}
+          className="h-[28rem] w-full bg-white"
           sandbox=""
         />
       </div>

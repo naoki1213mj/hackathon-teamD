@@ -16,6 +16,7 @@ class AppSettings(TypedDict):
     model_name: str
     content_safety_endpoint: str
     applicationinsights_connection_string: str
+    environment: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -24,12 +25,16 @@ _ENV_MAP: dict[str, str] = {
     "MODEL_NAME": "model_name",
     "CONTENT_SAFETY_ENDPOINT": "content_safety_endpoint",
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "applicationinsights_connection_string",
+    "ENVIRONMENT": "environment",
 }
 
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
     "model_name": "gpt-5-4-mini",
+    "environment": "development",
 }
+
+_PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}
 
 
 def get_settings() -> AppSettings:
@@ -39,3 +44,17 @@ def get_settings() -> AppSettings:
         value = os.environ.get(env_key, _DEFAULTS.get(setting_key, ""))
         settings[setting_key] = value
     return AppSettings(**settings)  # type: ignore[typeddict-item]
+
+
+def is_production_environment() -> bool:
+    """本番相当環境かどうかを返す。"""
+    environment = os.environ.get("ENVIRONMENT", _DEFAULTS["environment"]).lower()
+    return environment in _PRODUCTION_ENVIRONMENTS
+
+
+def get_missing_required_settings() -> list[str]:
+    """現在の環境で不足している必須設定の環境変数名を返す。"""
+    required: list[str] = []
+    if is_production_environment():
+        required.extend(["AZURE_AI_PROJECT_ENDPOINT", "CONTENT_SAFETY_ENDPOINT"])
+    return [name for name in required if not os.environ.get(name)]

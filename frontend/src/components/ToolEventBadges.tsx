@@ -13,9 +13,10 @@ const TOOL_ICONS: Record<string, string> = {
 
 interface ToolEventBadgesProps {
   events: ToolEvent[]
+  t: (key: string) => string
 }
 
-export function ToolEventBadges({ events }: ToolEventBadgesProps) {
+export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
   if (events.length === 0) return null
 
   return (
@@ -23,12 +24,11 @@ export function ToolEventBadges({ events }: ToolEventBadgesProps) {
       {events.map((event, i) => (
         <span
           key={`${event.tool}-${i}`}
-          className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1
-                     text-xs text-gray-700
-                     dark:bg-gray-800 dark:text-gray-300"
+          className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
         >
           <span>{TOOL_ICONS[event.tool] || '🔧'}</span>
-          <span>{event.tool}</span>
+          <span>{t(`tool.${event.tool}`)}</span>
+          <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{event.agent}</span>
           <span className={event.status === 'completed' ? 'text-green-500' : 'text-yellow-500'}>
             {event.status === 'completed' ? '✓' : '⏳'}
           </span>

@@ -13,6 +13,8 @@ function getSystemTheme(): 'light' | 'dark' {
 function applyTheme(theme: Theme) {
   const resolved = theme === 'system' ? getSystemTheme() : theme
   document.documentElement.classList.toggle('dark', resolved === 'dark')
+  document.documentElement.dataset.theme = resolved
+  document.documentElement.style.colorScheme = resolved
 }
 
 export function useTheme() {

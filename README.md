@@ -8,6 +8,12 @@
 
 A multi-agent pipeline where travel company marketing staff give natural language instructions and 4 AI agents sequentially produce **marketing plans (Markdown), promotional brochures (HTML), banner images (PNG), and promotional videos (MP4)**.
 
+## Current Status
+
+- Implemented: FastAPI SSE pipeline, four agent modules, responsive React UI, theme toggle, i18n, APIM/Functions/Logic Apps IaC, readiness endpoint, and production-aware fail-close behavior for Content Safety.
+- In progress: enforced APIM runtime routing, full MCP implementations for PDF and M365 actions, real Voice Live integration, and broader runtime alignment with Foundry-managed workflows.
+- The repository contains both shipping code and scaffolding for v3.5 features. The current gap between target architecture and implementation is tracked in [docs/reviews/2026-03-29-comprehensive-review.md](docs/reviews/2026-03-29-comprehensive-review.md).
+
 ## アーキテクチャ
 
 ```
@@ -92,6 +98,8 @@ azd auth login
 azd up       # 初回: プロビジョニング + デプロイ
 azd deploy   # 2回目以降: コードのみ
 ```
+
+Deployments are gated by CI and readiness checks. Production deploys now fail when required production settings are missing.
 
 ## プロジェクト構成
 

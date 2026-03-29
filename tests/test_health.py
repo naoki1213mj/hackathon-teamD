@@ -12,3 +12,30 @@ def test_health_returns_200():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_ready_returns_ready_in_development(monkeypatch):
+    """開発環境では未設定があっても readiness は ready を返す"""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "missing": []}
+
+
+def test_ready_returns_503_when_required_settings_missing_in_production(monkeypatch):
+    """本番環境では必須設定不足時に readiness が 503 を返す"""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "missing": ["AZURE_AI_PROJECT_ENDPOINT", "CONTENT_SAFETY_ENDPOINT"],
+    }

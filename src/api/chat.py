@@ -11,10 +11,24 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from src.config import get_settings
 from src.middleware import analyze_content, check_prompt_shield
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
+
+_APPROVAL_KEYWORDS = {
+    "approve",
+    "approved",
+    "go",
+    "ok",
+    "yes",
+    "承認",
+    "了承",
+    "進めて",
+    "批准",
+    "同意",
+}
 
 
 # --- SSE イベント定義 ---
@@ -36,6 +50,12 @@ class SSEEventType(StrEnum):
 def format_sse(event_type: str, data: dict) -> str:
     """SSE フォーマットに変換する"""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _is_approval_response(response_text: str) -> bool:
+    """承認レスポンスかどうかを言語非依存で判定する。"""
+    normalized = response_text.strip().lower()
+    return any(keyword in normalized for keyword in _APPROVAL_KEYWORDS)
 
 
 # --- リクエスト / レスポンスモデル ---
@@ -535,8 +555,6 @@ async def _refine_events(refine_text: str, conversation_id: str):
         target_agent = "marketing-plan-agent"
         step = 2
 
-    from src.config import get_settings
-
     settings = get_settings()
 
     if settings["project_endpoint"]:
@@ -549,8 +567,6 @@ async def _refine_events(refine_text: str, conversation_id: str):
 
 async def _post_approval_events(user_response: str, conversation_id: str):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
-    from src.config import get_settings
-
     settings = get_settings()
 
     if not settings["project_endpoint"]:
@@ -615,25 +631,37 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
         result = await workflow.run(user_input)
 
         # Workflow 結果から最終エージェントのテキスト出力を抽出する
+        # Agent Framework rc5: Message.contents は list[Content], Content.text に文字列がある
         result_text = ""
         if result is not None:
-            # AgentOrchestrationOutput の場合、messages から content を取得
-            if hasattr(result, "messages"):
-                for msg in reversed(result.messages):
-                    if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content.strip():
-                        result_text = msg.content
+            messages = []
+            try:
+                outputs = result.get_outputs()
+                for output in outputs:
+                    if isinstance(output, list):
+                        messages.extend(output)
+                    elif hasattr(output, "contents"):
+                        messages.append(output)
+            except Exception:
+                logger.debug("get_outputs() からの結果取得に失敗")
+
+            # Message.contents (list[Content]) → Content.text を連結
+            for msg in reversed(messages):
+                contents = getattr(msg, "contents", None)
+                role = getattr(msg, "role", None)
+                if contents and str(role) == "assistant":
+                    text_parts = []
+                    for c in contents:
+                        t = getattr(c, "text", None)
+                        if t and isinstance(t, str):
+                            text_parts.append(t)
+                    combined = "".join(text_parts).strip()
+                    if combined:
+                        result_text = combined
                         break
-            # list の場合
-            elif isinstance(result, list):
-                for item in reversed(result):
-                    if hasattr(item, "content") and isinstance(item.content, str):
-                        result_text = item.content
-                        break
-                    elif hasattr(item, "agent_response") and hasattr(item.agent_response, "content"):
-                        result_text = str(item.agent_response.content)
-                        break
+
             if not result_text:
-                result_text = str(result)
+                result_text = "パイプライン処理が完了しましたが、テキスト結果を取得できませんでした。"
 
         yield format_sse(
             SSEEventType.TEXT,
@@ -663,12 +691,21 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
             "self_harm": safety_scores.self_harm,
             "sexual": safety_scores.sexual,
             "violence": safety_scores.violence,
-            "status": "safe"
-            if all(
-                v == 0
-                for v in [safety_scores.hate, safety_scores.self_harm, safety_scores.sexual, safety_scores.violence]
-            )
-            else "warning",
+            "status": "error"
+            if safety_scores.check_failed
+            else (
+                "safe"
+                if all(
+                    v == 0
+                    for v in [
+                        safety_scores.hate,
+                        safety_scores.self_harm,
+                        safety_scores.sexual,
+                        safety_scores.violence,
+                    ]
+                )
+                else "warning"
+            ),
         },
     )
 
@@ -713,8 +750,6 @@ async def chat(request: ChatRequest) -> StreamingResponse:
             return
 
         # Azure 設定がある場合は実 Workflow、なければモック
-        from src.config import get_settings
-
         settings = get_settings()
         if settings["project_endpoint"]:
             async for event in workflow_event_generator(request.message, conversation_id):
@@ -738,7 +773,7 @@ async def approve(thread_id: str, request: ApproveRequest) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
     # 入力 Content Safety チェック（承認レスポンスにも適用）
     shield_result = await check_prompt_shield(request.response)
-    is_approved = "承認" in request.response
+    is_approved = _is_approval_response(request.response)
 
     async def approval_event_generator():
         if not shield_result.is_safe:
