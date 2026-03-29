@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.config import get_settings
+from src.conversations import save_conversation
 from src.middleware import analyze_content, check_prompt_shield
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -733,6 +734,9 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     shield_result = await check_prompt_shield(request.message)
 
     async def guarded_generator():
+        collected_events: list[dict] = []
+        start = time.monotonic()
+
         if not shield_result.is_safe:
             yield format_sse(
                 SSEEventType.ERROR,
@@ -743,20 +747,37 @@ async def chat(request: ChatRequest) -> StreamingResponse:
             )
             return
 
+        async def _collect_and_yield(gen):
+            async for event in gen:
+                # イベントを収集（リプレイ用タイムスタンプ付き）
+                try:
+                    lines = event.strip().split("\n")
+                    ev_type = lines[0].replace("event: ", "") if lines else ""
+                    ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+                    collected_events.append({"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data})
+                except Exception:
+                    pass
+                yield event
+
         # conversation_id が既存 = マルチターン修正
         if request.conversation_id:
-            async for event in _refine_events(request.message, conversation_id):
-                yield event
-            return
-
-        # Azure 設定がある場合は実 Workflow、なければモック
-        settings = get_settings()
-        if settings["project_endpoint"]:
-            async for event in workflow_event_generator(request.message, conversation_id):
+            async for event in _collect_and_yield(_refine_events(request.message, conversation_id)):
                 yield event
         else:
-            async for event in mock_event_generator(request.message, conversation_id):
-                yield event
+            # Azure 設定がある場合は実 Workflow、なければモック
+            settings = get_settings()
+            if settings["project_endpoint"]:
+                async for event in _collect_and_yield(workflow_event_generator(request.message, conversation_id)):
+                    yield event
+            else:
+                async for event in _collect_and_yield(mock_event_generator(request.message, conversation_id)):
+                    yield event
+
+        # 会話を非同期で保存（レスポンスには影響しない）
+        try:
+            await save_conversation(conversation_id, request.message, collected_events)
+        except Exception:
+            logger.debug("会話保存に失敗（非致命的）")
 
     return StreamingResponse(
         guarded_generator(),

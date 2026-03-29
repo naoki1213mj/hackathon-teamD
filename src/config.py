@@ -17,6 +17,7 @@ class AppSettings(TypedDict):
     content_safety_endpoint: str
     applicationinsights_connection_string: str
     environment: str
+    cosmos_db_endpoint: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -26,6 +27,7 @@ _ENV_MAP: dict[str, str] = {
     "CONTENT_SAFETY_ENDPOINT": "content_safety_endpoint",
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "applicationinsights_connection_string",
     "ENVIRONMENT": "environment",
+    "COSMOS_DB_ENDPOINT": "cosmos_db_endpoint",
 }
 
 # デフォルト値（オプショナルな設定のみ）

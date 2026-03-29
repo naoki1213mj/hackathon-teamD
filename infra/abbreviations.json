@@ -11,5 +11,6 @@
   "funcStorage": "stfn",
   "logicApp": "logic-",
   "containerAppsEnv": "cae-",
-  "containerApp": "ca-"
+  "containerApp": "ca-",
+  "cosmosDb": "cosmos-"
 }

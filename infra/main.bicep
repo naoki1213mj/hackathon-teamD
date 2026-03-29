@@ -100,7 +100,18 @@ module aiProject 'modules/ai-project.bicep' = {
 
 var aiProjectEndpoint = 'https://${aiFoundry.outputs.name}.services.ai.azure.com/api/projects/${aiProject.outputs.name}'
 
-// Container Apps Environment
+// VNet（Container Apps + Private Endpoints）
+module vnet 'modules/vnet.bicep' = {
+  name: 'vnet'
+  scope: rg
+  params: {
+    name: 'vnet-${resourceToken}'
+    location: location
+    tags: tags
+  }
+}
+
+// Container Apps Environment（VNet 統合）
 module containerAppsEnv 'modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
   scope: rg
@@ -109,6 +120,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
     location: location
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
+    subnetId: vnet.outputs.containerAppsSubnetId
   }
 }
 
@@ -128,6 +140,7 @@ module containerApp 'modules/container-app.bicep' = {
     modelName: defaultModelDeploymentName
     projectEndpoint: aiProjectEndpoint
     contentSafetyEndpoint: aiFoundry.outputs.endpoint
+    cosmosDbEndpoint: cosmosDb.outputs.endpoint
   }
 }
 
@@ -188,6 +201,27 @@ module logicApp 'modules/logic-app.bicep' = {
   }
 }
 
+// Azure Cosmos DB (会話履歴永続化)
+module cosmosDb 'modules/cosmos-db.bicep' = {
+  name: 'cosmos-db'
+  scope: rg
+  params: {
+    name: '${abbrs.cosmosDb}${resourceToken}'
+    location: location
+    tags: tags
+  }
+}
+
+// Cosmos DB RBAC: Container App MI に読み書きアクセス
+module cosmosDbAccess 'modules/cosmos-db-access.bicep' = {
+  name: 'cosmos-db-access'
+  scope: rg
+  params: {
+    cosmosAccountName: cosmosDb.outputs.name
+    principalId: containerApp.outputs.principalId
+  }
+}
+
 // 出力
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = acr.outputs.name
@@ -201,4 +235,5 @@ output AZURE_FUNCTION_APP_NAME string = functionApp.outputs.name
 output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name
 output AZURE_RESOURCE_GROUP string = rg.name
 output CONTENT_SAFETY_ENDPOINT string = aiFoundry.outputs.endpoint
+output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.endpoint
 output SERVICE_WEB_ENDPOINTS array = [containerApp.outputs.uri]

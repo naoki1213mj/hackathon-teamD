@@ -4,6 +4,7 @@ param name string
 param location string
 param tags object = {}
 param logAnalyticsWorkspaceId string
+param subnetId string = ''
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: last(split(logAnalyticsWorkspaceId, '/'))
@@ -21,6 +22,10 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
         sharedKey: logAnalytics.listKeys().primarySharedKey
       }
     }
+    vnetConfiguration: !empty(subnetId) ? {
+      infrastructureSubnetId: subnetId
+      internal: false
+    } : null
   }
 }
 
