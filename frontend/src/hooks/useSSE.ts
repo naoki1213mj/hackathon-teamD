@@ -2,8 +2,12 @@
  * SSE 接続管理フック。パイプラインの状態を一元管理する。
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
+import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
+
+/** toolEvents の最大保持数 */
+const MAX_TOOL_EVENTS = 50
 
 export interface AgentProgress {
   agent: string
@@ -75,6 +79,7 @@ export interface PipelineState {
   error: ErrorData | null
   versions: ArtifactSnapshot[]
   currentVersion: number
+  settings: ModelSettings
 }
 
 const initialState: PipelineState = {
@@ -90,11 +95,24 @@ const initialState: PipelineState = {
   error: null,
   versions: [],
   currentVersion: 0,
+  settings: { ...DEFAULT_SETTINGS },
 }
 
 export function useSSE() {
   const [state, setState] = useState<PipelineState>(initialState)
   const conversationIdRef = useRef<string | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const stateRef = useRef<PipelineState>(initialState)
+
+  // stateRef を常に最新に保つ
+  stateRef.current = state
+
+  // アンマウント時に SSE 接続を中断する
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort()
+    }
+  }, [])
 
   const createHandlers = useCallback((): SSEHandlers => ({
     agent_progress: (data) => {
@@ -108,7 +126,7 @@ export function useSSE() {
     tool_event: (data) => {
       setState(prev => ({
         ...prev,
-        toolEvents: [...prev.toolEvents, data as ToolEvent],
+        toolEvents: [...prev.toolEvents, data as ToolEvent].slice(-MAX_TOOL_EVENTS),
       }))
     },
     text: (data) => {
@@ -167,6 +185,9 @@ export function useSSE() {
   }), [])
 
   const sendMessage = useCallback(async (message: string) => {
+    abortControllerRef.current?.abort()
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     const existingConversationId = conversationIdRef.current
     setState(prev => ({
       ...prev,
@@ -175,15 +196,19 @@ export function useSSE() {
       approvalRequest: null,
     }))
     const handlers = createHandlers()
-    await connectSSE(message, handlers, existingConversationId || undefined)
+    const currentSettings = stateRef.current.settings
+    await connectSSE(message, handlers, existingConversationId || undefined, controller.signal, currentSettings)
   }, [createHandlers])
 
   const approve = useCallback(async (response: string) => {
     const threadId = conversationIdRef.current
     if (!threadId) return
+    abortControllerRef.current?.abort()
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     setState(prev => ({ ...prev, status: 'running', approvalRequest: null }))
     const handlers = createHandlers()
-    await sendApproval(threadId, response, handlers)
+    await sendApproval(threadId, response, handlers, controller.signal)
   }, [createHandlers])
 
   const reset = useCallback(() => {
@@ -204,5 +229,9 @@ export function useSSE() {
     })
   }, [])
 
-  return { state, sendMessage, approve, reset, restoreVersion }
+  const updateSettings = useCallback((settings: ModelSettings) => {
+    setState(prev => ({ ...prev, settings }))
+  }, [])
+
+  return { state, sendMessage, approve, reset, restoreVersion, updateSettings }
 }

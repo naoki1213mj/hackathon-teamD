@@ -71,6 +71,8 @@ module keyVault 'modules/key-vault.bicep' = {
     name: '${abbrs.keyVault}${resourceToken}'
     location: location
     tags: tags
+    privateEndpointsSubnetId: vnet.outputs.privateEndpointsSubnetId
+    vnetId: vnet.outputs.id
   }
 }
 
@@ -122,6 +124,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
     location: location
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
+    // subnetId: vnet.outputs.containerAppsSubnetId  // VNet 統合は既存 CAE の再作成が必要。新規環境ではコメント解除
   }
 }
 
@@ -212,6 +215,8 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
     name: '${abbrs.cosmosDb}${resourceToken}'
     location: location
     tags: tags
+    privateEndpointsSubnetId: vnet.outputs.privateEndpointsSubnetId
+    vnetId: vnet.outputs.id
   }
 }
 

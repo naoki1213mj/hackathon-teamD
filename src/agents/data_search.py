@@ -2,13 +2,105 @@
 
 import csv
 import json
+import logging
+import struct
 from pathlib import Path
 
 from agent_framework import tool
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
+from pydantic import BaseModel
 
 from src.config import get_settings
+
+try:
+    import pyodbc
+
+    _HAS_PYODBC = True
+except ImportError:
+    _HAS_PYODBC = False
+
+logger = logging.getLogger(__name__)
+
+
+# --- ツール出力スキーマ（バリデーション・テスト用） ---
+
+
+class SalesRecord(BaseModel):
+    """販売履歴の集約レコード"""
+
+    plan_name: str
+    destination: str
+    season: str
+    revenue: int
+    pax: int
+    customer_segment: str
+    booking_count: int
+
+
+class CustomerReview(BaseModel):
+    """顧客レビューレコード"""
+
+    plan_name: str
+    rating: int
+    comment: str
+
+# --- Fabric Lakehouse SQL 接続 ---
+
+# Azure SQL / Fabric 用のトークンスコープ
+_SQL_TOKEN_SCOPE = "https://database.windows.net/.default"
+
+
+def _query_fabric(query: str, params: list | None = None) -> list[dict]:
+    """Fabric Lakehouse SQL エンドポイントにクエリを実行し、結果を辞書リストで返す。
+
+    接続に失敗した場合や pyodbc 未インストール時は空リストを返す。
+    """
+    if not _HAS_PYODBC:
+        logger.debug("pyodbc が未インストールのため Fabric SQL 接続をスキップ")
+        return []
+
+    settings = get_settings()
+    endpoint = settings.get("fabric_sql_endpoint", "")
+    if not endpoint:
+        return []
+
+    try:
+        credential = DefaultAzureCredential()
+        token = credential.get_token(_SQL_TOKEN_SCOPE)
+        token_bytes = token.token.encode("utf-16-le")
+        token_struct = struct.pack(
+            f"<I{len(token_bytes)}s", len(token_bytes), token_bytes
+        )
+
+        # SQL_COPT_SS_ACCESS_TOKEN = 1256
+        conn = pyodbc.connect(
+            f"Driver={{ODBC Driver 18 for SQL Server}};"
+            f"Server={endpoint};"
+            f"Database=lakehouse;"
+            f"Encrypt=yes;"
+            f"TrustServerCertificate=no",
+            attrs_before={1256: token_struct},
+        )
+
+        cursor = conn.cursor()
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+
+        columns = [desc[0] for desc in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+        logger.info("Fabric SQL クエリ成功: %d 行取得", len(rows))
+        return rows
+
+    except (pyodbc.Error, ValueError, OSError) as exc:
+        logger.warning("Fabric SQL 接続エラー（CSV にフォールバック）: %s", exc)
+        return []
+
 
 # --- デモデータ読み込み（Fabric Lakehouse 未接続時は CSV から読み込む） ---
 
@@ -22,6 +114,97 @@ def _load_csv(filename: str) -> list[dict]:
         return []
     with open(filepath, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def _get_sales_data_from_fabric(
+    season: str | None = None,
+    region: str | None = None,
+) -> list[dict]:
+    """Fabric Lakehouse の sales_history テーブルから集約データを取得する。
+
+    SQL 側で季節・地域フィルタと集約を実行し、結果を返す。
+    取得できなかった場合は空リストを返す。
+    """
+    # departure_date から季節を SQL で導出して集約
+    where_clauses: list[str] = []
+    params: list = []
+
+    if region:
+        where_clauses.append("destination LIKE ?")
+        params.append(f"%{region}%")
+
+    if season:
+        season_months = {
+            "spring": "(3, 4, 5)",
+            "summer": "(6, 7, 8)",
+            "autumn": "(9, 10, 11)",
+            "winter": "(12, 1, 2)",
+        }
+        months = season_months.get(season)
+        if months:
+            where_clauses.append(f"MONTH(departure_date) IN {months}")
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    query = f"""
+        SELECT
+            plan_name,
+            destination,
+            CASE
+                WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                ELSE 'winter'
+            END AS season,
+            SUM(CAST(revenue AS BIGINT)) AS revenue,
+            SUM(CAST(pax AS INT)) AS pax,
+            MIN(customer_segment) AS customer_segment,
+            COUNT(*) AS booking_count
+        FROM sales_history
+        {where_sql}
+        GROUP BY
+            plan_name,
+            destination,
+            CASE
+                WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                ELSE 'winter'
+            END
+    """
+
+    return _query_fabric(query, params if params else None)
+
+
+def _get_reviews_from_fabric(
+    plan_name: str | None = None,
+    min_rating: int | None = None,
+) -> list[dict]:
+    """Fabric Lakehouse の customer_reviews テーブルからレビューを取得する。
+
+    取得できなかった場合は空リストを返す。
+    """
+    where_clauses: list[str] = []
+    params: list = []
+
+    if plan_name:
+        where_clauses.append("plan_name LIKE ?")
+        params.append(f"%{plan_name}%")
+
+    if min_rating is not None:
+        where_clauses.append("rating >= ?")
+        params.append(min_rating)
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    query = f"""
+        SELECT plan_name, rating, comment
+        FROM customer_reviews
+        {where_sql}
+        ORDER BY review_date DESC
+    """
+
+    return _query_fabric(query, params if params else None)
 
 
 def _get_sales_data() -> list[dict]:
@@ -112,6 +295,13 @@ async def search_sales_history(
         season: 季節フィルタ（spring/summer/autumn/winter）
         region: 地域フィルタ（例: 「沖縄」「北海道」）
     """
+    # Fabric SQL を優先し、取得できなければ CSV にフォールバック
+    results = _get_sales_data_from_fabric(season=season, region=region)
+    if results:
+        logger.info("Fabric SQL から販売データ %d 件取得", len(results))
+        return json.dumps(results, ensure_ascii=False, default=str)
+
+    logger.info("CSV フォールバックで販売データを取得")
     results = _get_sales_data()
     if season:
         results = [r for r in results if r["season"] == season]
@@ -131,6 +321,13 @@ async def search_customer_reviews(
         plan_name: プラン名でフィルタ
         min_rating: 最低評価でフィルタ（1〜5）
     """
+    # Fabric SQL を優先し、取得できなければ CSV にフォールバック
+    results = _get_reviews_from_fabric(plan_name=plan_name, min_rating=min_rating)
+    if results:
+        logger.info("Fabric SQL からレビュー %d 件取得", len(results))
+        return json.dumps(results, ensure_ascii=False, default=str)
+
+    logger.info("CSV フォールバックでレビューデータを取得")
     results = _get_reviews()
     if plan_name:
         results = [r for r in results if plan_name in r["plan_name"]]
@@ -156,7 +353,7 @@ INSTRUCTIONS = """\
 """
 
 
-def create_data_search_agent():
+def create_data_search_agent(model_settings: dict | None = None):
     """データ検索エージェントを作成する"""
     settings = get_settings()
     client = AzureOpenAIResponsesClient(
@@ -164,8 +361,16 @@ def create_data_search_agent():
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
-    return client.as_agent(
-        name="data-search-agent",
-        instructions=INSTRUCTIONS,
-        tools=[search_sales_history, search_customer_reviews],
-    )
+    agent_kwargs: dict = {
+        "name": "data-search-agent",
+        "instructions": INSTRUCTIONS,
+        "tools": [search_sales_history, search_customer_reviews],
+    }
+    if model_settings:
+        if "temperature" in model_settings:
+            agent_kwargs["temperature"] = model_settings["temperature"]
+        if "max_tokens" in model_settings:
+            agent_kwargs["max_output_tokens"] = model_settings["max_tokens"]
+        if "top_p" in model_settings:
+            agent_kwargs["top_p"] = model_settings["top_p"]
+    return client.as_agent(**agent_kwargs)

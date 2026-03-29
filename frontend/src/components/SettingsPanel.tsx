@@ -1,0 +1,153 @@
+/**
+ * モデル設定パネル。Temperature / Max Tokens / Top P / Foundry IQ パラメータを調整する。
+ */
+
+import { useState } from 'react'
+
+export interface ModelSettings {
+  temperature: number
+  maxTokens: number
+  topP: number
+  iqSearchResults: number
+  iqScoreThreshold: number
+}
+
+export const DEFAULT_SETTINGS: ModelSettings = {
+  temperature: 0.7,
+  maxTokens: 4096,
+  topP: 1.0,
+  iqSearchResults: 5,
+  iqScoreThreshold: 0.7,
+}
+
+interface SettingsPanelProps {
+  settings: ModelSettings
+  onChange: (settings: ModelSettings) => void
+  t: (key: string) => string
+}
+
+interface SliderFieldProps {
+  label: string
+  tooltip: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (value: number) => void
+}
+
+function SliderField({ label, tooltip, value, min, max, step, onChange }: SliderFieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-[var(--text-secondary)]" title={tooltip}>
+          {label}
+          <span className="ml-1 cursor-help text-[var(--text-muted)]" title={tooltip}>ⓘ</span>
+        </label>
+        <span className="rounded bg-[var(--panel-strong)] px-2 py-0.5 text-xs font-mono text-[var(--text-primary)]">
+          {value}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full accent-[var(--accent-strong)] h-1.5 cursor-pointer appearance-none rounded-full bg-[var(--panel-border)]
+          [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none
+          [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent-strong)]
+          [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:transition-transform
+          [&::-webkit-slider-thumb]:hover:scale-110"
+      />
+    </div>
+  )
+}
+
+export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  const update = (key: keyof ModelSettings, value: number) => {
+    onChange({ ...settings, [key]: value })
+  }
+
+  const resetToDefaults = () => {
+    onChange({ ...DEFAULT_SETTINGS })
+  }
+
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+      >
+        <span>⚙️</span>
+        <span>{t('settings.title')}</span>
+        <span className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4 shadow-sm">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <SliderField
+              label={t('settings.temperature')}
+              tooltip={t('settings.temperature.desc')}
+              value={settings.temperature}
+              min={0}
+              max={2}
+              step={0.1}
+              onChange={(v) => update('temperature', v)}
+            />
+            <SliderField
+              label={t('settings.maxTokens')}
+              tooltip={t('settings.maxTokens')}
+              value={settings.maxTokens}
+              min={256}
+              max={8192}
+              step={256}
+              onChange={(v) => update('maxTokens', v)}
+            />
+            <SliderField
+              label={t('settings.topP')}
+              tooltip="Top P"
+              value={settings.topP}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => update('topP', v)}
+            />
+            <SliderField
+              label={t('settings.iqResults')}
+              tooltip={t('settings.iqResults')}
+              value={settings.iqSearchResults}
+              min={1}
+              max={20}
+              step={1}
+              onChange={(v) => update('iqSearchResults', v)}
+            />
+            <SliderField
+              label={t('settings.iqThreshold')}
+              tooltip={t('settings.iqThreshold')}
+              value={settings.iqScoreThreshold}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => update('iqScoreThreshold', v)}
+            />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={resetToDefaults}
+              className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+            >
+              {t('settings.reset')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

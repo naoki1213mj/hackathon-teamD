@@ -11,6 +11,7 @@ export default defineConfig([
     files: ['**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
+      // TODO: recommendedTypeChecked に昇格可能（parserOptions.project 設定が必要）
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,

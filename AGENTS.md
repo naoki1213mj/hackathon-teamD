@@ -70,6 +70,112 @@
 | `Flex Consumption` プラン | `Consumption` プラン | 旧 Consumption はレガシー |
 | `Microsoft Foundry` | `Azure AI Foundry` | 2025-11 にリネーム済み |
 
+## エージェント詳細
+
+### Agent1: data-search-agent（データ検索）
+
+**ファイル**: `src/agents/data_search.py`
+**役割**: Fabric Lakehouse から売上データ・顧客レビューを分析し、ターゲット・季節・地域・予算情報を抽出する。
+
+| ツール名 | 説明 | Azure 接続 | フォールバック |
+|---------|------|-----------|-------------|
+| `search_sales_history(query, season, region)` | 売上履歴テーブルを検索。季節・地域でフィルタリング | ✅ Fabric Lakehouse (pyodbc + Azure AD) | CSV (`data/sales_history.csv`) → ハードコードデータ |
+| `search_customer_reviews(plan_name, min_rating)` | 顧客レビューを検索。プラン名・最低評価でフィルタリング | ✅ Fabric Lakehouse (pyodbc + Azure AD) | CSV (`data/customer_reviews.csv`) → ハードコードデータ |
+
+**出力形式**: Markdown（ターゲット分析 / 売上トレンド / 顧客評価 / 推奨事項の 4 セクション）
+
+---
+
+### Agent2: marketing-plan-agent（施策生成）
+
+**ファイル**: `src/agents/marketing_plan.py`
+**役割**: Agent1 の分析結果をもとにマーケティング企画書を作成する。景品表示法違反表現を回避。
+
+| ツール名 | 説明 | Azure 接続 | フォールバック |
+|---------|------|-----------|-------------|
+| `search_market_trends(query)` | 最新の旅行市場トレンド・競合情報を検索 | ✅ Foundry Agent Service (Bing grounding / Web Search) | ハードコードトレンドデータ |
+
+**出力形式**: Markdown（タイトル / キャッチコピー 3 案 / ターゲットペルソナ / プラン概要 / 差別化ポイント / 改善ポイント / 販促チャネル / KPI の 8 セクション）
+
+---
+
+### Agent3: regulation-check-agent（規制チェック）
+
+**ファイル**: `src/agents/regulation_check.py`
+**役割**: 企画書のコンプライアンスを 6 項目チェック（旅行業法 / 景品表示法 / ブランドガイドライン / NG 表現 / ナレッジベース / 安全情報）。
+
+| ツール名 | 説明 | Azure 接続 | フォールバック |
+|---------|------|-----------|-------------|
+| `search_knowledge_base(query)` | レギュレーション文書をナレッジベースから検索 | ✅ Foundry IQ → Azure AI Search | 静的レスポンス |
+| `check_ng_expressions(text)` | 禁止表現（最安値・業界No.1 等）をスキャン | ローカル処理（ハードコードリスト） | — |
+| `check_travel_law_compliance(document)` | 旅行業法チェックリスト 5 項目を検証 | ローカル処理（キーワード検索） | — |
+| `search_safety_info(destination)` | 渡航先の安全情報（外務省警告・気象警報） | ✅ Foundry Agent Service (Bing grounding) | 静的安全データ |
+
+**出力形式**: Markdown（チェック結果テーブル ✅/⚠️/❌ / 違反詳細 / 修正提案 / 修正済み企画書）
+
+---
+
+### Agent4: brochure-gen-agent（販促物生成）
+
+**ファイル**: `src/agents/brochure_gen.py`
+**役割**: 規制チェック済み企画書から 3 つの成果物を生成（HTML ブローシャ / ヒーロー画像 / SNS バナー）。
+
+| ツール名 | 説明 | Azure 接続 | フォールバック |
+|---------|------|-----------|-------------|
+| `generate_hero_image(prompt, destination, style)` | 目的地メインビジュアル画像生成（1792x1024px） | ✅ GPT Image 1.5 (OpenAI Images API) | 1x1 透明 PNG プレースホルダー |
+| `generate_banner_image(prompt, platform)` | SNS バナー画像生成（Instagram/Twitter/Facebook サイズ対応） | ✅ GPT Image 1.5 (OpenAI Images API) | 1x1 透明 PNG プレースホルダー |
+
+**出力形式**: HTML ブローシャ（Tailwind CSS / レスポンシブ / 旅行業登録番号フッター付き）+ Base64 画像 data URI
+
+---
+
+### Agent5: quality-review-agent（品質レビュー）
+
+**ファイル**: `src/agents/quality_review.py`
+**役割**: 生成された成果物の品質を 4 観点でレビュー（企画書構造 / ブローシャアクセシビリティ / テキストトーン一貫性 / 旅行業法適合）。バックグラウンドで実行され、`AZURE_AI_PROJECT_ENDPOINT` 未設定時はスキップされる。
+
+| ツール名 | 説明 | Azure 接続 | フォールバック |
+|---------|------|-----------|-------------|
+| `review_plan_quality(plan_markdown)` | 企画書の 5 必須セクション（タイトル / キャッチコピー / ターゲット / 概要 / KPI）を検証 | ローカル処理（キーワード検索） | — |
+| `review_brochure_accessibility(html_content)` | HTML アクセシビリティ 4 項目チェック（alt属性 / lang属性 / フッター / フォントサイズ） | ローカル処理 | — |
+
+**出力形式**: Markdown（セクションごとの ✅/⚠️/❌ チェックリスト）
+
+---
+
+## ワークフロー（Sequential Pipeline）
+
+```
+Agent1 (data-search-agent)
+  ↓ データ分析結果
+Agent2 (marketing-plan-agent)
+  ↓ 企画書 Markdown
+  ↓ [承認ステップ — ユーザーが承認/修正を選択]
+Agent3 (regulation-check-agent)
+  ↓ 規制チェック済み企画書
+Agent4 (brochure-gen-agent)
+  ↓ HTML ブローシャ + 画像
+Agent5 (quality-review-agent) ← バックグラウンド実行（オプショナル）
+```
+
+**フレームワーク**: `SequentialBuilder` (agent_framework.orchestrations)
+**エントリポイント**: `src/workflows/__init__.py` → `create_pipeline_workflow()`
+
+## Azure 接続状態サマリ
+
+| ツール / サービス | Azure 接続 | フォールバック動作 |
+|-----------------|-----------|------------------|
+| Fabric Lakehouse (売上・レビュー検索) | `FABRIC_SQL_ENDPOINT` 設定時 | CSV ファイル → ハードコードデータ |
+| Web Search (市場トレンド) | `AZURE_AI_PROJECT_ENDPOINT` 設定時 | ハードコードトレンドデータ |
+| Foundry IQ (ナレッジベース検索) | `AZURE_AI_PROJECT_ENDPOINT` + AI Search 設定時 | 静的レスポンス |
+| Web Search (安全情報) | `AZURE_AI_PROJECT_ENDPOINT` 設定時 | 静的安全データ |
+| GPT Image 1.5 (画像生成) | `AZURE_AI_PROJECT_ENDPOINT` + モデルデプロイ時 | 1x1 透明 PNG |
+| Content Safety (Prompt Shield) | `CONTENT_SAFETY_ENDPOINT` 設定時 | 開発環境ではスキップ、本番では fail-close |
+| Content Safety (Text Analysis) | `CONTENT_SAFETY_ENDPOINT` 設定時 | 開発環境ではスキップ、本番では fail-close |
+| Cosmos DB (会話履歴) | `COSMOS_DB_ENDPOINT` 設定時 | インメモリストア |
+
+> **注**: 全環境変数が未設定の場合でもモックデモモードで動作する。
+
 ## ディレクトリ構成
 
 ```
@@ -103,20 +209,15 @@ travel-marketing-agents/
 ├── data/                         # デモデータ + demo-replay.json
 ├── regulations/                  # レギュレーション文書
 ├── tests/                        # pytest（53 テスト）
+├── docs/                         # ドキュメント
+│   ├── requirements_v3.7.md      # 要件定義書
+│   ├── api-reference.md          # API リファレンス
+│   ├── deployment-guide.md       # デプロイガイド
+│   └── azure-setup.md            # Azure セットアップガイド
 ├── Dockerfile                    # マルチステージ（Container Apps 用）
 ├── Dockerfile.agent              # Hosted Agent 用
 ├── azure.yaml                    # azd 設定
 └── .github/workflows/            # CI + Deploy + Security
-```
-│   ├── main.bicep
-│   └── modules/
-├── tests/                        # pytest
-├── docs/                         # 要件定義書等
-│   └── requirements_v3.md
-├── azure.yaml                    # azd 設定
-├── Dockerfile                    # マルチステージビルド
-├── pyproject.toml
-└── .env.example
 ```
 
 ## Quick Commands

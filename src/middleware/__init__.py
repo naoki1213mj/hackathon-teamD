@@ -47,7 +47,13 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         from azure.ai.contentsafety import ContentSafetyClient
         from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
         from azure.identity import DefaultAzureCredential
+    except ImportError:
+        logger.warning("azure-ai-contentsafety がインストールされていません")
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "client_unavailable"})
+        return ShieldResult(is_safe=True, details={"reason": "client_unavailable"})
 
+    try:
         client = ContentSafetyClient(
             endpoint=endpoint,
             credential=DefaultAzureCredential(),
@@ -59,14 +65,12 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         response = client.analyze_text(options)
         is_safe = all(c.severity == 0 for c in response.categories_analysis)
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
-    except ImportError:
-        logger.warning("azure-ai-contentsafety がインストールされていません")
-        if _content_safety_required():
-            return ShieldResult(is_safe=False, details={"reason": "client_unavailable"})
-        return ShieldResult(is_safe=True, details={"reason": "client_unavailable"})
     except Exception:
         logger.exception("Prompt Shield チェックでエラーが発生")
-        # fail-closed: チェック不能時は安全側に倒す
+        if _content_safety_required():
+            logger.error("本番環境: Prompt Shield 障害のため入力をブロック (fail-close)")
+            return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+        # 開発環境でも安全側に倒す
         return ShieldResult(is_safe=False, details={"reason": "check_failed"})
 
 
@@ -84,7 +88,13 @@ async def analyze_content(text: str) -> SafetyScores:
         from azure.ai.contentsafety import ContentSafetyClient
         from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
         from azure.identity import DefaultAzureCredential
+    except ImportError:
+        logger.warning("azure-ai-contentsafety がインストールされていません")
+        if _content_safety_required():
+            return SafetyScores(check_failed=True)
+        return SafetyScores()
 
+    try:
         client = ContentSafetyClient(
             endpoint=endpoint,
             credential=DefaultAzureCredential(),
@@ -105,11 +115,8 @@ async def analyze_content(text: str) -> SafetyScores:
             elif cat.category == "Violence":
                 scores.violence = cat.severity
         return scores
-    except ImportError:
-        logger.warning("azure-ai-contentsafety がインストールされていません")
-        if _content_safety_required():
-            return SafetyScores(check_failed=True)
-        return SafetyScores()
     except Exception:
         logger.exception("Text Analysis でエラーが発生")
+        if _content_safety_required():
+            logger.error("本番環境: Text Analysis 障害のためチェック失敗扱い (fail-close)")
         return SafetyScores(check_failed=True)

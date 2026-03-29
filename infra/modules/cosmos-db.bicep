@@ -3,6 +3,8 @@
 param name string
 param location string
 param tags object = {}
+param privateEndpointsSubnetId string = ''
+param vnetId string = ''
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: name
@@ -66,6 +68,57 @@ resource conversationsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDataba
       }
       defaultTtl: 2592000 // 30日
     }
+  }
+}
+
+// Private Endpoint
+resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (!empty(privateEndpointsSubnetId)) {
+  name: 'pep-${name}'
+  location: location
+  tags: tags
+  properties: {
+    subnet: { id: privateEndpointsSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: '${name}-connection'
+        properties: {
+          privateLinkServiceId: cosmosAccount.id
+          groupIds: ['Sql']
+        }
+      }
+    ]
+  }
+}
+
+// Private DNS Zone
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (!empty(privateEndpointsSubnetId)) {
+  name: 'privatelink.documents.azure.com'
+  location: 'global'
+  tags: tags
+}
+
+resource vnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (!empty(privateEndpointsSubnetId)) {
+  parent: privateDnsZone
+  name: '${name}-vnet-link'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnetId }
+    registrationEnabled: false
+  }
+}
+
+resource dnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (!empty(privateEndpointsSubnetId)) {
+  parent: privateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'cosmos-config'
+        properties: {
+          privateDnsZoneId: privateDnsZone.id
+        }
+      }
+    ]
   }
 }
 

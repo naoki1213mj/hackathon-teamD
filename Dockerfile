@@ -2,7 +2,7 @@
 FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --force
 COPY frontend/ ./
 RUN node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build
 

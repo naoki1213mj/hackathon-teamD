@@ -13,9 +13,11 @@ import { PlanApproval } from './components/PlanApproval'
 import { RefineChat } from './components/RefineChat'
 import { RegulationResults } from './components/RegulationResults'
 import { SafetyBadge } from './components/SafetyBadge'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ToolEventBadges } from './components/ToolEventBadges'
 import { VersionSelector } from './components/VersionSelector'
+import { VideoPreview } from './components/VideoPreview'
 import { VoiceInput } from './components/VoiceInput'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
@@ -23,7 +25,7 @@ import { useTheme } from './hooks/useTheme'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 
 function App() {
-  const { state, sendMessage, approve, reset, restoreVersion } = useSSE()
+  const { state, sendMessage, approve, reset, restoreVersion, updateSettings } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
 
@@ -98,6 +100,7 @@ function App() {
                 <p className="mt-1 text-xs text-[var(--text-muted)]">{t('panel.composer.subtitle')}</p>
               </div>
             </div>
+            <SettingsPanel settings={state.settings} onChange={updateSettings} t={t} />
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1">
                 {state.status === 'completed' ? (
@@ -118,7 +121,7 @@ function App() {
                   />
                 )}
               </div>
-              <VoiceInput disabled={isRunning} t={t} />
+              <VoiceInput onTranscript={sendMessage} disabled={isRunning} t={t} />
             </div>
           </div>
         </section>
@@ -151,13 +154,10 @@ function App() {
               { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
               { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
               { key: 'video', label: `🎬 ${t('tab.video') || '動画'}`, content: (
-                <div className="flex items-center justify-center rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] p-12">
-                  <div className="text-center">
-                    <p className="text-3xl">🎬</p>
-                    <p className="mt-3 text-sm font-medium text-[var(--text-primary)]">{t('tab.video')}</p>
-                    <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('tab.video.description')}</p>
-                  </div>
-                </div>
+                <VideoPreview
+                  videoUrl={state.textContents.find(c => c.content_type === 'video')?.content}
+                  t={t}
+                />
               )},
             ]} t={t} />
 

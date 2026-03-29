@@ -2,6 +2,7 @@
  * Markdown レンダラーコンポーネント。react-markdown で安全に描画する。
  */
 
+import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 
 interface MarkdownViewProps {
@@ -9,10 +10,10 @@ interface MarkdownViewProps {
   className?: string
 }
 
-export function MarkdownView({ content, className = '' }: MarkdownViewProps) {
+export const MarkdownView = memo(function MarkdownView({ content, className = '' }: MarkdownViewProps) {
   return (
     <div className={`prose prose-sm max-w-none dark:prose-invert ${className}`}>
       <ReactMarkdown>{content}</ReactMarkdown>
     </div>
   )
-}
+})

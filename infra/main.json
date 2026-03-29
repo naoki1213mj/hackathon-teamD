@@ -1,0 +1,2165 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "14172934966670202543"
+    }
+  },
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "metadata": {
+        "description": "環境名（リソース名の接頭辞に使用）"
+      }
+    },
+    "location": {
+      "type": "string",
+      "minLength": 1,
+      "metadata": {
+        "description": "Azure リージョン"
+      }
+    },
+    "imageName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "コンテナイメージ名（azd が自動設定する）"
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": {
+      "resourceGroup": "rg-",
+      "logAnalytics": "log-",
+      "appInsights": "appi-",
+      "containerRegistry": "cr",
+      "keyVault": "kv-",
+      "aiFoundry": "ais",
+      "aiProject": "aip-",
+      "apim": "apim-",
+      "functionApp": "func-",
+      "funcStorage": "stfn",
+      "logicApp": "logic-",
+      "containerAppsEnv": "cae-",
+      "containerApp": "ca-",
+      "cosmosDb": "cosmos-"
+    },
+    "abbrs": "[variables('$fxv#0')]",
+    "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), parameters('location')))]",
+    "tags": {
+      "azd-env-name": "[parameters('environmentName')]"
+    },
+    "defaultModelDeploymentName": "gpt-5-4-mini"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-07-01",
+      "name": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "log-analytics",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').logAnalytics, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9899552848505943973"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-insights",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').appInsights, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "6533905253552520876"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[parameters('logAnalyticsWorkspaceId')]"
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "connectionString": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').ConnectionString]"
+            },
+            "instrumentationKey": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').InstrumentationKey]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-registry",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').containerRegistry, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "16049998327211611278"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-11-01-preview",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Basic"
+              },
+              "properties": {
+                "adminUserEnabled": false
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "loginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), '2023-11-01-preview').loginServer]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "key-vault",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').keyVault, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "privateEndpointsSubnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.privateEndpointsSubnetId.value]"
+          },
+          "vnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.id.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "7886966258636954046"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "privateEndpointsSubnetId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "vnetId": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "tenantId": "[subscription().tenantId]",
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "enablePurgeProtection": true,
+                "softDeleteRetentionInDays": 7,
+                "publicNetworkAccess": "Disabled"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pep-{0}', parameters('name'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('privateEndpointsSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "[format('{0}-connection', parameters('name'))]",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', parameters('name'))]",
+                      "groupIds": [
+                        "vault"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "privatelink.vaultcore.azure.net",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.vaultcore.azure.net', format('{0}-vnet-link', parameters('name')))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pep-{0}', parameters('name')), 'default')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "vault-config",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]",
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pep-{0}', parameters('name')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.KeyVault/vaults', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "ai-foundry",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').aiFoundry, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "modelDeploymentName": {
+            "value": "[variables('defaultModelDeploymentName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "10206990167426751027"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "modelDeploymentName": {
+              "type": "string",
+              "defaultValue": "gpt-5-4-mini"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2025-06-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "AIServices",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "sku": {
+                "name": "S0"
+              },
+              "properties": {
+                "allowProjectManagement": true,
+                "customSubDomainName": "[toLower(parameters('name'))]",
+                "disableLocalAuth": true,
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', parameters('name'), parameters('modelDeploymentName'))]",
+              "sku": {
+                "capacity": 30,
+                "name": "GlobalStandard"
+              },
+              "properties": {
+                "model": {
+                  "name": "gpt-5.4-mini",
+                  "format": "OpenAI",
+                  "version": "2026-03-17"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "endpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('name')), '2025-06-01').endpoint]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('name')), '2025-06-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "ai-project",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').aiProject, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "aiFoundryName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "7517824754693881030"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "aiFoundryName": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts/projects",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', parameters('aiFoundryName'), parameters('name'))]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {}
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('aiFoundryName'), parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('aiFoundryName'), parameters('name')), '2025-06-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "vnet",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('vnet-{0}', variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9633735603092962136"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2024-05-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.0.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "snet-container-apps",
+                    "properties": {
+                      "addressPrefix": "10.0.0.0/23",
+                      "delegations": [
+                        {
+                          "name": "Microsoft.App.environments",
+                          "properties": {
+                            "serviceName": "Microsoft.App/environments"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "snet-private-endpoints",
+                    "properties": {
+                      "addressPrefix": "10.0.2.0/24"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "containerAppsSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('name')), '2024-05-01').subnets[0].id]"
+            },
+            "privateEndpointsSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('name')), '2024-05-01').subnets[1].id]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-apps-env",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').containerAppsEnv, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
+          },
+          "subnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.containerAppsSubnetId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9082369741267997682"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string"
+            },
+            "subnetId": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', last(split(parameters('logAnalyticsWorkspaceId'), '/'))), '2023-09-01').customerId]",
+                    "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', last(split(parameters('logAnalyticsWorkspaceId'), '/'))), '2023-09-01').primarySharedKey]"
+                  }
+                },
+                "vnetConfiguration": "[if(not(empty(parameters('subnetId'))), createObject('infrastructureSubnetId', parameters('subnetId'), 'internal', false()), null())]"
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-app",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').containerApp, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "containerAppsEnvironmentId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-apps-env'), '2025-04-01').outputs.id.value]"
+          },
+          "containerRegistryName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.name.value]"
+          },
+          "imageName": "[if(not(empty(parameters('imageName'))), createObject('value', parameters('imageName')), createObject('value', 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'))]",
+          "keyVaultName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.name.value]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.connectionString.value]"
+          },
+          "modelName": {
+            "value": "[variables('defaultModelDeploymentName')]"
+          },
+          "projectEndpoint": {
+            "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value)]"
+          },
+          "contentSafetyEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+          },
+          "cosmosDbEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.endpoint.value]"
+          },
+          "apimGatewayUrl": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.gatewayUrl.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "10995135198904412735"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "containerAppsEnvironmentId": {
+              "type": "string"
+            },
+            "containerRegistryName": {
+              "type": "string"
+            },
+            "imageName": {
+              "type": "string"
+            },
+            "keyVaultName": {
+              "type": "string"
+            },
+            "appInsightsConnectionString": {
+              "type": "string"
+            },
+            "modelName": {
+              "type": "string",
+              "defaultValue": "gpt-5-4-mini"
+            },
+            "projectEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "contentSafetyEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "cosmosDbEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "apimGatewayUrl": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "variables": {
+            "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('apimGatewayUrl'))), createArray(createObject('name', 'APIM_GATEWAY_URL', 'value', parameters('apimGatewayUrl'))), createArray()))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'web'))]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "configuration": {
+                  "ingress": {
+                    "external": true,
+                    "targetPort": 8000,
+                    "transport": "auto"
+                  },
+                  "registries": "[if(variables('isAcrImage'), createArray(createObject('server', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), '2023-11-01-preview').loginServer, 'identity', 'system')), createArray())]"
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "travel-agents",
+                      "image": "[parameters('imageName')]",
+                      "resources": {
+                        "cpu": "[json('1.0')]",
+                        "memory": "2Gi"
+                      },
+                      "env": "[variables('containerEnv')]",
+                      "probes": [
+                        {
+                          "type": "Liveness",
+                          "httpGet": {
+                            "path": "/api/health",
+                            "port": 8000
+                          },
+                          "periodSeconds": 30,
+                          "failureThreshold": 3
+                        },
+                        {
+                          "type": "Readiness",
+                          "httpGet": {
+                            "path": "/api/ready",
+                            "port": 8000
+                          },
+                          "initialDelaySeconds": 10,
+                          "periodSeconds": 10
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 0,
+                    "maxReplicas": 3,
+                    "rules": [
+                      {
+                        "name": "http-rule",
+                        "http": {
+                          "metadata": {
+                            "concurrentRequests": "50"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.App/containerApps', parameters('name')), '4633458b-17de-408a-b874-0445c86b69e6')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.App/containerApps', parameters('name')), '2024-03-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/containerApps', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), resourceId('Microsoft.App/containerApps', parameters('name')), '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.App/containerApps', parameters('name')), '2024-03-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/containerApps', parameters('name'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/containerApps', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "uri": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', parameters('name')), '2024-03-01').configuration.ingress.fqdn)]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/containerApps', parameters('name')), '2024-03-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-apps-env')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'key-vault')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "ai-foundry-app-access",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aiFoundryName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "1345069344158203863"
+            }
+          },
+          "parameters": {
+            "aiFoundryName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "api-management",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').apim, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "appInsightsId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.id.value]"
+          },
+          "appInsightsInstrumentationKey": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.instrumentationKey.value]"
+          },
+          "foundryEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "16053205156675117859"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "publisherEmail": {
+              "type": "string",
+              "defaultValue": "team-d@hackathon.local"
+            },
+            "publisherName": {
+              "type": "string",
+              "defaultValue": "Team D Hackathon"
+            },
+            "appInsightsId": {
+              "type": "string"
+            },
+            "appInsightsInstrumentationKey": {
+              "type": "string"
+            },
+            "foundryEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ApiManagement/service",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "BasicV2",
+                "capacity": 1
+              },
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "publisherEmail": "[parameters('publisherEmail')]",
+                "publisherName": "[parameters('publisherName')]"
+              }
+            },
+            {
+              "type": "Microsoft.ApiManagement/service/loggers",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', parameters('name'), 'appinsights-logger')]",
+              "properties": {
+                "loggerType": "applicationInsights",
+                "resourceId": "[parameters('appInsightsId')]",
+                "credentials": {
+                  "instrumentationKey": "[parameters('appInsightsInstrumentationKey')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('foundryEndpoint')))]",
+              "type": "Microsoft.ApiManagement/service/backends",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', parameters('name'), 'foundry-backend')]",
+              "properties": {
+                "protocol": "http",
+                "url": "[parameters('foundryEndpoint')]",
+                "credentials": {
+                  "header": {}
+                },
+                "tls": {
+                  "validateCertificateChain": true,
+                  "validateCertificateName": true
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('foundryEndpoint')))]",
+              "type": "Microsoft.ApiManagement/service/apis",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', parameters('name'), 'foundry-ai-gateway')]",
+              "properties": {
+                "displayName": "Foundry AI Gateway",
+                "path": "ai",
+                "protocols": [
+                  "https"
+                ],
+                "subscriptionRequired": false,
+                "serviceUrl": "[parameters('foundryEndpoint')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('foundryEndpoint')))]",
+              "type": "Microsoft.ApiManagement/service/apis/policies",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('name'), 'foundry-ai-gateway', 'policy')]",
+              "properties": {
+                "format": "xml",
+                "value": "<policies><inbound><base /><rate-limit calls=\"60\" renewal-period=\"60\" /><set-header name=\"X-Request-Id\" exists-action=\"skip\"><value>@(context.RequestId.ToString())</value></set-header><llm-content-safety><input><text threshold=\"Medium\" categories=\"Hate,SelfHarm,Sexual,Violence\" /><jailbreak enabled=\"true\" /><indirect-attack enabled=\"true\" /></input></llm-content-safety></inbound><backend><base /></backend><outbound><base /><set-header name=\"X-Gateway\" exists-action=\"override\"><value>travel-marketing-ai-gateway</value></set-header><llm-content-safety><output><text threshold=\"Medium\" categories=\"Hate,SelfHarm,Sexual,Violence\" /></output></llm-content-safety></outbound><on-error><base /></on-error></policies>"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('name'), 'foundry-ai-gateway')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "gatewayUrl": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('name')), '2024-06-01-preview').gatewayUrl]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('name')), '2024-06-01-preview', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "ai-foundry-apim-access",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aiFoundryName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "1345069344158203863"
+            }
+          },
+          "parameters": {
+            "aiFoundryName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "function-app",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').functionApp, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "storageAccountName": {
+            "value": "[format('{0}{1}', variables('abbrs').funcStorage, variables('resourceToken'))]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.connectionString.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "12478197362021228826"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "storageAccountName": {
+              "type": "string"
+            },
+            "appInsightsConnectionString": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('storageAccountName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "StorageV2",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "properties": {
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true
+              }
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}-plan', parameters('name'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "tier": "FlexConsumption",
+                "name": "FC1"
+              },
+              "properties": {
+                "reserved": true
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2024-04-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "functionapp,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan', parameters('name')))]",
+                "siteConfig": {
+                  "appSettings": [
+                    {
+                      "name": "AzureWebJobsStorage__accountName",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                      "value": "[parameters('appInsightsConnectionString')]"
+                    },
+                    {
+                      "name": "FUNCTIONS_EXTENSION_VERSION",
+                      "value": "~4"
+                    },
+                    {
+                      "name": "WEBSITE_AUTH_STORAGE_TYPE",
+                      "value": "Msi"
+                    }
+                  ]
+                },
+                "functionAppConfig": {
+                  "deployment": {
+                    "storage": {
+                      "type": "blobContainer",
+                      "value": "[format('{0}deployments', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.blob)]",
+                      "authentication": {
+                        "type": "SystemAssignedIdentity"
+                      }
+                    }
+                  },
+                  "runtime": {
+                    "name": "python",
+                    "version": "3.13"
+                  },
+                  "scaleAndConcurrency": {
+                    "maximumInstanceCount": 40,
+                    "instanceMemoryMB": 2048
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan', parameters('name')))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.Web/sites', parameters('name')), 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.Web/sites', parameters('name')), '17d1049b-9a84-46fb-8f53-869881c3d3ab')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "defaultHostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01').defaultHostName]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "logic-app",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').logicApp, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "6360476594237281197"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Logic/workflows",
+              "apiVersion": "2019-05-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "state": "Enabled",
+                "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "triggers": {
+                    "manual": {
+                      "type": "Request",
+                      "kind": "Http",
+                      "inputs": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "plan_title": {
+                              "type": "string"
+                            },
+                            "plan_markdown": {
+                              "type": "string"
+                            },
+                            "brochure_html": {
+                              "type": "string"
+                            },
+                            "conversation_id": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "actions": {
+                    "Response": {
+                      "type": "Response",
+                      "kind": "Http",
+                      "inputs": {
+                        "statusCode": 200,
+                        "body": {
+                          "status": "accepted",
+                          "message": "承認後アクションを開始しました"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Logic/workflows', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "callbackUrl": {
+              "type": "string",
+              "value": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01').value]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "cosmos-db",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').cosmosDb, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "privateEndpointsSubnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.privateEndpointsSubnetId.value]"
+          },
+          "vnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.id.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "14003567375872034540"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "privateEndpointsSubnetId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "vnetId": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts",
+              "apiVersion": "2024-05-15",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "GlobalDocumentDB",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "databaseAccountOfferType": "Standard",
+                "capabilities": [
+                  {
+                    "name": "EnableServerless"
+                  }
+                ],
+                "locations": [
+                  {
+                    "locationName": "[parameters('location')]",
+                    "failoverPriority": 0
+                  }
+                ],
+                "disableLocalAuth": true,
+                "consistencyPolicy": {
+                  "defaultConsistencyLevel": "Session"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('name'), 'travel-marketing')]",
+              "properties": {
+                "resource": {
+                  "id": "travel-marketing"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('name'), 'travel-marketing', 'conversations')]",
+              "properties": {
+                "resource": {
+                  "id": "conversations",
+                  "partitionKey": {
+                    "paths": [
+                      "/user_id"
+                    ],
+                    "kind": "Hash"
+                  },
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/status/?"
+                      },
+                      {
+                        "path": "/created_at/?"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ]
+                  },
+                  "defaultTtl": 2592000
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('name'), 'travel-marketing')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pep-{0}', parameters('name'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('privateEndpointsSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "[format('{0}-connection', parameters('name'))]",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('name'))]",
+                      "groupIds": [
+                        "Sql"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "privatelink.documents.azure.com",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.documents.azure.com', format('{0}-vnet-link', parameters('name')))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('privateEndpointsSubnetId')))]",
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pep-{0}', parameters('name')), 'default')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "cosmos-config",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')]",
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pep-{0}', parameters('name')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "endpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('name')), '2024-05-15').documentEndpoint]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "cosmos-db-access",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "cosmosAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.name.value]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "10449253429774801544"
+            }
+          },
+          "parameters": {
+            "cosmosAccountName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "cosmosDataContributorRoleId": "00000000-0000-0000-0000-000000000002"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('cosmosAccountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), parameters('principalId'), variables('cosmosDataContributorRoleId')))]",
+              "properties": {
+                "roleDefinitionId": "[format('{0}/sqlRoleDefinitions/{1}', resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), variables('cosmosDataContributorRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName'))]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "AZURE_CONTAINER_REGISTRY_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value]"
+    },
+    "AZURE_CONTAINER_REGISTRY_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_CONTAINER_APP_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_AI_PROJECT_ENDPOINT": {
+      "type": "string",
+      "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value)]"
+    },
+    "AZURE_AI_PROJECT_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_AI_FOUNDRY_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+    },
+    "MODEL_NAME": {
+      "type": "string",
+      "value": "[variables('defaultModelDeploymentName')]"
+    },
+    "AZURE_APIM_GATEWAY_URL": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.gatewayUrl.value]"
+    },
+    "AZURE_FUNCTION_APP_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_LOGIC_APP_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'logic-app'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_RESOURCE_GROUP": {
+      "type": "string",
+      "value": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]"
+    },
+    "CONTENT_SAFETY_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+    },
+    "COSMOS_DB_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.endpoint.value]"
+    },
+    "SERVICE_WEB_ENDPOINTS": {
+      "type": "array",
+      "value": [
+        "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.uri.value]"
+      ]
+    }
+  }
+}

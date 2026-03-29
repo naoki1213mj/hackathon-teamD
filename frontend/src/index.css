@@ -52,3 +52,22 @@ body {
 ::selection {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
+
+/* ダークモードでの select/option の背景色修正 */
+:root.dark select,
+:root.dark option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* スクロールバーのダークモード対応 */
+:root.dark ::-webkit-scrollbar {
+  width: 6px;
+}
+:root.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root.dark ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}

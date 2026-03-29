@@ -3,13 +3,16 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from enum import StrEnum
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import save_conversation
@@ -17,6 +20,7 @@ from src.middleware import analyze_content, check_prompt_shield
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 
 _APPROVAL_KEYWORDS = {
     "approve",
@@ -59,6 +63,19 @@ def _is_approval_response(response_text: str) -> bool:
     return any(keyword in normalized for keyword in _APPROVAL_KEYWORDS)
 
 
+# 制御文字除去パターン（改行は許可）
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
+
+
+def _sanitize_text(value: str) -> str:
+    """前後空白除去・制御文字除去・空文字拒否の共通バリデーション"""
+    value = value.strip()
+    value = _CONTROL_CHAR_RE.sub("", value)
+    if not value:
+        raise ValueError("メッセージが空です")
+    return value
+
+
 # --- リクエスト / レスポンスモデル ---
 
 
@@ -67,6 +84,13 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=5000)
     conversation_id: str | None = Field(None, max_length=100)
+    settings: dict | None = Field(None, description="モデルパラメータ設定")
+
+    @field_validator("message")
+    @classmethod
+    def sanitize_message(cls, v: str) -> str:
+        """前後空白除去・制御文字除去・空文字拒否"""
+        return _sanitize_text(v)
 
 
 class ApproveRequest(BaseModel):
@@ -74,6 +98,12 @@ class ApproveRequest(BaseModel):
 
     conversation_id: str = Field(..., max_length=100)
     response: str = Field(..., min_length=1, max_length=5000)
+
+    @field_validator("response")
+    @classmethod
+    def sanitize_response(cls, v: str) -> str:
+        """前後空白除去・制御文字除去・空文字拒否"""
+        return _sanitize_text(v)
 
 
 # --- モック SSE ジェネレーター（Phase 1: Azure 未接続のデモ用） ---
@@ -585,8 +615,8 @@ async def _post_approval_events(user_response: str, conversation_id: str):
                 data_line = [line for line in event.split("\n") if line.startswith("data: ")][0]
                 data = json.loads(data_line[len("data: ") :])
                 agent3_result = data.get("content", "")
-            except IndexError, json.JSONDecodeError:
-                pass
+            except (IndexError, json.JSONDecodeError) as exc:
+                logger.warning("Agent3 結果の SSE パースに失敗: %s", exc)
 
     # Agent4: 販促物生成
     async for event in _run_single_agent("brochure-gen-agent", 4, agent3_result or user_response, conversation_id):
@@ -726,12 +756,13 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest) -> StreamingResponse:
+@limiter.limit("10/minute")
+async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     """チャットメッセージを受け取り、SSE ストリームでパイプライン結果を返す"""
-    conversation_id = request.conversation_id or str(uuid.uuid4())
+    conversation_id = body.conversation_id or str(uuid.uuid4())
 
     # 入力 Content Safety チェック（層1: Prompt Shield）
-    shield_result = await check_prompt_shield(request.message)
+    shield_result = await check_prompt_shield(body.message)
 
     async def guarded_generator():
         collected_events: list[dict] = []
@@ -757,29 +788,54 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     collected_events.append(
                         {"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data}
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("SSE イベント収集のパースに失敗: %s", exc)
                 yield event
 
         # conversation_id が既存 = マルチターン修正
-        if request.conversation_id:
-            async for event in _collect_and_yield(_refine_events(request.message, conversation_id)):
+        if body.conversation_id:
+            async for event in _collect_and_yield(_refine_events(body.message, conversation_id)):
                 yield event
         else:
             # Azure 設定がある場合は実 Workflow、なければモック
             settings = get_settings()
             if settings["project_endpoint"]:
-                async for event in _collect_and_yield(workflow_event_generator(request.message, conversation_id)):
+                async for event in _collect_and_yield(workflow_event_generator(body.message, conversation_id)):
                     yield event
             else:
-                async for event in _collect_and_yield(mock_event_generator(request.message, conversation_id)):
+                async for event in _collect_and_yield(mock_event_generator(body.message, conversation_id)):
                     yield event
 
         # 会話を非同期で保存（レスポンスには影響しない）
         try:
-            await save_conversation(conversation_id, request.message, collected_events)
+            await save_conversation(conversation_id, body.message, collected_events)
         except Exception:
             logger.debug("会話保存に失敗（非致命的）")
+
+        # Agent5: 品質レビュー（バックグラウンドで実行、オプショナル）
+        settings = get_settings()
+        if settings["project_endpoint"] and not body.conversation_id:
+            try:
+                from src.agents import create_review_agent
+
+                review_agent = create_review_agent()
+                if review_agent:
+                    # 収集済みテキストイベントを結合してレビュー対象にする
+                    review_input = "\n".join(
+                        ev.get("data", {}).get("content", "")
+                        for ev in collected_events
+                        if ev.get("event") == SSEEventType.TEXT
+                    )
+                    if review_input.strip():
+                        review_result = await review_agent.run(review_input)
+                        review_text = str(review_result) if review_result else ""
+                        if review_text:
+                            yield format_sse(
+                                SSEEventType.TEXT,
+                                {"content": review_text, "agent": "quality-review-agent"},
+                            )
+            except Exception:
+                logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
 
     return StreamingResponse(
         guarded_generator(),
@@ -792,11 +848,12 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
 
 @router.post("/chat/{thread_id}/approve")
-async def approve(thread_id: str, request: ApproveRequest) -> StreamingResponse:
+@limiter.limit("10/minute")
+async def approve(thread_id: str, request: Request, body: ApproveRequest) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
     # 入力 Content Safety チェック（承認レスポンスにも適用）
-    shield_result = await check_prompt_shield(request.response)
-    is_approved = _is_approval_response(request.response)
+    shield_result = await check_prompt_shield(body.response)
+    is_approved = _is_approval_response(body.response)
 
     async def approval_event_generator():
         if not shield_result.is_safe:
@@ -806,10 +863,10 @@ async def approve(thread_id: str, request: ApproveRequest) -> StreamingResponse:
             )
             return
         if is_approved:
-            async for event in _post_approval_events(request.response, thread_id):
+            async for event in _post_approval_events(body.response, thread_id):
                 yield event
         else:
-            async for event in _refine_events(request.response, thread_id):
+            async for event in _refine_events(body.response, thread_id):
                 yield event
 
     return StreamingResponse(

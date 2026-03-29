@@ -21,7 +21,7 @@ export function BrochurePreview({ contents, t }: BrochurePreviewProps) {
           srcDoc={htmlContent.content}
           title={t('section.brochure')}
           className="h-[28rem] w-full bg-white"
-          sandbox=""
+          sandbox="allow-same-origin"
         />
       </div>
     </div>

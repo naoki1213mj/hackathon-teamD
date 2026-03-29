@@ -51,34 +51,43 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4 shadow-lg backdrop-blur">
-          <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{t('history.title')}</h3>
-          {conversations.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">{t('history.empty')}</p>
-          ) : (
-            <ul className="max-h-64 space-y-2 overflow-y-auto">
-              {conversations.map((conv) => (
-                <li key={conv.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelect(conv.id)
-                      setIsOpen(false)
-                    }}
-                    className="w-full rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-left transition-colors hover:bg-[var(--accent-soft)]"
-                  >
-                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">
-                      {conv.input || conv.id}
-                    </p>
-                    <p className="mt-1 text-[10px] text-[var(--text-muted)]">
-                      {conv.status} · {new Date(conv.created_at).toLocaleString()}
-                    </p>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <>
+          {/* 背景オーバーレイ（クリックで閉じる） */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setIsOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4 shadow-2xl"
+               style={{ background: 'var(--panel-strong)' }}>
+            <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{t('history.title')}</h3>
+            {conversations.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)]">{t('history.empty')}</p>
+            ) : (
+              <ul className="max-h-64 space-y-2 overflow-y-auto">
+                {conversations.map((conv) => (
+                  <li key={conv.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(conv.id)
+                        setIsOpen(false)
+                      }}
+                      className="w-full rounded-xl border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--accent-soft)]"
+                    >
+                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">
+                        {conv.input || conv.id}
+                      </p>
+                      <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                        {conv.status} · {new Date(conv.created_at).toLocaleString()}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

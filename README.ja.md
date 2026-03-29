@@ -233,6 +233,43 @@ azd deploy   # 2回目以降: コードのみ
 | Matsumoto | App SE | Frontend / Backend / Agent2 / Agent4 / 販促動画 |
 | mmatsuzaki | Infra SE | IaC / APIM / MCP / Agent3 / Content Safety / Observability / Voice Live / Logic Apps / Teams 公開 |
 
+## Azure 接続ステータス
+
+| サービス | 接続方法 | フォールバック |
+|---------|---------|-------------|
+| Foundry (推論) | `AZURE_AI_PROJECT_ENDPOINT` | モックデモモード |
+| Content Safety | `CONTENT_SAFETY_ENDPOINT` | 開発: スキップ / 本番: fail-close |
+| Fabric Lakehouse | `FABRIC_SQL_ENDPOINT` (pyodbc) | CSV ファイル → ハードコードデータ |
+| Cosmos DB | `COSMOS_DB_ENDPOINT` | インメモリストア |
+| GPT Image 1.5 | Foundry 経由 (Images API) | 1x1 透明 PNG プレースホルダー |
+| Web Search | Foundry Bing Grounding | ハードコードトレンドデータ |
+| Foundry IQ | Azure AI Search | 静的レスポンス |
+| Application Insights | `APPLICATIONINSIGHTS_CONNECTION_STRING` | テレメトリ無効 |
+
+> **注**: 全環境変数が未設定でもモックデモモードで動作します。
+
+## 環境変数
+
+| 変数名 | 必須 | 説明 |
+|--------|------|------|
+| `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Foundry プロジェクトエンドポイント |
+| `CONTENT_SAFETY_ENDPOINT` | 本番 | Content Safety エンドポイント |
+| `MODEL_NAME` | — | 推論モデル名（デフォルト: `gpt-5-4-mini`） |
+| `ENVIRONMENT` | — | 環境名（デフォルト: `development`） |
+| `COSMOS_DB_ENDPOINT` | — | Cosmos DB エンドポイント |
+| `FABRIC_SQL_ENDPOINT` | — | Fabric Lakehouse SQL EP |
+| `ALLOWED_ORIGINS` | — | CORS 許可オリジン |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | — | Application Insights 接続文字列 |
+
+詳細は [.env.example](.env.example) を参照。
+
+## ドキュメント
+
+- [API リファレンス](docs/api-reference.md) — エンドポイント仕様・SSE イベント定義
+- [デプロイガイド](docs/deployment-guide.md) — ローカル開発・Docker・Azure デプロイ手順
+- [Azure セットアップガイド](docs/azure-setup.md) — Azure リソース構築手順
+- [要件定義書](docs/requirements_v3.7.md) — v3.7 要件定義
+
 ## ライセンス
 
 このプロジェクトはハッカソン作品です。

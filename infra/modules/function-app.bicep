@@ -18,7 +18,7 @@ resource funcStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
   properties: {
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
+    allowSharedKeyAccess: true // Functions デプロイツールが共有キーを必要とするため有効化
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
   }
@@ -63,6 +63,10 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'FUNCTIONS_EXTENSION_VERSION'
           value: '~4'
         }
+        {
+          name: 'WEBSITE_AUTH_STORAGE_TYPE'
+          value: 'Msi'
+        }
       ]
     }
     functionAppConfig: {
@@ -71,8 +75,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
           type: 'blobContainer'
           value: '${funcStorage.properties.primaryEndpoints.blob}deployments'
           authentication: {
-            type: 'StorageAccountConnectionString'
-            storageAccountConnectionStringName: 'AzureWebJobsStorage'
+            type: 'SystemAssignedIdentity'
           }
         }
       }
@@ -88,14 +91,25 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   }
 }
 
-// Storage 接続文字列が必要
-resource funcStorageConnectionString 'Microsoft.Web/sites/config@2024-04-01' = {
-  parent: functionApp
-  name: 'appsettings'
+// Storage Blob Data Owner: Function App MI がデプロイ用 Blob コンテナにアクセス
+resource storageBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: funcStorage
+  name: guid(funcStorage.id, functionApp.id, 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
   properties: {
-    AzureWebJobsStorage: 'DefaultEndpointsProtocol=https;AccountName=${funcStorage.name};AccountKey=${funcStorage.listKeys().keys[0].value}'
-    FUNCTIONS_EXTENSION_VERSION: '~4'
-    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  }
+}
+
+// Storage Account Contributor: Function App MI がキューやテーブルを管理
+resource storageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: funcStorage
+  name: guid(funcStorage.id, functionApp.id, '17d1049b-9a84-46fb-8f53-869881c3d3ab')
+  properties: {
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')
   }
 }
 

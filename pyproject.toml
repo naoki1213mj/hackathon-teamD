@@ -13,6 +13,7 @@ dependencies = [
     "azure-monitor-opentelemetry>=1.6.0",
     "fastapi>=0.135.2",
     "python-dotenv>=1.1.0",
+    "slowapi>=0.1.9",
     "uvicorn>=0.42.0",
 ]
 
@@ -35,3 +36,5 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["."]
+addopts = "--cov=src --cov-report=term-missing"

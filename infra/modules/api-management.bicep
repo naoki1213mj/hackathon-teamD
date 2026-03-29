@@ -76,6 +76,8 @@ resource aiGatewayApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-
   name: 'policy'
   properties: {
     format: 'xml'
+    // Content Safety ポリシーは APIM の llm-content-safety 機能が GA 後に有効化（backend-id 要件あり）
+    // 現時点では rate-limit + ヘッダー付与のみ
     value: '<policies><inbound><base /><rate-limit calls="60" renewal-period="60" /><set-header name="X-Request-Id" exists-action="skip"><value>@(context.RequestId.ToString())</value></set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Gateway" exists-action="override"><value>travel-marketing-ai-gateway</value></set-header></outbound><on-error><base /></on-error></policies>'
   }
 }

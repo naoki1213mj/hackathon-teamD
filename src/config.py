@@ -18,6 +18,11 @@ class AppSettings(TypedDict):
     applicationinsights_connection_string: str
     environment: str
     cosmos_db_endpoint: str
+    fabric_sql_endpoint: str
+    allowed_origins: str
+    content_understanding_endpoint: str
+    speech_service_endpoint: str
+    speech_service_region: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -28,12 +33,18 @@ _ENV_MAP: dict[str, str] = {
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "applicationinsights_connection_string",
     "ENVIRONMENT": "environment",
     "COSMOS_DB_ENDPOINT": "cosmos_db_endpoint",
+    "FABRIC_SQL_ENDPOINT": "fabric_sql_endpoint",
+    "ALLOWED_ORIGINS": "allowed_origins",
+    "CONTENT_UNDERSTANDING_ENDPOINT": "content_understanding_endpoint",
+    "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
+    "SPEECH_SERVICE_REGION": "speech_service_region",
 }
 
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
     "model_name": "gpt-5-4-mini",
     "environment": "development",
+    "allowed_origins": "http://localhost:5173",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

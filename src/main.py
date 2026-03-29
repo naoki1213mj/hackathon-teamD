@@ -1,17 +1,26 @@
-"""FastAPI エントリポイント。ルーター統合・CORS・静的ファイル配信を行う。"""
+"""FastAPI エントリポイント。ルーター統合・CORS・レート制限・静的ファイル配信を行う。"""
 
 import logging
 import os
+import time
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.api.chat import limiter
 from src.api.chat import router as chat_router
 from src.api.conversations import router as conversations_router
 from src.api.health import router as health_router
+from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +40,13 @@ def _configure_observability() -> None:
         logger.warning("azure-monitor-opentelemetry 未インストール: Observability スキップ")
 
 
+def _get_allowed_origins() -> list[str]:
+    """環境変数からカンマ区切りの許可オリジンリストを返す"""
+    settings = get_settings()
+    raw = settings["allowed_origins"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """アプリケーション起動・終了時のライフサイクル管理"""
@@ -45,10 +61,52 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 設定（開発時のみ Vite dev server を許可）
+# レート制限
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# --- 例外ハンドラ ---
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """HTTP 例外を統一 JSON フォーマットで返す"""
+    return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """バリデーションエラーを統一 JSON フォーマットで返す"""
+    return JSONResponse(status_code=422, content={"error": "入力値が不正です", "details": str(exc)})
+
+
+# --- ミドルウェア ---
+
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """リクエストログとリクエスト相関 ID を付与するミドルウェア"""
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    start_time = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start_time) * 1000
+    logger.info(
+        "request_id=%s method=%s path=%s status=%d duration_ms=%.1f",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+
+# CORS 設定（ALLOWED_ORIGINS 環境変数で制御。デフォルトは localhost:5173）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
