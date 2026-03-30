@@ -3,41 +3,49 @@
  *
  * Voice Live WebSocket はユーザー委任 AAD トークンが必要（MI トークンは 1006 で拒否される）。
  * ブラウザ上で MSAL.js を使い、Entra ID でユーザー認証してトークンを取得する。
+ *
+ * Edge の COOP (Cross-Origin-Opener-Policy) でポップアップがブロックされるため、
+ * redirect 方式を使用する。
  */
 
-import { PublicClientApplication, type SilentRequest } from '@azure/msal-browser'
+import { PublicClientApplication, type SilentRequest, InteractionRequiredAuthError } from '@azure/msal-browser'
 
 let msalInstance: PublicClientApplication | null = null
+let initPromise: Promise<void> | null = null
 
 export interface MsalConfig {
   clientId: string
   tenantId: string
 }
 
-const SCOPES = ['https://cognitiveservices.azure.com/.default']
+const SCOPES = ['https://cognitiveservices.azure.com/user_impersonation']
 
 export async function initMsal(config: MsalConfig): Promise<void> {
   if (msalInstance) return
+  if (initPromise) { await initPromise; return }
 
-  msalInstance = new PublicClientApplication({
-    auth: {
-      clientId: config.clientId,
-      authority: `https://login.microsoftonline.com/${config.tenantId}`,
-      redirectUri: window.location.origin,
-    },
-    cache: {
-      cacheLocation: 'sessionStorage',
-    },
-  })
+  initPromise = (async () => {
+    msalInstance = new PublicClientApplication({
+      auth: {
+        clientId: config.clientId,
+        authority: `https://login.microsoftonline.com/${config.tenantId}`,
+        redirectUri: window.location.origin,
+      },
+      cache: {
+        cacheLocation: 'sessionStorage',
+      },
+    })
 
-  await msalInstance.initialize()
-  await msalInstance.handleRedirectPromise()
+    await msalInstance.initialize()
+    // redirect からの戻りを処理
+    await msalInstance.handleRedirectPromise()
+  })()
+
+  await initPromise
 }
 
 export async function getVoiceLiveToken(config: MsalConfig): Promise<string | null> {
-  if (!msalInstance) {
-    await initMsal(config)
-  }
+  await initMsal(config)
   if (!msalInstance) return null
 
   const accounts = msalInstance.getAllAccounts()
@@ -50,16 +58,21 @@ export async function getVoiceLiveToken(config: MsalConfig): Promise<string | nu
       }
       const response = await msalInstance.acquireTokenSilent(request)
       return response.accessToken
-    } catch {
-      // サイレント取得失敗 → ポップアップにフォールバック
+    } catch (err) {
+      if (err instanceof InteractionRequiredAuthError) {
+        // サイレント失敗 → redirect で再認証
+        await msalInstance.acquireTokenRedirect({ scopes: SCOPES })
+        return null // redirect するため、ここには戻らない
+      }
+      console.warn('MSAL silent token failed:', err)
     }
   }
 
+  // 未ログイン → redirect でログイン
   try {
-    const response = await msalInstance.acquireTokenPopup({
-      scopes: SCOPES,
-    })
-    return response.accessToken
+    await msalInstance.acquireTokenRedirect({ scopes: SCOPES })
+    // redirect するため、ここには戻らない
+    return null
   } catch (err) {
     console.warn('MSAL token acquisition failed:', err)
     return null
