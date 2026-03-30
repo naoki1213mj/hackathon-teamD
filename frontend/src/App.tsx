@@ -102,7 +102,7 @@ function App() {
               <div className="space-y-3">
                 {state.userMessages.map((msg, i) => (
                   <div key={i} className="flex justify-end">
-                    <div className="max-w-[85%] rounded-[20px] rounded-br-md bg-[var(--accent-strong)] px-4 py-3 text-sm text-white shadow-sm">
+                    <div className="max-w-[85%] rounded-[20px] rounded-br-md bg-[var(--user-bubble-bg)] px-4 py-3 text-sm text-[var(--user-bubble-text)] shadow-sm">
                       <p className="whitespace-pre-wrap">{msg}</p>
                     </div>
                   </div>
