@@ -1,32 +1,57 @@
-"""Foundry Evaluations セットアップスクリプト。
+"""Foundry Evaluations 実行スクリプト。
 
-パイプライン出力の品質を評価するための Evaluator を構成する。
-会話履歴から評価データセットを生成し、バッチ評価を実行する。
+azure-ai-evaluation SDK でパイプライン出力の品質を評価する。
+social-ai-studio の評価パターンを参考に実装。
 
 使い方:
     uv run python scripts/run_evaluations.py
 
 必要な環境変数:
     AZURE_AI_PROJECT_ENDPOINT: Foundry プロジェクトの endpoint
+    EVAL_MODEL_DEPLOYMENT: 評価に使うモデル deployment 名（デフォルト: gpt-5-4-mini）
 """
 
 import json
 import os
 import sys
-
-from azure.ai.projects import AIProjectClient
-from azure.identity import DefaultAzureCredential
+from urllib.parse import urlparse
 
 
-def run_text_evaluation(project: AIProjectClient) -> dict:
-    """テキスト品質の評価を実行する"""
-    from azure.ai.projects.models import (
-        EvaluationDataset,
-        Evaluator,
-        InlineEvaluationDataset,
-    )
+def main():
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    eval_model = os.environ.get("EVAL_MODEL_DEPLOYMENT", "gpt-5-4-mini")
+    if not endpoint:
+        print("❌ AZURE_AI_PROJECT_ENDPOINT 環境変数を設定してください")
+        sys.exit(1)
 
-    # 評価データセット（代表的なパイプライン入出力ペア）
+    print(f"🔗 プロジェクト: {endpoint}")
+    print(f"🤖 評価モデル: {eval_model}")
+
+    from azure.ai.evaluation import CoherenceEvaluator, FluencyEvaluator, RelevanceEvaluator
+
+    # AI Services のリソースレベル endpoint を導出
+    # social-ai-studio パターン: project endpoint からスキーム + ホスト部分のみ抽出
+    parsed = urlparse(endpoint)
+    azure_endpoint = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else endpoint
+
+    # AAD トークンを api_key として渡す（social-ai-studio パターン）
+    try:
+        from azure.identity import DefaultAzureCredential
+
+        credential = DefaultAzureCredential()
+        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        api_key = token.token
+    except Exception as e:
+        print(f"❌ 認証に失敗: {e}")
+        sys.exit(1)
+
+    model_config = {
+        "azure_endpoint": azure_endpoint,
+        "azure_deployment": eval_model,
+        "api_version": "2024-10-21",
+        "api_key": api_key,
+    }
+
     eval_data = [
         {
             "query": "沖縄3泊4日のファミリー向け春季プランを作って",
@@ -50,48 +75,34 @@ def run_text_evaluation(project: AIProjectClient) -> dict:
         },
     ]
 
-    # 評価実行
-    try:
-        evaluation = project.evaluations.create(
-            display_name="travel-pipeline-quality",
-            description="旅行マーケティングパイプラインの品質評価",
-            data=EvaluationDataset(
-                inline=InlineEvaluationDataset(rows=eval_data),
-            ),
-            evaluators={
-                "coherence": Evaluator(id="coherence"),
-                "fluency": Evaluator(id="fluency"),
-                "groundedness": Evaluator(id="groundedness"),
-                "relevance": Evaluator(id="relevance"),
-            },
-        )
-        print(f"✅ 評価を作成しました: {evaluation.id}")
-        print(f"   名前: {evaluation.display_name}")
-        return {"id": evaluation.id, "status": "created"}
-    except Exception as e:
-        print(f"⚠️ 評価作成に失敗: {e}")
-        print("   Foundry ポータルで手動評価をセットアップしてください。")
-        return {"status": "failed", "error": str(e)}
+    evaluators = {
+        "relevance": RelevanceEvaluator(model_config=model_config),
+        "coherence": CoherenceEvaluator(model_config=model_config),
+        "fluency": FluencyEvaluator(model_config=model_config),
+    }
 
+    print("\n📊 品質評価を実行中...")
+    results = []
+    for i, data in enumerate(eval_data):
+        print(f"\n--- 評価 {i + 1}/{len(eval_data)} ---")
+        print(f"  クエリ: {data['query'][:50]}...")
+        scores: dict[str, object] = {}
+        for name, evaluator in evaluators.items():
+            try:
+                result = evaluator(query=data["query"], response=data["response"])
+                score = result.get(name, result.get(f"gpt_{name}", "N/A"))
+                reason = result.get(f"{name}_reason", "")
+                scores[name] = float(score) if score is not None else -1
+                if reason:
+                    scores[f"{name}_reason"] = reason
+                print(f"  {name}: {score}")
+            except Exception as e:
+                print(f"  {name}: エラー ({e})")
+                scores[name] = -1
+        results.append({"query": data["query"][:50], "scores": scores})
 
-def main():
-    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
-    if not endpoint:
-        print("❌ AZURE_AI_PROJECT_ENDPOINT 環境変数を設定してください")
-        sys.exit(1)
-
-    print(f"🔗 プロジェクト: {endpoint}")
-    project = AIProjectClient(
-        endpoint=endpoint,
-        credential=DefaultAzureCredential(),
-    )
-
-    print("\n📊 テキスト品質評価を実行中...")
-    result = run_text_evaluation(project)
-    print(f"\n結果: {json.dumps(result, indent=2, ensure_ascii=False)}")
-
-    print("\n✅ Foundry Evaluations セットアップ完了！")
-    print("   Foundry ポータルの Evaluations ダッシュボードで結果を確認できます。")
+    print(f"\n📋 結果サマリ:\n{json.dumps(results, indent=2, ensure_ascii=False)}")
+    print("\n✅ 評価完了！")
 
 
 if __name__ == "__main__":

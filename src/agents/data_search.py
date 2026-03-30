@@ -77,7 +77,7 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
         conn = pyodbc.connect(
             f"Driver={{ODBC Driver 18 for SQL Server}};"
             f"Server={endpoint};"
-            f"Database=lakehouse;"
+            f"Database=Travel_Lakehouse;"
             f"Encrypt=yes;"
             f"TrustServerCertificate=no",
             attrs_before={1256: token_struct},
@@ -120,7 +120,7 @@ def _get_sales_data_from_fabric(
     season: str | None = None,
     region: str | None = None,
 ) -> list[dict]:
-    """Fabric Lakehouse の sales_history テーブルから集約データを取得する。
+    """Fabric Lakehouse の sales_results テーブルから集約データを取得する。
 
     SQL 側で季節・地域フィルタと集約を実行し、結果を返す。
     取得できなかった場合は空リストを返す。
@@ -162,7 +162,7 @@ def _get_sales_data_from_fabric(
             SUM(CAST(pax AS INT)) AS pax,
             MIN(customer_segment) AS customer_segment,
             COUNT(*) AS booking_count
-        FROM sales_history
+        FROM sales_results
         {where_sql}
         GROUP BY
             plan_name,

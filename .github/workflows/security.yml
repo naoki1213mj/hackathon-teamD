@@ -86,3 +86,9 @@ jobs:
           uv sync --frozen
           uv run pip-audit
         continue-on-error: true
+
+      - name: bandit (Python code security)
+        run: |
+          uv run pip install bandit
+          uv run bandit -r src/ -ll --skip B101
+        continue-on-error: true
