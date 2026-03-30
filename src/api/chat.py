@@ -317,6 +317,24 @@ def _extract_plan_title(plan_markdown: str) -> str:
     return "旅行マーケティング企画書"
 
 
+def _extract_corrected_plan(regulation_output: str) -> str | None:
+    """Agent3 の出力から修正済み企画書セクションを抽出する。"""
+    markers = [
+        r"##\s*(?:修正済み|修正を反映した).*?企画書",
+        r"##\s*4\.\s*修正",
+        r"---\s*\n\s*#\s+",
+    ]
+    for pattern in markers:
+        match = re.search(pattern, regulation_output)
+        if match:
+            return regulation_output[match.start():]
+    # マーカーが見つからない場合は最後の "# " 見出し以降を返す
+    last_heading = regulation_output.rfind("\n# ")
+    if last_heading > len(regulation_output) // 2:
+        return regulation_output[last_heading + 1:]
+    return None
+
+
 async def _build_brochure_fallback_outcome(
     events: list[str],
     source_text: str,
@@ -1144,6 +1162,17 @@ async def _mock_post_approval_events(conversation_id: str):
     )
     await asyncio.sleep(0.2)
 
+    # Mock 販促動画 URL
+    yield format_sse(
+        SSEEventType.TEXT,
+        {
+            "content": "https://example.com/mock-promo-video.mp4",
+            "agent": "brochure-gen-agent",
+            "content_type": "video",
+        },
+    )
+    await asyncio.sleep(0.2)
+
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
         {
@@ -1374,7 +1403,21 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         return
     total_tool_calls += regulation_outcome["tool_calls"]
 
-    brochure_input = context["plan_markdown"]
+    # Agent3 の出力から修正済み企画書を抽出。見つからなければ元の企画書を使用
+    brochure_input = _extract_corrected_plan(regulation_outcome["text"]) or context["plan_markdown"]
+
+    # 旅行先を入力に明示（画像生成の精度向上）
+    destination_match = re.search(r'(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]', brochure_input)
+    if destination_match:
+        destination_text = destination_match.group(1).strip()
+    else:
+        destination_text = None
+        for place in ['北海道', '沖縄', '京都', '東京', '九州', '東北', '四国', '北陸']:
+            if place in brochure_input:
+                destination_text = place
+                break
+    if destination_text:
+        brochure_input = f"[旅行先: {destination_text}]\n\n{brochure_input}"
 
     # 既存パンフレット参照（Content Understanding）
     reference_pdf = _get_reference_brochure_path()
@@ -1393,6 +1436,30 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     if not brochure_outcome["success"]:
         return
     total_tool_calls += brochure_outcome["tool_calls"]
+
+    # 販促動画のポーリング（Photo Avatar バッチジョブ）
+    from src.agents.brochure_gen import poll_video_job, pop_pending_video_job
+
+    video_job = pop_pending_video_job()
+    if video_job and video_job.get("job_id"):
+        yield format_sse(
+            SSEEventType.TEXT,
+            {
+                "content": "🎬 販促動画を生成中です...",
+                "agent": "brochure-gen-agent",
+                "content_type": "text",
+            },
+        )
+        video_url = await poll_video_job(video_job["job_id"], max_wait=120)
+        if video_url:
+            yield format_sse(
+                SSEEventType.TEXT,
+                {
+                    "content": video_url,
+                    "agent": "brochure-gen-agent",
+                    "content_type": "video",
+                },
+            )
 
     review_input = "\n\n".join(
         part

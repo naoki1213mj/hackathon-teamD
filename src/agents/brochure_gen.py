@@ -165,6 +165,67 @@ def pop_pending_video_job() -> dict[str, str] | None:
         return job
 
 
+async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
+    """Photo Avatar バッチジョブの完了をポーリングし、動画 URL を返す。
+
+    Args:
+        job_id: バッチ合成ジョブ ID
+        max_wait: 最大待機秒数（デフォルト 3 分）
+
+    Returns:
+        動画の URL（完了時）または None（タイムアウト/エラー）
+    """
+    settings = get_settings()
+    speech_endpoint = settings.get("speech_service_endpoint", "")
+    if not speech_endpoint:
+        return None
+
+    try:
+        credential = DefaultAzureCredential()
+        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    except (ValueError, OSError, Exception) as exc:
+        logger.warning("Photo Avatar ポーリング: トークン取得失敗: %s", exc)
+        return None
+
+    poll_url = (
+        f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}"
+        f"?api-version=2024-08-01"
+    )
+    headers = {"Authorization": f"Bearer {token.token}"}
+
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            req = urllib.request.Request(poll_url, headers=headers, method="GET")
+            resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+            data = json.loads(resp.read().decode())
+            status = data.get("status", "")
+
+            if status == "Succeeded":
+                outputs = data.get("outputs", {})
+                video_url = outputs.get("result", "")
+                if video_url:
+                    logger.info("Photo Avatar 動画生成完了: %s", video_url)
+                    return video_url
+                logger.warning("Photo Avatar: Succeeded だが result URL なし")
+                return None
+
+            if status in ("Failed", "Cancelled"):
+                logger.warning("Photo Avatar ジョブ失敗: status=%s", status)
+                return None
+
+            logger.debug("Photo Avatar ポーリング中: status=%s", status)
+        except urllib.error.URLError as exc:
+            logger.warning("Photo Avatar ポーリング通信エラー: %s", exc)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Photo Avatar ポーリングエラー: %s", exc)
+
+        await asyncio.sleep(10)
+
+    logger.warning("Photo Avatar ポーリングタイムアウト (job_id=%s)", job_id)
+    return None
+
+
 # --- ツール定義 ---
 
 
@@ -437,7 +498,20 @@ Agent3 が規制チェック済みの企画書（Markdown）
 - `lang="ja"` を html タグに設定
 - フッターに**旅行業登録番号**と**取引条件**を必ず挿入
 - 企画書のキャッチコピー・ターゲット・プラン概要を反映
+- **`generate_hero_image` で生成した画像のプレースホルダーとして、HTML 内に `<img src="HERO_IMAGE" alt="メインビジュアル" class="w-full rounded-lg" />` を配置すること**
 - 視覚的に魅力的なデザイン（旅行の雰囲気が伝わるように）
+
+## 画像生成のガイドライン
+- 入力の企画書から**旅行先（目的地）**を必ず抽出してください
+- `generate_hero_image` を呼ぶとき:
+  - `destination` パラメータに旅行先の英語名を設定（例: 北海道→"Hokkaido", 沖縄→"Okinawa"）
+  - `prompt` にその旅行先の特徴的な景色を具体的に記述
+  - 例: 北海道なら "snowy mountains, lavender fields, fresh seafood market"
+  - 例: 沖縄なら "tropical beach, coral reef, Shuri Castle"
+- `generate_banner_image` を呼ぶとき:
+  - `prompt` に旅行先名と季節を英語で含める
+  - 例: "Spring Hokkaido travel promotion, cherry blossoms and snow mountains"
+- **絶対に他の地域の名所を混ぜないでください**（北海道プランに富士山を入れない等）
 
 ## ツール使用ルール
 - `generate_hero_image`: 目的地のメインビジュアルを生成（英語プロンプト推奨）
