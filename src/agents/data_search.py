@@ -375,7 +375,7 @@ def create_data_search_agent(model_settings: dict | None = None):
         deployment_name=settings["model_name"],
     )
     # Code Interpreter: Foundry Agent Service 組み込みツール（§3.5 AG1-06）
-    code_interpreter_tool: dict = {"type": "code_interpreter"}
+    code_interpreter_tool = client.get_code_interpreter_tool()
     agent_kwargs: dict = {
         "name": "data-search-agent",
         "instructions": INSTRUCTIONS,
