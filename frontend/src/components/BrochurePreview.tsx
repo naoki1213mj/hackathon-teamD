@@ -17,13 +17,15 @@ export function BrochurePreview({ contents, t }: BrochurePreviewProps) {
         {t('section.brochure')}
       </h3>
       <div className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-bg)]">
-        <iframe
-          srcDoc={htmlContent.content}
-          title={t('section.brochure')}
-          className="w-full border-0 bg-white"
-          sandbox=""
-          style={{ minHeight: '60vh', height: '80vh' }}
-        />
+        <div style={{ zoom: 0.45 }}>
+          <iframe
+            srcDoc={htmlContent.content}
+            title={t('section.brochure')}
+            className="w-full border-0 bg-white"
+            sandbox=""
+            style={{ height: '1400px' }}
+          />
+        </div>
       </div>
     </div>
   )

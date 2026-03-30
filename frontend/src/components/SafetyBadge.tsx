@@ -27,9 +27,8 @@ export function SafetyBadge({ result, t }: SafetyBadgeProps) {
           : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300'
       }`}
     >
-      <span className={`h-2 w-2 rounded-full ${isSafe ? 'bg-emerald-500' : isError ? 'bg-amber-500' : 'bg-red-500'}`} />
+      <span>{isSafe ? '✅' : isError ? '❓' : '⚠️'}</span>
       <span>{isSafe ? t('safety.safe') : isError ? t('safety.error') : t('safety.warning')}</span>
-      <span className="text-[10px] opacity-80">H{result.hate} S{result.self_harm} X{result.sexual} V{result.violence}</span>
     </span>
   )
 }
