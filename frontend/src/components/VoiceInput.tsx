@@ -67,18 +67,18 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const [useVoiceLive, setUseVoiceLive] = useState<boolean | null>(null)
   const clientRef = useRef<VoiceLiveClient | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-  const stateRef = useRef<VoiceState>('idle')
-  stateRef.current = state
 
   // Voice Live 利用可能性チェック — MSAL.js トークン取得を試みる
   useEffect(() => {
-    // Voice Live はユーザー委任トークンが必要。
-    // バックエンドの /api/voice-token はユーザー認証情報を返す。
-    // MSAL.js でブラウザからトークン取得できる場合のみ有効化。
+    // Voice Live が以前失敗している場合はスキップ（Edge リダイレクト後の再試行防止）
+    if (sessionStorage.getItem('voiceLiveFailed') === 'true') {
+      setUseVoiceLive(false)
+      return
+    }
+
     fetch('/api/voice-config')
       .then(r => r.json())
       .then((data: { agent_name?: string; client_id?: string }) => {
-        // client_id が設定されていれば Voice Live 利用可能
         setUseVoiceLive(!!data.client_id)
       })
       .catch(() => setUseVoiceLive(false))
@@ -92,7 +92,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
     }
     const recognition = new SpeechRecognitionClass()
     recognition.lang = 'ja-JP'
-    recognition.continuous = true
+    recognition.continuous = false
     recognition.interimResults = true
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -108,24 +108,16 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       if (finalText) {
         onTranscript(finalText)
         setTranscript('')
-        // continuous モードなので停止しない — ユーザーが停止ボタンを押すまで継続
       } else {
         setTranscript(interim)
       }
     }
     recognition.onerror = (e: { error: string }) => {
-      // no-speech は正常（沈黙時に発生）— 無視して継続
-      if (e.error === 'no-speech') return
       console.warn('Web Speech error:', e.error)
       setState('idle')
     }
     recognition.onend = () => {
-      // continuous モードでも Edge は時々 onend を発火する — 自動再開
-      if (stateRef.current === 'listening' && recognitionRef.current) {
-        try { recognitionRef.current.start() } catch { setState('idle') }
-      } else {
-        setState('idle')
-      }
+      setState('idle')
     }
 
     recognition.start()
@@ -196,8 +188,8 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       clientRef.current = client
     } catch (err) {
       console.warn('Voice Live 接続失敗、Web Speech API にフォールバック:', err)
+      sessionStorage.setItem('voiceLiveFailed', 'true')
       setState('idle')
-      // Voice Live が使えない場合は Web Speech API にフォールバック
       setUseVoiceLive(false)
       startWebSpeech()
     }
