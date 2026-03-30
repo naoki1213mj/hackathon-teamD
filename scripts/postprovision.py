@@ -219,6 +219,88 @@ def apply_ai_gateway_policy(
 
 
 # ---------------------------------------------------------------------------
+# Step 3: Voice Live 用 Foundry Prompt Agent を作成
+# ---------------------------------------------------------------------------
+
+
+def create_voice_agent(
+    project_endpoint: str,
+    subscription_id: str,
+    rg: str,
+) -> None:
+    """Voice Live 用の Foundry Prompt Agent を作成する。"""
+    ai_services_name = project_endpoint.split("//")[1].split(".")[0]
+    project_name = project_endpoint.rstrip("/").split("/")[-1]
+
+    token = _get_token()
+
+    agent_name = "travel-voice-orchestrator"
+
+    # Voice Live 設定
+    voice_live_config = json.dumps({
+        "session": {
+            "voice": {
+                "name": "ja-JP-NanamiNeural",
+                "type": "azure-standard",
+                "temperature": 0.8,
+            },
+            "input_audio_transcription": {
+                "model": "azure-speech",
+            },
+            "turn_detection": {
+                "type": "azure_semantic_vad",
+                "silence_duration_ms": 500,
+            },
+            "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+            "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
+        }
+    })
+
+    # メタデータに Voice Live 設定を格納（512文字制限のためチャンク化）
+    metadata: dict[str, str] = {}
+    limit = 512
+    metadata["microsoft.voice-live.configuration"] = voice_live_config[:limit]
+    remaining = voice_live_config[limit:]
+    chunk_num = 1
+    while remaining:
+        metadata[f"microsoft.voice-live.configuration.{chunk_num}"] = remaining[:limit]
+        remaining = remaining[limit:]
+        chunk_num += 1
+
+    url = (
+        f"https://management.azure.com/subscriptions/{subscription_id}"
+        f"/resourceGroups/{rg}"
+        f"/providers/Microsoft.CognitiveServices/accounts/{ai_services_name}"
+        f"/projects/{project_name}/agents/{agent_name}/versions/1.0"
+        "?api-version=2025-04-01-preview"
+    )
+
+    body = {
+        "properties": {
+            "definition": {
+                "type": "PromptAgent",
+                "model": "gpt-5-4-mini",
+                "instructions": (
+                    "あなたは旅行マーケティングのアシスタントです。\n"
+                    "ユーザーの音声指示を聞き取り、旅行プランの企画を支援します。\n"
+                    "ユーザーが旅行プランの企画を依頼したら、具体的な旅行先・季節・ターゲット・予算を確認し、\n"
+                    "企画の方向性を提案してください。\n"
+                    "日本語で応答してください。"
+                ),
+            },
+            "metadata": metadata,
+        }
+    }
+
+    logger.info("Voice Agent を作成中: %s", agent_name)
+    result = _rest_call(url, method="PUT", body=body, token=token)
+    if result is not None:
+        logger.info("Voice Agent を作成しました: %s", agent_name)
+    else:
+        logger.warning("Voice Agent の作成に失敗しました")
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -271,6 +353,9 @@ def main() -> None:
 
     # Step 3: AI Gateway ポリシーを適用
     apply_ai_gateway_policy(subscription_id, rg, apim_name)
+
+    # Step 4: Voice Agent 作成
+    create_voice_agent(project_endpoint, subscription_id, rg)
 
     logger.info("postprovision 完了")
 

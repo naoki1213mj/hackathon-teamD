@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+/**
+ * 音声入力コンポーネント。
+ * Voice Live API が利用可能な場合は WebSocket で接続、
+ * 利用不可の場合は Web Speech API にフォールバック。
+ */
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void
@@ -6,7 +13,7 @@ interface VoiceInputProps {
   t: (key: string) => string
 }
 
-type VoiceState = 'idle' | 'listening' | 'processing'
+type VoiceState = 'idle' | 'connecting' | 'listening' | 'processing' | 'speaking' | 'error'
 
 // Web Speech API の型定義（ブラウザ互換）
 interface SpeechRecognitionEvent {
@@ -54,125 +61,161 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
 }
 
 export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProps) {
-  const [voiceState, setVoiceState] = useState<VoiceState>('idle')
-  const [isSupported] = useState(() => getSpeechRecognition() !== null)
-  const [interimText, setInterimText] = useState('')
+  const [state, setState] = useState<VoiceState>('idle')
+  const [transcript, setTranscript] = useState('')
+  const [useVoiceLive, setUseVoiceLive] = useState<boolean | null>(null)
+  const clientRef = useRef<VoiceLiveClient | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
 
-  // アンマウント時にクリーンアップ
+  // Voice Live 利用可能性チェック
   useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.onresult = null
-        recognitionRef.current.onerror = null
-        recognitionRef.current.onend = null
-        recognitionRef.current.abort()
-        recognitionRef.current = null
-      }
-    }
+    fetch('/api/voice-token')
+      .then(r => r.json())
+      .then((data: { endpoint?: string; token?: string; error?: string }) => {
+        setUseVoiceLive(!!data.endpoint && !!data.token && !data.error)
+      })
+      .catch(() => setUseVoiceLive(false))
   }, [])
 
-  const startListening = useCallback(() => {
+  const startWebSpeech = useCallback(() => {
     const SpeechRecognitionClass = getSpeechRecognition()
-    if (!SpeechRecognitionClass) return
-
+    if (!SpeechRecognitionClass) {
+      setState('error')
+      return
+    }
     const recognition = new SpeechRecognitionClass()
+    recognition.lang = 'ja-JP'
     recognition.continuous = false
     recognition.interimResults = true
-    recognition.lang = 'ja-JP'
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let final_transcript = ''
-      let interim_transcript = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        if (result.isFinal) {
-          final_transcript += result[0].transcript
+      let finalText = ''
+      let interim = ''
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalText += event.results[i][0].transcript
         } else {
-          interim_transcript += result[0].transcript
+          interim += event.results[i][0].transcript
         }
       }
-
-      if (final_transcript) {
-        setVoiceState('processing')
-        setInterimText('')
-        onTranscript(final_transcript)
-        setTimeout(() => setVoiceState('idle'), 500)
-      } else if (interim_transcript) {
-        setInterimText(interim_transcript)
+      if (finalText) {
+        onTranscript(finalText)
+        setTranscript('')
+        setState('idle')
+      } else {
+        setTranscript(interim)
       }
     }
+    recognition.onerror = () => setState('idle')
+    recognition.onend = () => setState('idle')
 
-    recognition.onerror = () => {
-      setVoiceState('idle')
-      setInterimText('')
-    }
-
-    recognition.onend = () => {
-      setVoiceState('idle')
-      recognitionRef.current = null
-    }
-
-    recognitionRef.current = recognition
-    setVoiceState('listening')
     recognition.start()
+    recognitionRef.current = recognition
+    setState('listening')
   }, [onTranscript])
 
-  const stopListening = useCallback(() => {
+  const startVoiceLive = useCallback(async () => {
+    setState('connecting')
+    try {
+      const resp = await fetch('/api/voice-token')
+      const data = (await resp.json()) as {
+        endpoint?: string; token?: string; project_name?: string;
+        api_version?: string; error?: string
+      }
+      if (data.error) throw new Error(data.error)
+
+      const config: VoiceLiveConfig = {
+        endpoint: data.endpoint || '',
+        token: data.token || '',
+        agentName: 'travel-voice-orchestrator',
+        projectName: data.project_name || '',
+        apiVersion: data.api_version || '2025-10-01',
+      }
+
+      const client = new VoiceLiveClient(config, {
+        onTranscript: (text, isFinal) => {
+          setTranscript(text)
+          if (isFinal) {
+            onTranscript(text)
+            setTranscript('')
+          }
+        },
+        onAgentText: () => {
+          // エージェント応答テキスト — 将来の UI 表示用
+        },
+        onError: (error) => {
+          console.error('Voice Live error:', error)
+          setState('error')
+        },
+        onStateChange: (s) => {
+          if (s === 'listening') setState('listening')
+          else if (s === 'processing') setState('processing')
+          else if (s === 'speaking') setState('speaking')
+          else if (s === 'connected') setState('listening')
+          else if (s === 'disconnected') setState('idle')
+          else if (s === 'connecting') setState('connecting')
+        },
+      })
+
+      await client.connect()
+      clientRef.current = client
+    } catch {
+      setState('error')
+      startWebSpeech()
+    }
+  }, [onTranscript, startWebSpeech])
+
+  const stop = useCallback(() => {
+    clientRef.current?.disconnect()
+    clientRef.current = null
     if (recognitionRef.current) {
       recognitionRef.current.stop()
+      recognitionRef.current = null
     }
-    setVoiceState('idle')
-    setInterimText('')
+    setState('idle')
+    setTranscript('')
   }, [])
 
-  const toggleVoice = useCallback(() => {
-    if (voiceState === 'listening') {
-      stopListening()
+  const toggle = useCallback(() => {
+    if (state !== 'idle') {
+      stop()
+    } else if (useVoiceLive) {
+      startVoiceLive()
     } else {
-      startListening()
+      startWebSpeech()
     }
-  }, [voiceState, startListening, stopListening])
+  }, [state, useVoiceLive, startVoiceLive, startWebSpeech, stop])
 
-  // ブラウザが Web Speech API をサポートしていない場合
-  if (!isSupported) {
-    return (
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled
-          className="inline-flex cursor-not-allowed items-center justify-center rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] p-2.5 text-[var(--text-secondary)] opacity-50"
-          aria-label={t('voice.button')}
-          title={t('voice.preview')}
-        >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-          </svg>
-        </button>
-        <span className="max-w-56 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs text-[var(--accent-strong)]">
-          {t('voice.unsupported')}
-        </span>
-      </div>
-    )
-  }
+  // アンマウント時にクリーンアップ
+  useEffect(() => () => stop(), [stop])
+
+  const isActive = state !== 'idle' && state !== 'error'
+  const stateLabel = state === 'listening' ? t('voice.listening')
+    : state === 'processing' ? t('voice.processing')
+    : state === 'speaking' ? '🔊'
+    : state === 'connecting' ? '...'
+    : state === 'error' ? t('voice.unsupported')
+    : ''
 
   return (
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={toggleVoice}
-        disabled={disabled || voiceState === 'processing'}
+        onClick={toggle}
+        disabled={disabled || useVoiceLive === null}
         className={`inline-flex items-center justify-center rounded-full border p-2.5 transition-all ${
-          voiceState === 'listening'
+          state === 'listening'
             ? 'animate-pulse border-red-400 bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400'
-            : voiceState === 'processing'
+            : state === 'processing'
               ? 'border-yellow-400 bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
-              : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              : state === 'speaking'
+                ? 'border-blue-400 bg-blue-50 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400'
+                : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
         } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
-        aria-label={voiceState === 'listening' ? t('voice.stop') : t('voice.button')}
-        title={voiceState === 'listening' ? t('voice.stop') : t('voice.label')}
+        aria-label={t('voice.label')}
+        title={useVoiceLive ? 'Voice Live' : t('voice.label')}
       >
-        {voiceState === 'listening' ? (
+        {isActive ? (
           <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
             <rect x="6" y="6" width="12" height="12" rx="2" />
           </svg>
@@ -182,15 +225,26 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
           </svg>
         )}
       </button>
-      {voiceState === 'listening' && (
-        <span className="max-w-56 truncate rounded-full bg-red-50 px-3 py-1 text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
-          {interimText || t('voice.listening')}
+      {stateLabel && (
+        <span className={`max-w-56 truncate rounded-full px-3 py-1 text-xs ${
+          state === 'listening'
+            ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+            : state === 'processing'
+              ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
+              : state === 'speaking'
+                ? 'bg-blue-50 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400'
+                : 'text-[var(--text-muted)]'
+        }`}>
+          {stateLabel}
         </span>
       )}
-      {voiceState === 'processing' && (
-        <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400">
-          {t('voice.processing')}
+      {transcript && (
+        <span className="max-w-[200px] truncate text-xs text-[var(--text-secondary)]">
+          {transcript}
         </span>
+      )}
+      {useVoiceLive && state === 'idle' && (
+        <span className="text-[10px] text-green-600 dark:text-green-400">Voice Live</span>
       )}
     </div>
   )

@@ -20,6 +20,7 @@ from src.api.chat import limiter
 from src.api.chat import router as chat_router
 from src.api.conversations import router as conversations_router
 from src.api.health import router as health_router
+from src.api.voice import router as voice_router
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(conversations_router)
+app.include_router(voice_router)
 
 # 静的ファイル配信（本番: Docker マルチステージビルドで frontend/dist を配信）
 if os.environ.get("SERVE_STATIC", "").lower() == "true":
