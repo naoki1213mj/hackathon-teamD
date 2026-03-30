@@ -17,6 +17,8 @@
   --accent-soft: rgba(15, 118, 110, 0.14);
   --input-bg: #f1f5f9;
   --input-border: rgba(15, 23, 42, 0.15);
+  --user-bubble-bg: #115e59;
+  --user-bubble-text: #ffffff;
   --warning-surface: #fff7ed;
   --warning-border: #fdba74;
   --warning-text: #9a3412;
@@ -44,6 +46,8 @@
   --accent-soft: rgba(45, 212, 191, 0.18);
   --input-bg: #1e293b;
   --input-border: rgba(148, 163, 184, 0.3);
+  --user-bubble-bg: #134e4a;
+  --user-bubble-text: #ccfbf1;
   --warning-surface: rgba(120, 53, 15, 0.28);
   --warning-border: rgba(251, 191, 36, 0.3);
   --warning-text: #fde68a;
