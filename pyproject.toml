@@ -17,6 +17,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "uvicorn>=0.42.0",
     "pyodbc>=5.2.0",
+    "agent-framework-github-copilot>=1.0.0b260319",
 ]
 
 [dependency-groups]

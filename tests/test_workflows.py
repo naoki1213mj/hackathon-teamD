@@ -1,5 +1,7 @@
 """Workflow オーケストレーションのテスト"""
 
+from unittest.mock import MagicMock, patch
+
 
 class TestWorkflowImport:
     """Workflow モジュールの import テスト"""
@@ -15,6 +17,49 @@ class TestWorkflowImport:
         from agent_framework.orchestrations import SequentialBuilder
 
         assert SequentialBuilder is not None
+
+
+class TestWorkflowCreation:
+    """Workflow 構築のテスト（エージェント作成をモック化）"""
+
+    def test_create_pipeline_workflow_returns_workflow(self):
+        """ワークフローが正常に構築されること"""
+        mock_agent = MagicMock()
+        mock_workflow = MagicMock()
+
+        with patch("src.workflows.create_data_search_agent", return_value=mock_agent) as m1, \
+             patch("src.workflows.create_marketing_plan_agent", return_value=mock_agent) as m2, \
+             patch("src.workflows.create_regulation_check_agent", return_value=mock_agent) as m3, \
+             patch("src.workflows.create_brochure_gen_agent", return_value=mock_agent) as m4, \
+             patch("src.workflows.SequentialBuilder") as mock_builder:
+            mock_builder.return_value.build.return_value = mock_workflow
+
+            from src.workflows import create_pipeline_workflow
+
+            workflow = create_pipeline_workflow()
+            assert workflow is mock_workflow
+            m1.assert_called_once()
+            m2.assert_called_once()
+            m3.assert_called_once()
+            m4.assert_called_once()
+
+    def test_create_pipeline_workflow_passes_four_participants(self):
+        """4 エージェントが participants として渡されること"""
+        agents = [MagicMock(name=f"agent{i}") for i in range(4)]
+
+        with patch("src.workflows.create_data_search_agent", return_value=agents[0]), \
+             patch("src.workflows.create_marketing_plan_agent", return_value=agents[1]), \
+             patch("src.workflows.create_regulation_check_agent", return_value=agents[2]), \
+             patch("src.workflows.create_brochure_gen_agent", return_value=agents[3]), \
+             patch("src.workflows.SequentialBuilder") as mock_builder:
+            mock_builder.return_value.build.return_value = MagicMock()
+
+            from src.workflows import create_pipeline_workflow
+
+            create_pipeline_workflow()
+            call_kwargs = mock_builder.call_args
+            participants = call_kwargs.kwargs.get("participants", call_kwargs.args[0] if call_kwargs.args else [])
+            assert len(participants) == 4
 
 
 class TestAgentCreation:

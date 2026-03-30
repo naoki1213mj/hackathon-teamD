@@ -11,7 +11,7 @@ from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel
 
-from src.config import get_settings
+from src.config import get_model_endpoint, get_settings
 
 try:
     import pyodbc
@@ -352,21 +352,34 @@ INSTRUCTIONS = """\
 4. **推奨**: データに基づく施策の方向性
 
 売上データと顧客レビューのツールを必ず使って分析してください。
+
+## データ可視化
+売上データを分析した後、Code Interpreter を使って以下の可視化を生成してください:
+- 売上推移の折れ線グラフまたは棒グラフ
+- 顧客セグメント別の円グラフ
+グラフは日本語ラベルで作成し、見やすい色使いにしてください。
 """
 
 
 def create_data_search_agent(model_settings: dict | None = None):
-    """データ検索エージェントを作成する"""
+    """データ検索エージェントを作成する。
+
+    Code Interpreter はリージョン依存（East US 2 / Sweden Central 推奨）。
+    本プロジェクトは East US 2 にデプロイするため利用可能。
+    """
     settings = get_settings()
+    endpoint = get_model_endpoint()
     client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
+        project_endpoint=endpoint,
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
+    # Code Interpreter: Foundry Agent Service 組み込みツール（§3.5 AG1-06）
+    code_interpreter_tool: dict = {"type": "code_interpreter"}
     agent_kwargs: dict = {
         "name": "data-search-agent",
         "instructions": INSTRUCTIONS,
-        "tools": [search_sales_history, search_customer_reviews],
+        "tools": [search_sales_history, search_customer_reviews, code_interpreter_tool],
     }
     if model_settings:
         if "temperature" in model_settings:

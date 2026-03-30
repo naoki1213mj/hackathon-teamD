@@ -10,6 +10,7 @@ import uuid
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import TypedDict
 
 from fastapi import APIRouter, Request
@@ -95,10 +96,10 @@ class AgentExecutionOutcome(TypedDict):
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
 _TOOL_EVENT_HINTS: dict[str, list[str]] = {
-    "data-search-agent": ["search_sales_history", "search_customer_reviews"],
+    "data-search-agent": ["search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
     "regulation-check-agent": ["search_knowledge_base", "check_ng_expressions", "check_travel_law_compliance"],
-    "brochure-gen-agent": ["generate_hero_image", "generate_banner_image"],
+    "brochure-gen-agent": ["generate_hero_image", "generate_banner_image", "analyze_existing_brochure", "generate_promo_video"],
 }
 
 
@@ -163,7 +164,11 @@ def _extract_result_text(result: object) -> str:
 
     try:
         outputs = result.get_outputs()
-    except Exception:
+    except (AttributeError, TypeError) as exc:
+        logger.debug("get_outputs() 失敗: %s", exc)
+        outputs = []
+    except Exception as exc:
+        logger.debug("get_outputs() で予期しないエラー: %s", exc)
         outputs = []
 
     messages: list[object] = []
@@ -202,6 +207,59 @@ def _extract_inline_images(html_content: str) -> list[dict[str, str]]:
     parser.feed(html_content)
     parser.close()
     return parser.images
+
+
+def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
+    """Code Interpreter の出力から画像データを抽出する。
+
+    Responses API の code_interpreter_call 出力アイテムを走査し、
+    画像出力（base64 data URI または file_id）を収集する。
+    Code Interpreter が画像を生成しなかった場合は空リストを返す。
+    """
+    images: list[dict[str, str]] = []
+    try:
+        outputs = result.get_outputs() if hasattr(result, "get_outputs") else []
+    except (AttributeError, TypeError) as exc:
+        logger.debug("Code Interpreter 画像抽出で get_outputs() 失敗: %s", exc)
+        return images
+    except Exception as exc:
+        logger.debug("Code Interpreter 画像抽出で予期しないエラー: %s", exc)
+        return images
+
+    all_items: list[object] = []
+    for output in outputs:
+        if isinstance(output, list):
+            all_items.extend(output)
+        else:
+            all_items.append(output)
+
+    for item in all_items:
+        item_type = getattr(item, "type", "")
+        if item_type != "code_interpreter_call":
+            continue
+        # code_interpreter_call の outputs を走査
+        ci_result = getattr(item, "code_interpreter", None) or item
+        ci_outputs = getattr(ci_result, "outputs", []) or []
+        for ci_out in ci_outputs:
+            out_type = getattr(ci_out, "type", "")
+            if out_type == "image":
+                image_obj = getattr(ci_out, "image", None)
+                if image_obj is None:
+                    continue
+                # inline base64 データがある場合
+                b64_data = getattr(image_obj, "data", "") or getattr(image_obj, "b64_json", "")
+                if b64_data:
+                    images.append({
+                        "url": f"data:image/png;base64,{b64_data}",
+                        "alt": "データ分析グラフ（Code Interpreter）",
+                    })
+                    continue
+                # file_id 参照の場合（ログのみ。ダウンロードは別途対応）
+                file_id = getattr(image_obj, "file_id", "")
+                if file_id:
+                    logger.info("Code Interpreter 画像ファイル検出: file_id=%s", file_id)
+
+    return images
 
 
 def _build_content_events(agent_name: str, result_text: str) -> list[str]:
@@ -582,7 +640,7 @@ async def _execute_agent(
 
     # Side-channel 画像の取得（brochure-gen-agent のツールが画像を side-channel に保存する）
     if agent_name == "brochure-gen-agent":
-        from src.agents.brochure_gen import pop_pending_images
+        from src.agents.brochure_gen import pop_pending_images, pop_pending_video_job
 
         pending = pop_pending_images()
         for img_key, img_data_uri in pending.items():
@@ -590,6 +648,31 @@ async def _execute_agent(
                 format_sse(
                     SSEEventType.IMAGE,
                     {"url": img_data_uri, "alt": f"Generated {img_key} image", "agent": agent_name},
+                )
+            )
+
+        # Side-channel 動画ジョブの取得（Photo Avatar バッチ合成）
+        video_job = pop_pending_video_job()
+        if video_job:
+            events.append(
+                format_sse(
+                    SSEEventType.TEXT,
+                    {
+                        "agent": "brochure-gen-agent",
+                        "content": f"🎬 販促動画を生成中です（ジョブID: {video_job['job_id']}）。完了まで数分かかります。",
+                        "content_type": "text",
+                    },
+                )
+            )
+
+    # Code Interpreter 画像の取得（data-search-agent がグラフを生成する場合）
+    if agent_name == "data-search-agent" and result is not None:
+        ci_images = _extract_code_interpreter_images(result)
+        for ci_img in ci_images:
+            events.append(
+                format_sse(
+                    SSEEventType.IMAGE,
+                    {"url": ci_img["url"], "alt": ci_img["alt"], "agent": agent_name},
                 )
             )
 
@@ -672,6 +755,9 @@ async def _maybe_run_quality_review(review_input: str) -> list[str]:
             return []
 
         return [format_sse(SSEEventType.TEXT, {"content": review_text, "agent": "quality-review-agent"})]
+    except (ImportError, ValueError, OSError) as exc:
+        logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
+        return []
     except Exception:
         logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
         return []
@@ -1012,6 +1098,27 @@ async def _mock_post_approval_events(conversation_id: str):
     )
     await asyncio.sleep(0.3)
 
+    # 販促動画生成（モック）
+    yield format_sse(
+        SSEEventType.TOOL_EVENT,
+        {
+            "tool": "generate_promo_video",
+            "status": "completed",
+            "agent": "brochure-gen-agent",
+        },
+    )
+    await asyncio.sleep(0.2)
+
+    yield format_sse(
+        SSEEventType.TEXT,
+        {
+            "agent": "brochure-gen-agent",
+            "content": "🎬 販促動画を生成中です（ジョブID: promo-mock-12345）。完了まで数分かかります。",
+            "content_type": "text",
+        },
+    )
+    await asyncio.sleep(0.2)
+
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
         {
@@ -1181,6 +1288,18 @@ async def _refine_events(refine_text: str, conversation_id: str):
             yield event
 
 
+def _get_reference_brochure_path() -> str | None:
+    """既存パンフレットPDFのパスを取得する。"""
+    settings = get_settings()
+    if not settings.get("content_understanding_endpoint"):
+        return None
+    # data/ ディレクトリに sample_brochure.pdf があれば使用
+    sample_path = Path(__file__).resolve().parent.parent.parent / "data" / "sample_brochure.pdf"
+    if sample_path.exists():
+        return str(sample_path)
+    return None
+
+
 async def _post_approval_events(user_response: str, conversation_id: str):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
     settings = get_settings()
@@ -1226,6 +1345,11 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     brochure_input = context["plan_markdown"]
     if len(brochure_input) > 2000:
         brochure_input = brochure_input[:2000] + "\n\n（以降省略）"
+
+    # 既存パンフレット参照（Content Understanding）
+    reference_pdf = _get_reference_brochure_path()
+    if reference_pdf:
+        brochure_input = f"[参考パンフレット: {reference_pdf}]\n\n{brochure_input}"
 
     brochure_outcome = await _execute_agent(
         agent_name="brochure-gen-agent",
@@ -1303,6 +1427,8 @@ async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_
         )
         await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
         logger.info("Logic Apps コールバック送信完了: conversation_id=%s", conversation_id)
+    except (ValueError, OSError) as exc:
+        logger.warning("Logic Apps コールバック送信に失敗（非致命的）: %s", exc)
     except Exception:
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）", exc_info=True)
 
@@ -1419,8 +1545,10 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 collected_events,
                 status=conversation_status,
             )
-        except Exception:
-            logger.debug("会話保存に失敗（非致命的）")
+        except (ValueError, OSError) as exc:
+            logger.debug("会話保存に失敗（非致命的）: %s", exc)
+        except Exception as exc:
+            logger.debug("会話保存で予期しないエラー（非致命的）: %s", exc)
 
         # Agent5: 品質レビュー（バックグラウンドで実行、オプショナル）
         settings = get_settings()
@@ -1444,6 +1572,8 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                                 SSEEventType.TEXT,
                                 {"content": review_text, "agent": "quality-review-agent"},
                             )
+            except (ImportError, ValueError, OSError) as exc:
+                logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
             except Exception:
                 logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
 
@@ -1508,6 +1638,8 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
                 events=merged_messages,
                 status=_conversation_status_from_events(merged_messages),
             )
+        except (ValueError, OSError) as exc:
+            logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
         except Exception:
             logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import urllib.request
 
@@ -13,7 +12,7 @@ from agent_framework import tool
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
-from src.config import get_settings
+from src.config import get_model_endpoint, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +69,11 @@ def _get_image_openai_client():
                 },
             )
             logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, _IMAGE_MODEL)
-        except Exception:
-            logger.exception("画像クライアント初期化失敗")
+        except (ImportError, ValueError, OSError) as exc:
+            logger.warning("画像クライアント初期化失敗: %s", exc)
+            _image_openai_client = None
+        except Exception as exc:
+            logger.exception("画像クライアント初期化で予期しないエラー: %s", exc)
             _image_openai_client = None
     return _image_openai_client
 
@@ -105,8 +107,11 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 
         b64_data = image_items[0].result
         return f"data:image/png;base64,{b64_data}"
-    except Exception:
-        logger.exception("画像生成に失敗。フォールバック画像を返します")
+    except (ValueError, OSError) as exc:
+        logger.warning("画像生成に失敗。フォールバック画像を返します: %s", exc)
+        return _FALLBACK_IMAGE
+    except Exception as exc:
+        logger.exception("画像生成で予期しないエラー。フォールバック画像を返します: %s", exc)
         return _FALLBACK_IMAGE
 
 
@@ -122,6 +127,19 @@ def pop_pending_images() -> dict[str, str]:
     images = _pending_images.copy()
     _pending_images = {}
     return images
+
+
+# --- Side-channel 動画ジョブストア ---
+# Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
+_pending_video_job: dict[str, str] | None = None
+
+
+def pop_pending_video_job() -> dict[str, str] | None:
+    """保留中の動画生成ジョブ情報を取得してクリアする。"""
+    global _pending_video_job
+    job = _pending_video_job
+    _pending_video_job = None
+    return job
 
 
 # --- ツール定義 ---
@@ -183,7 +201,8 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
     Args:
         pdf_path: 解析対象の PDF ファイルパス
     """
-    endpoint = os.environ.get("CONTENT_UNDERSTANDING_ENDPOINT", "")
+    settings = get_settings()
+    endpoint = settings.get("content_understanding_endpoint", "")
     if not endpoint:
         return "⚠️ PDF 解析は現在利用できません。CONTENT_UNDERSTANDING_ENDPOINT 環境変数を設定してください。"
 
@@ -325,10 +344,15 @@ async def generate_promo_video(
         with urllib.request.urlopen(request, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
+        # Side-channel にジョブ情報を保存
+        global _pending_video_job
+        actual_job_id = result.get("id", job_id)
+        _pending_video_job = {"job_id": actual_job_id, "status": "submitted"}
+
         return json.dumps(
             {
                 "status": "submitted",
-                "job_id": result.get("id", job_id),
+                "job_id": actual_job_id,
                 "message": (
                     f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_style}"
                 ),
@@ -357,14 +381,26 @@ INSTRUCTIONS = """\
 - HTML ブローシャは ```html で囲んで出力。Tailwind CSS 使用。レスポンシブ対応
 - `generate_hero_image` でメインビジュアル、`generate_banner_image` で SNS バナーを生成
 - フッターに旅行業登録番号と取引条件を挿入
+
+## 既存パンフレット参照
+`analyze_existing_brochure` ツールが利用可能な場合、既存のパンフレット PDF を解析して
+レイアウト構成・キャッチコピーのトーン・写真配置を参考にしてください。
+参考情報として取り込み、新しいプラン内容に合わせたブローシャを生成してください。
+入力に [参考パンフレット: ...] が含まれていれば、そのパスで `analyze_existing_brochure` を呼び出してください。
+
+## 販促紹介動画
+ブローシャと画像の生成後、`generate_promo_video` ツールを使って販促紹介動画を生成してください。
+企画書のサマリテキスト（100〜200文字）をアバターに読み上げさせます。
+SPEECH_SERVICE_ENDPOINT が設定されていない場合はスキップしてください。
 """
 
 
 def create_brochure_gen_agent(model_settings: dict | None = None):
     """ブローシャ＆画像生成エージェントを作成する"""
     settings = get_settings()
+    endpoint = get_model_endpoint()
     client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
+        project_endpoint=endpoint,
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
@@ -372,6 +408,8 @@ def create_brochure_gen_agent(model_settings: dict | None = None):
     agent_tools: list = [
         generate_hero_image,
         generate_banner_image,
+        analyze_existing_brochure,
+        generate_promo_video,
     ]
 
     agent_kwargs: dict = {

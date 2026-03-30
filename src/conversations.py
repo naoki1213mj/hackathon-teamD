@@ -24,8 +24,11 @@ def _get_cosmos_client():
     except ImportError:
         logger.warning("azure-cosmos がインストールされていません")
         return None
-    except Exception:
-        logger.exception("Cosmos DB クライアントの作成に失敗")
+    except (ValueError, OSError) as exc:
+        logger.warning("Cosmos DB クライアントの作成に失敗: %s", exc)
+        return None
+    except Exception as exc:
+        logger.exception("Cosmos DB クライアントの作成で予期しないエラー: %s", exc)
         return None
 
 
@@ -37,8 +40,11 @@ def _get_container():
     try:
         database = client.get_database_client("travel-marketing")
         return database.get_container_client("conversations")
-    except Exception:
-        logger.exception("Cosmos DB コンテナの取得に失敗")
+    except (ValueError, OSError) as exc:
+        logger.warning("Cosmos DB コンテナの取得に失敗: %s", exc)
+        return None
+    except Exception as exc:
+        logger.exception("Cosmos DB コンテナの取得で予期しないエラー: %s", exc)
         return None
 
 
@@ -71,8 +77,10 @@ async def save_conversation(
             container.upsert_item(doc)
             logger.info("会話 %s を Cosmos DB に保存", conversation_id)
             return
-        except Exception:
-            logger.exception("Cosmos DB への保存に失敗、インメモリにフォールバック")
+        except (ValueError, OSError) as exc:
+            logger.warning("Cosmos DB への保存に失敗、インメモリにフォールバック: %s", exc)
+        except Exception as exc:
+            logger.exception("Cosmos DB への保存で予期しないエラー、インメモリにフォールバック: %s", exc)
 
     _memory_store[conversation_id] = doc
     logger.info("会話 %s をインメモリに保存", conversation_id)
@@ -84,8 +92,11 @@ async def get_conversation(conversation_id: str) -> dict | None:
     if container:
         try:
             return container.read_item(item=conversation_id, partition_key="demo-user")
-        except Exception:
-            logger.debug("Cosmos DB から会話 %s が見つからない", conversation_id)
+        except (ValueError, OSError) as exc:
+            logger.debug("Cosmos DB から会話 %s が見つからない: %s", conversation_id, exc)
+            return None
+        except Exception as exc:
+            logger.debug("Cosmos DB から会話 %s の取得で予期しないエラー: %s", conversation_id, exc)
             return None
 
     return _memory_store.get(conversation_id)
@@ -105,8 +116,11 @@ async def list_conversations(limit: int = 20) -> list[dict]:
                 )
             )
             return items
-        except Exception:
-            logger.exception("Cosmos DB からの一覧取得に失敗")
+        except (ValueError, OSError) as exc:
+            logger.warning("Cosmos DB からの一覧取得に失敗: %s", exc)
+            return []
+        except Exception as exc:
+            logger.exception("Cosmos DB からの一覧取得で予期しないエラー: %s", exc)
             return []
 
     return sorted(_memory_store.values(), key=lambda x: x.get("created_at", ""), reverse=True)[:limit]
@@ -128,8 +142,10 @@ async def save_replay_data(conversation_id: str, events_with_timing: list[dict])
         try:
             container.upsert_item(replay_doc)
             return
-        except Exception:
-            logger.exception("Cosmos DB へのリプレイデータ保存に失敗")
+        except (ValueError, OSError) as exc:
+            logger.warning("Cosmos DB へのリプレイデータ保存に失敗: %s", exc)
+        except Exception as exc:
+            logger.exception("Cosmos DB へのリプレイデータ保存で予期しないエラー: %s", exc)
 
     _memory_store[f"replay-{conversation_id}"] = replay_doc
 
@@ -141,8 +157,10 @@ async def get_replay_data(conversation_id: str) -> list[dict] | None:
         try:
             doc = container.read_item(item=f"replay-{conversation_id}", partition_key="demo-user")
             return doc.get("events", [])
-        except Exception:
-            pass
+        except (ValueError, OSError) as exc:
+            logger.debug("Cosmos DB からリプレイデータ取得失敗: %s", exc)
+        except Exception as exc:
+            logger.debug("Cosmos DB からリプレイデータ取得で予期しないエラー: %s", exc)
 
     doc = _memory_store.get(f"replay-{conversation_id}")
     if doc:
@@ -160,7 +178,9 @@ async def get_replay_data(conversation_id: str) -> list[dict] | None:
             if isinstance(data, list):
                 return data
             return data.get("events", [])
-        except Exception:
-            logger.exception("リプレイ JSON の読み込みに失敗")
+        except (ValueError, OSError) as exc:
+            logger.warning("リプレイ JSON の読み込みに失敗: %s", exc)
+        except Exception as exc:
+            logger.exception("リプレイ JSON の読み込みで予期しないエラー: %s", exc)
 
     return None

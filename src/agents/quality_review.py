@@ -1,16 +1,15 @@
 """品質レビューエージェント。
 
 Agent4 の成果物生成後に実行し、品質チェックを行う。
-Agent Framework の AzureOpenAIResponsesClient でレビューを実施する。
+GitHubCopilotAgent が利用可能な場合はそちらを使用し、
+未設定時は AzureOpenAIResponsesClient ベースのエージェントにフォールバックする。
 """
 
 import logging
 
 from agent_framework import tool
-from agent_framework.azure import AzureOpenAIResponsesClient
-from azure.identity import DefaultAzureCredential
 
-from src.config import get_settings
+from src.config import get_model_endpoint, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -79,25 +78,60 @@ INSTRUCTIONS = """\
 3. テキストのトーン一貫性（ブランドガイドライン準拠）
 4. 旅行業法の表記ルール準拠
 
-ツールを使って自動チェックし、結果をまとめてください。
+ツールを使って自動チェックし、チェック結果を Markdown のチェックリスト形式で出力してください。
 問題がなければ「品質チェック合格」と明記してください。
 """
 
+_REVIEW_TOOLS = [review_plan_quality, review_brochure_accessibility]
+
 
 def create_review_agent():
-    """品質レビューエージェントを作成する。"""
+    """品質レビューエージェントを作成する。
+
+    GitHubCopilotAgent が利用可能な場合はそちらを使用し、
+    未設定時は従来の AzureOpenAIResponsesClient ベースのエージェントにフォールバックする。
+    """
+    # GitHubCopilotAgent を優先的に試行
+    try:
+        from agent_framework.github import GitHubCopilotAgent
+
+        review_agent = GitHubCopilotAgent(
+            name="quality-review-agent",
+            instructions=INSTRUCTIONS,
+            tools=_REVIEW_TOOLS,
+        )
+        logger.info("GitHubCopilotAgent で品質レビューエージェントを作成しました")
+        return review_agent
+    except (ImportError, ValueError, OSError) as exc:
+        logger.info(
+            "GitHubCopilotAgent 未設定のため従来エージェントにフォールバック: %s", exc
+        )
+    except Exception as exc:
+        logger.warning(
+            "GitHubCopilotAgent の初期化で予期しないエラー: %s", exc
+        )
+
+    # フォールバック: AzureOpenAIResponsesClient ベースのエージェント
     settings = get_settings()
     if not settings["project_endpoint"]:
         logger.info("Project endpoint 未設定のためレビューエージェントはスキップ")
         return None
 
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
-        credential=DefaultAzureCredential(),
-        deployment_name=settings["model_name"],
-    )
-    return client.as_agent(
-        name="quality-review-agent",
-        instructions=INSTRUCTIONS,
-        tools=[review_plan_quality, review_brochure_accessibility],
-    )
+    try:
+        from agent_framework.azure import AzureOpenAIResponsesClient
+        from azure.identity import DefaultAzureCredential
+
+        endpoint = get_model_endpoint()
+        client = AzureOpenAIResponsesClient(
+            project_endpoint=endpoint,
+            credential=DefaultAzureCredential(),
+            deployment_name=settings["model_name"],
+        )
+        return client.as_agent(
+            name="quality-review-agent",
+            instructions=INSTRUCTIONS,
+            tools=_REVIEW_TOOLS,
+        )
+    except (ImportError, ValueError, OSError) as exc:
+        logger.warning("AzureOpenAIResponsesClient の初期化に失敗: %s", exc)
+        return None

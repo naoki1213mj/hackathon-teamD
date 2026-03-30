@@ -24,6 +24,7 @@ class AppSettings(TypedDict):
     speech_service_endpoint: str
     speech_service_region: str
     logic_app_callback_url: str
+    apim_gateway_url: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -40,6 +41,7 @@ _ENV_MAP: dict[str, str] = {
     "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
     "SPEECH_SERVICE_REGION": "speech_service_region",
     "LOGIC_APP_CALLBACK_URL": "logic_app_callback_url",
+    "APIM_GATEWAY_URL": "apim_gateway_url",
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -65,6 +67,20 @@ def is_production_environment() -> bool:
     """本番相当環境かどうかを返す。"""
     environment = os.environ.get("ENVIRONMENT", _DEFAULTS["environment"]).lower()
     return environment in _PRODUCTION_ENVIRONMENTS
+
+
+def get_model_endpoint() -> str:
+    """モデル呼び出し用のエンドポイントを返す。
+
+    APIM AI Gateway が設定されている場合はそちらを優先し、
+    トークンレート制限・メトリクス収集・トレーシングを有効化する。
+    未設定時は Foundry プロジェクトエンドポイントに直接接続する。
+    """
+    settings = get_settings()
+    apim_url = settings.get("apim_gateway_url", "")  # type: ignore[arg-type]
+    if apim_url:
+        return apim_url
+    return settings["project_endpoint"]
 
 
 def get_missing_required_settings() -> list[str]:
