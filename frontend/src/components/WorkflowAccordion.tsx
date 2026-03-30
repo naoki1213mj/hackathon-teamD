@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
-import type { AgentProgress, TextContent, ToolEvent, PipelineMetrics, ErrorData } from '../hooks/useSSE'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
 import { AnalysisView } from './AnalysisView'
+import { ErrorRetry } from './ErrorRetry'
 import { MarkdownView } from './MarkdownView'
+import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
 import { ToolEventBadges } from './ToolEventBadges'
-import { MetricsBar } from './MetricsBar'
-import { ErrorRetry } from './ErrorRetry'
 
 const STEPS = [
-  { key: 'data-search-agent', icon: '📊', labelKey: 'step.data_search' },
-  { key: 'marketing-plan-agent', icon: '📝', labelKey: 'step.marketing_plan' },
-  { key: 'regulation-check-agent', icon: '⚖️', labelKey: 'step.regulation' },
-  { key: 'brochure-gen-agent', icon: '🎨', labelKey: 'step.brochure' },
+  { key: 'data-search-agent', icon: '📊', labelKey: 'step.data_search', step: 1 },
+  { key: 'marketing-plan-agent', icon: '📝', labelKey: 'step.marketing_plan', step: 2 },
+  { key: 'regulation-check-agent', icon: '⚖️', labelKey: 'step.regulation', step: 4 },
+  { key: 'brochure-gen-agent', icon: '🎨', labelKey: 'step.brochure', step: 5 },
 ]
 
 interface Props {
@@ -34,8 +34,8 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   // 折りたたみ状態をステップから導出（pure derived state）
   const autoCollapsed = useMemo(() => {
     const result: Record<string, boolean> = {}
-    STEPS.forEach((step, i) => {
-      if (i + 1 < currentStep) result[step.key] = true
+    STEPS.forEach((step) => {
+      if (step.step < currentStep) result[step.key] = true
       else if (step.key === currentAgent) result[step.key] = false
       else result[step.key] = false
     })
@@ -61,9 +61,9 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [currentAgent])
 
-  const getStatus = (stepKey: string, stepIndex: number) => {
+  const getStatus = (stepKey: string, stepNum: number) => {
     if (!agentProgress) return 'pending'
-    if (stepIndex + 1 < agentProgress.step) return 'completed'
+    if (stepNum < agentProgress.step) return 'completed'
     if (agentProgress.agent === stepKey && agentProgress.status === 'running') return 'active'
     if (agentProgress.agent === stepKey && agentProgress.status === 'completed') return 'completed'
     return 'pending'
@@ -74,8 +74,8 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
   return (
     <div className="space-y-2">
-      {STEPS.map((step, i) => {
-        const status = getStatus(step.key, i)
+      {STEPS.map((step) => {
+        const status = getStatus(step.key, step.step)
         const content = getContent(step.key)
         const sectionCollapsed = isSectionCollapsed(step.key)
         const isActive = status === 'active'
