@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
+import { getVoiceLiveToken } from '../lib/msal-auth'
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void
@@ -67,12 +68,16 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const clientRef = useRef<VoiceLiveClient | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
 
-  // Voice Live 利用可能性チェック
+  // Voice Live 利用可能性チェック — MSAL.js トークン取得を試みる
   useEffect(() => {
-    fetch('/api/voice-token')
+    // Voice Live はユーザー委任トークンが必要。
+    // バックエンドの /api/voice-token はユーザー認証情報を返す。
+    // MSAL.js でブラウザからトークン取得できる場合のみ有効化。
+    fetch('/api/voice-config')
       .then(r => r.json())
-      .then((data: { endpoint?: string; token?: string; error?: string }) => {
-        setUseVoiceLive(!!data.endpoint && !!data.token && !data.error)
+      .then((data: { agent_name?: string; client_id?: string }) => {
+        // client_id が設定されていれば Voice Live 利用可能
+        setUseVoiceLive(!!data.client_id)
       })
       .catch(() => setUseVoiceLive(false))
   }, [])
@@ -117,19 +122,33 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const startVoiceLive = useCallback(async () => {
     setState('connecting')
     try {
-      const resp = await fetch('/api/voice-token')
-      const data = (await resp.json()) as {
-        endpoint?: string; token?: string; project_name?: string;
-        api_version?: string; error?: string
+      // Voice Live 設定を取得（client_id, tenant_id, endpoint 等）
+      const configResp = await fetch('/api/voice-config')
+      const configData = (await configResp.json()) as {
+        client_id?: string; tenant_id?: string; endpoint?: string;
+        agent_name?: string; project_name?: string; api_version?: string
       }
-      if (data.error) throw new Error(data.error)
+
+      if (!configData.client_id || !configData.endpoint) {
+        throw new Error('Voice Live config missing client_id or endpoint')
+      }
+
+      // MSAL.js でユーザー委任トークンを取得
+      const token = await getVoiceLiveToken({
+        clientId: configData.client_id,
+        tenantId: configData.tenant_id || '',
+      })
+
+      if (!token) {
+        throw new Error('MSAL token acquisition failed')
+      }
 
       const config: VoiceLiveConfig = {
-        endpoint: data.endpoint || '',
-        token: data.token || '',
-        agentName: 'travel-voice-orchestrator',
-        projectName: data.project_name || '',
-        apiVersion: data.api_version || '2025-10-01',
+        endpoint: configData.endpoint,
+        token: token,
+        agentName: configData.agent_name || 'travel-voice-orchestrator',
+        projectName: configData.project_name || '',
+        apiVersion: configData.api_version || '2026-01-01-preview',
       }
 
       const client = new VoiceLiveClient(config, {

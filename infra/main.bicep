@@ -15,6 +15,9 @@ param location string
 @description('コンテナイメージ名（azd が自動設定する）')
 param imageName string = ''
 
+@description('Voice Live SPA アプリの Client ID（postprovision で設定）')
+param voiceSpaClientId string = ''
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -153,6 +156,8 @@ module containerApp 'modules/container-app.bicep' = {
     speechServiceEndpoint: aiFoundry.outputs.endpoint
     speechServiceRegion: location
     logicAppCallbackUrl: logicApp.outputs.callbackUrl
+    voiceSpaClientId: voiceSpaClientId
+    tenantId: tenant().tenantId
   }
 }
 

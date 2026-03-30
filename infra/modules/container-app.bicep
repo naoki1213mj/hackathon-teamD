@@ -16,6 +16,8 @@ param cosmosDbEndpoint string = ''
 param contentUnderstandingEndpoint string = ''
 param speechServiceEndpoint string = ''
 param speechServiceRegion string = ''
+param voiceSpaClientId string = ''
+param tenantId string = ''
 @secure()
 param logicAppCallbackUrl string = ''
 
@@ -72,6 +74,16 @@ var containerEnv = concat([
   {
     name: 'LOGIC_APP_CALLBACK_URL'
     secretRef: 'logic-app-callback-url'
+  }
+] : [], !empty(voiceSpaClientId) ? [
+  {
+    name: 'VOICE_SPA_CLIENT_ID'
+    value: voiceSpaClientId
+  }
+] : [], !empty(tenantId) ? [
+  {
+    name: 'AZURE_TENANT_ID'
+    value: tenantId
   }
 ] : [])
 

@@ -43,11 +43,28 @@ async def get_voice_token() -> JSONResponse:
 
 @router.get("/voice-config")
 async def get_voice_config() -> JSONResponse:
-    """Voice Live の設定情報を返す。"""
+    """Voice Live の MSAL 設定情報を返す。"""
     agent_name = os.environ.get("VOICE_AGENT_NAME", "travel-voice-orchestrator")
+    client_id = os.environ.get("VOICE_SPA_CLIENT_ID", "")
+    tenant_id = os.environ.get("AZURE_TENANT_ID", "")
+    resource_name = ""
+    project_name = ""
+    ep = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    if ep:
+        try:
+            resource_name = ep.split("//")[1].split(".")[0]
+            project_name = ep.rstrip("/").split("/")[-1]
+        except (IndexError, AttributeError):
+            pass
 
     return JSONResponse(content={
         "agent_name": agent_name,
+        "client_id": client_id,
+        "tenant_id": tenant_id,
+        "resource_name": resource_name,
+        "project_name": project_name,
         "voice": "ja-JP-NanamiNeural",
         "vad_type": "azure_semantic_vad",
+        "endpoint": f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime" if resource_name else "",
+        "api_version": "2026-01-01-preview",
     })

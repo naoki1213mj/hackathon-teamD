@@ -219,7 +219,81 @@ def apply_ai_gateway_policy(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Voice Live 用 Foundry Prompt Agent を作成
+# Step 3: Entra ID SPA アプリ登録（Voice Live ブラウザ認証用）
+# ---------------------------------------------------------------------------
+
+
+def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
+    """Voice Live 用の Entra ID SPA アプリ登録を作成する。"""
+    import os as _os
+
+    # 既存アプリの確認
+    result = subprocess.run(
+        ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    existing_id = result.stdout.strip()
+    if existing_id:
+        logger.info("Entra App 既存: %s (%s)", app_name, existing_id)
+        return existing_id
+
+    # 新規 SPA アプリ作成
+    result = subprocess.run(
+        [
+            "az", "ad", "app", "create",
+            "--display-name", app_name,
+            "--sign-in-audience", "AzureADMyOrg",
+            "--enable-id-token-issuance", "true",
+            "--web-redirect-uris", "",
+            "--query", "appId", "-o", "tsv",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.warning("Entra App 作成失敗: %s", result.stderr)
+        return None
+
+    app_id = result.stdout.strip()
+
+    # SPA リダイレクト URI を設定
+    container_app_url = _os.environ.get("SERVICE_WEB_ENDPOINTS", "").strip("[]\"' ")
+    redirect_uris = [
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ]
+    if container_app_url:
+        redirect_uris.append(container_app_url)
+
+    subprocess.run(
+        ["az", "ad", "app", "update", "--id", app_id, "--spa-redirect-uris", *redirect_uris],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # Microsoft Graph User.Read 権限を追加
+    subprocess.run(
+        [
+            "az", "ad", "app", "permission", "add",
+            "--id", app_id,
+            "--api", "00000003-0000-0000-c000-000000000000",
+            "--api-permissions", "e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    logger.info("Entra App 作成完了: %s (%s)", app_name, app_id)
+    return app_id
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Voice Live 用 Foundry Prompt Agent を作成
 # ---------------------------------------------------------------------------
 
 
@@ -356,6 +430,22 @@ def main() -> None:
 
     # Step 4: Voice Agent 作成
     create_voice_agent(project_endpoint, subscription_id, rg)
+
+    # Step 5: Entra App 登録（Voice Live SPA 認証用）
+    tenant_result = subprocess.run(
+        ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tenant_id = tenant_result.stdout.strip()
+    app_id = create_entra_app()
+    if app_id:
+        subprocess.run(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id], check=False)
+        logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
+    if tenant_id:
+        subprocess.run(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id], check=False)
+        logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
 
     logger.info("postprovision 完了")
 
