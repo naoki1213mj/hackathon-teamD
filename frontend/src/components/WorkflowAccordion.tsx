@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import type { AgentProgress, TextContent, ToolEvent, PipelineMetrics, ErrorData } from '../hooks/useSSE'
 import { AnalysisView } from './AnalysisView'
 import { MarkdownView } from './MarkdownView'
@@ -26,23 +26,40 @@ interface Props {
 }
 
 export function WorkflowAccordion({ agentProgress, textContents, toolEvents, metrics, error, onRetry, t, locale }: Props) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const activeRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!agentProgress) return
-    setCollapsed(prev => {
-      const next = { ...prev }
-      STEPS.forEach((step, i) => {
-        if (i + 1 < agentProgress.step) next[step.key] = true
-      })
-      next[agentProgress.agent] = false
-      return next
-    })
-    setTimeout(() => activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100)
-  }, [agentProgress?.step, agentProgress?.agent])
+  const currentStep = agentProgress?.step ?? 0
+  const currentAgent = agentProgress?.agent ?? ''
 
-  const toggle = (key: string) => setCollapsed(p => ({ ...p, [key]: !p[key] }))
+  // 折りたたみ状態をステップから導出（pure derived state）
+  const autoCollapsed = useMemo(() => {
+    const result: Record<string, boolean> = {}
+    STEPS.forEach((step, i) => {
+      if (i + 1 < currentStep) result[step.key] = true
+      else if (step.key === currentAgent) result[step.key] = false
+      else result[step.key] = false
+    })
+    return result
+  }, [currentStep, currentAgent])
+
+  // 手動トグル用の state（ユーザー操作のみ）
+  // currentStep が変わったらリセットされる（key として currentStep を使用）
+  const [userToggled, setUserToggled] = useState<{ step: number; overrides: Record<string, boolean> }>({ step: 0, overrides: {} })
+
+  // ステップが変わったら overrides を自動リセット
+  const activeOverrides = userToggled.step === currentStep ? userToggled.overrides : {}
+
+  const isSectionCollapsed = (key: string): boolean => {
+    if (key in activeOverrides) return activeOverrides[key]
+    return autoCollapsed[key] ?? false
+  }
+
+  const toggle = (key: string) => setUserToggled({ step: currentStep, overrides: { ...activeOverrides, [key]: !isSectionCollapsed(key) } })
+
+  // アクティブセクションにスクロール
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [currentAgent])
 
   const getStatus = (stepKey: string, stepIndex: number) => {
     if (!agentProgress) return 'pending'
@@ -60,7 +77,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
       {STEPS.map((step, i) => {
         const status = getStatus(step.key, i)
         const content = getContent(step.key)
-        const isCollapsed = collapsed[step.key] ?? false
+        const sectionCollapsed = isSectionCollapsed(step.key)
         const isActive = status === 'active'
         const stepTools = getToolEvents(step.key)
 
@@ -80,7 +97,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
             <button
               onClick={() => toggle(step.key)}
               className="flex w-full items-center justify-between px-4 py-3 text-left"
-              aria-expanded={!isCollapsed}
+              aria-expanded={!sectionCollapsed}
             >
               <div className="flex items-center gap-3">
                 <span className="text-lg">{step.icon}</span>
@@ -98,7 +115,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                 )}
               </div>
               <svg
-                className={`h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
+                className={`h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 ${sectionCollapsed ? '' : 'rotate-180'}`}
                 fill="none" viewBox="0 0 24 24" stroke="currentColor"
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -106,14 +123,14 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
             </button>
 
             {/* 折りたたみ時のサマリー */}
-            {isCollapsed && content && (
+            {sectionCollapsed && content && (
               <p className="px-4 pb-3 text-xs text-[var(--text-muted)] line-clamp-1">
                 {content.content.replace(/[#*_]/g, '').slice(0, 120)}…
               </p>
             )}
 
             {/* 展開時のコンテンツ */}
-            {!isCollapsed && (
+            {!sectionCollapsed && (
               <div className="px-4 pb-4">
                 {stepTools.length > 0 && <ToolEventBadges events={stepTools} t={t} />}
                 {content ? (

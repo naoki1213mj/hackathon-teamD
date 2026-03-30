@@ -12,7 +12,6 @@ export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number
     }
     if (isRunning) {
       startRef.current = Date.now()
-      setElapsed(0)
       timerRef.current = setInterval(() => {
         setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
       }, 1000)
@@ -20,5 +19,5 @@ export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [isRunning, resetKey])
 
-  return elapsed
+  return isRunning ? elapsed : 0
 }
