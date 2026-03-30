@@ -15,6 +15,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { VersionSelector } from './components/VersionSelector'
 import { VideoPreview } from './components/VideoPreview'
 import { VoiceInput } from './components/VoiceInput'
+import { useState } from 'react'
 import { WorkflowAccordion } from './components/WorkflowAccordion'
 import { useElapsedTime } from './hooks/useElapsedTime'
 import { useI18n } from './hooks/useI18n'
@@ -47,6 +48,9 @@ function App() {
   const { state, sendMessage, approve, reset, restoreVersion, updateSettings } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
+
+  // 音声入力テキスト — InputForm に挿入して確認後に送信
+  const [voiceText, setVoiceText] = useState('')
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
@@ -169,15 +173,16 @@ function App() {
                   />
                 ) : (
                   <InputForm
-                    onSubmit={sendMessage}
+                    onSubmit={(msg) => { sendMessage(msg); setVoiceText('') }}
                     disabled={isRunning}
                     placeholder={t('input.placeholder')}
                     sendLabel={t('input.send')}
                     label={t('input.label')}
+                    initialValue={voiceText}
                   />
                 )}
               </div>
-              <VoiceInput onTranscript={sendMessage} disabled={isRunning} t={t} />
+              <VoiceInput onTranscript={setVoiceText} disabled={isRunning} t={t} />
               <PdfUpload disabled={isRunning} t={t} />
             </div>
           </div>

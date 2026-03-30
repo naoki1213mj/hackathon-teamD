@@ -42,11 +42,16 @@ export class VoiceLiveClient {
       + `&project_id=${encodeURIComponent(this.config.projectName)}`
 
     return new Promise<void>((resolve, reject) => {
-      // api-key クエリパラメータで認証（WSS で暗号化済み）
-      const authUrl = `${url}&api-key=${encodeURIComponent(this.config.token)}`
-      this.ws = new WebSocket(authUrl)
+      // subprotocol で認証（ブラウザ WebSocket はカスタムヘッダー非対応）
+      this.ws = new WebSocket(url, [
+        'realtime',
+        `openai-insecure-api-key.${this.config.token}`,
+      ])
+
+      let opened = false
 
       this.ws.onopen = () => {
+        opened = true
         this.handlers.onStateChange('connected')
         this.sendSessionUpdate()
         this.startMicrophone()
@@ -63,15 +68,18 @@ export class VoiceLiveClient {
         }
       }
 
-      this.ws.onerror = () => {
+      this.ws.onerror = (ev) => {
+        console.warn('Voice Live WebSocket error:', ev)
         this.handlers.onError('Voice Live 接続エラー')
         this.handlers.onStateChange('disconnected')
-        reject(new Error('Voice Live WebSocket connection failed'))
+        if (!opened) reject(new Error('Voice Live WebSocket connection failed'))
       }
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (ev) => {
+        console.warn(`Voice Live WebSocket closed: code=${ev.code} reason=${ev.reason}`)
         this.handlers.onStateChange('disconnected')
         this.cleanup()
+        if (!opened) reject(new Error(`Voice Live closed: ${ev.code} ${ev.reason}`))
       }
     })
   }

@@ -9,10 +9,18 @@ interface InputFormProps {
   placeholder: string
   sendLabel: string
   label: string
+  initialValue?: string
 }
 
-export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label }: InputFormProps) {
+export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, initialValue }: InputFormProps) {
+  // initialValue が変わったら message にセットする（React 19 の key パターン）
+  const [prevInitial, setPrevInitial] = useState('')
   const [message, setMessage] = useState('')
+
+  if (initialValue && initialValue !== prevInitial) {
+    setPrevInitial(initialValue)
+    setMessage(initialValue)
+  }
 
   const isOverLimit = message.length > MAX_LENGTH
   const isNearLimit = message.length > WARN_THRESHOLD
