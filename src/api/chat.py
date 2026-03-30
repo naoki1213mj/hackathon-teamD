@@ -517,7 +517,10 @@ def _is_retryable_agent_error(exc: Exception) -> bool:
     # コンテキスト長超過やバリデーションエラーはリトライしても無駄
     if any(kw in message for kw in ["context_length_exceeded", "invalid_payload", "invalid_request_error"]):
         return False
-    return any(keyword in message for keyword in ["429", "rate limit", "too many requests", "timeout", "temporarily"])
+    return any(keyword in message for keyword in [
+        "429", "rate limit", "too many requests", "timeout", "temporarily",
+        "500", "server_error", "502", "503", "504",
+    ])
 
 
 def _is_code_interpreter_404(exc: Exception) -> bool:
@@ -1350,10 +1353,15 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         {"agent": "approval", "status": "completed", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
     )
 
+    # Agent3 への入力はコンテキスト長制限を避けるため 4000 文字に制限
+    regulation_input = context["plan_markdown"]
+    if len(regulation_input) > 4000:
+        regulation_input = regulation_input[:4000] + "\n\n（以降省略）"
+
     regulation_outcome = await _execute_agent(
         agent_name="regulation-check-agent",
         agent_step=4,
-        user_input=context["plan_markdown"],
+        user_input=regulation_input,
         conversation_id=conversation_id,
         model_settings=context.get("model_settings"),
     )
