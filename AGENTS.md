@@ -35,7 +35,7 @@
 
 | 層 | 技術 | バージョン |
 |---|------|----------|
-| フロントエンド | React + TypeScript + Vite + Tailwind CSS | React 18, Vite 6 |
+| フロントエンド | React + TypeScript + Vite + Tailwind CSS | React 19, Vite 8 |
 | バックエンド | FastAPI + uvicorn | Python 3.14 |
 | パッケージ管理 | uv | 最新 |
 | 推論モデル | gpt-5.4-mini | GA (2026-03-17~) |
@@ -44,7 +44,6 @@
 | オーケストレーション | Foundry Agent Service Workflows | Preview |
 | データ | Fabric Lakehouse | Delta Parquet + SQL EP |
 | ナレッジ | Foundry IQ Knowledge Base | Preview |
-| MCP サーバー | Azure Functions (Flex Consumption) | Preview |
 | AI Gateway | Azure API Management | GA |
 | デプロイ | Azure Container Apps + azd | GA |
 | CI/CD | GitHub Actions (DevSecOps) | — |
@@ -199,13 +198,12 @@ travel-marketing-agents/
 │   └── main.py                   # FastAPI エントリポイント
 ├── frontend/                     # フロントエンド (React 19)
 │   └── src/
-│       ├── components/           # 19 コンポーネント（ConversationHistory 追加）
+│       ├── components/           # 24 コンポーネント（ConversationHistory 追加）
 │       ├── hooks/                # useSSE, useTheme, useI18n
 │       └── lib/                  # i18n.ts, sse-client.ts, export.ts
-├── functions/                    # Azure Functions MCP サーバー (Python 3.13)
 ├── infra/                        # Bicep IaC（16 モジュール）
 │   ├── main.bicep
-│   └── modules/                  # VNet, Cosmos DB, APIM, Functions 等
+│   └── modules/                  # VNet, Cosmos DB, APIM 等
 ├── data/                         # デモデータ + demo-replay.json
 ├── regulations/                  # レギュレーション文書
 ├── tests/                        # pytest（53 テスト）

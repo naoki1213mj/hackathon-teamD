@@ -11,14 +11,15 @@
 - 主処理の 4 エージェント: データ検索、施策生成、規制チェック、販促物生成
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
 - Microsoft Foundry、Content Safety、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar との連携
-- `azd` + Bicep による Azure Container Apps、ACR、APIM、Functions、Key Vault、Cosmos DB、VNet、Log Analytics、Application Insights の構築
+- `azd` + Bicep による Azure Container Apps、ACR、APIM、Key Vault、Cosmos DB、VNet、Log Analytics、Application Insights の構築
 
 ## 実装上の現在地
 
 - Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。
-- APIM AI Gateway は Azure 側に作成されますが、アプリ本体の推論トラフィックはまだ `APIM_GATEWAY_URL` を経由していません。
-- Azure モードの `POST /api/chat` は 4 エージェントを途中停止なしで最後まで実行します。
-- `approval_request` SSE イベントは、現状ではモック / デモ経路と承認継続経路で主に使われます。
+- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、AI Gateway 接続の作成とトークン制限ポリシーの適用を行います。
+- Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
+- パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）です。
+- フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
 - ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。
 
 Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。
@@ -35,7 +36,8 @@ flowchart LR
     a1 --> fabric[Fabric Lakehouse または CSV フォールバック]
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
-    flow --> a3[regulation-check-agent]
+    flow --> approval{approval_request}
+    approval --> a3[regulation-check-agent]
     a3 --> kb[Azure AI Search / Foundry IQ]
     a3 --> safeweb[Web Search 安全情報]
     flow --> a4[brochure-gen-agent]
@@ -94,7 +96,7 @@ azd auth login
 azd up
 ```
 
-`azd up` の後に必要なモデル追加や Azure AI Search 設定、Speech / Logic Apps の環境変数投入は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
+`azd up` の後、`scripts/postprovision.py` が AI Gateway 接続と APIM ポリシーを自動構成します。残りの手動設定（Azure AI Search や Speech / Logic Apps の環境変数投入）は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
 
 ## 主要な環境変数
 
@@ -102,7 +104,7 @@ azd up
 |---|---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Microsoft Foundry project endpoint |
 | `CONTENT_SAFETY_ENDPOINT` | 本番 | Content Safety / Text Analysis のエンドポイント |
-| `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini` |
+| `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini`。フロントエンドのモデルセレクターでは `gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` も選択可 |
 | `ENVIRONMENT` | 任意 | `development`、`staging`、`production` |
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存。未設定時はインメモリ |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric Lakehouse SQL endpoint |
@@ -119,7 +121,6 @@ azd up
 ```text
 src/                 FastAPI アプリ、エージェント、ワークフロー、ミドルウェア
 frontend/            React UI、SSE フック、成果物ビュー、会話履歴
-functions/           Azure Functions ベースの補助ツール
 infra/               Azure リソースの Bicep テンプレート
 data/                デモデータとリプレイ用データ
 regulations/         ナレッジベース投入元の規制文書

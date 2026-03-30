@@ -81,19 +81,19 @@
 |---|---|---|---|
 | `message` | `string` | 必須 | 1〜5000 文字 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `settings` | `object \| null` | 任意 | 将来拡張用。現状の `/api/chat` 主経路では未使用 |
+| `settings` | `object \| null` | 任意 | `model` でテキスト推論モデルを選択可能（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）。`temperature`、`max_tokens` も将来拡張用に受け付ける |
 
 ### 現行挙動
 
 | 条件 | SSE の主な流れ |
 |---|---|
-| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `safety` → `done`、その後に任意で `quality-review-agent` の `text` |
+| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `safety` → `done`、その後に任意で `quality-review-agent` の `text` |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
 | `conversation_id` あり | 指示内容に応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 
 ### 注意
 
-- Azure モードの主フローは現在、途中で `approval_request` を返しません。
+- Azure モードの主フローは Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
 - `conversation_id` を指定した修正モードでは、会話履歴全体を再構成するのではなく、対象エージェントを個別に呼び直します。
 
 ### cURL 例
@@ -238,7 +238,7 @@ data: <json>
   "agent": "pipeline",
   "status": "running",
   "step": 1,
-  "total_steps": 4
+  "total_steps": 5
 }
 ```
 
@@ -247,7 +247,7 @@ data: <json>
 | `agent` | `string` | `pipeline`、`data-search-agent`、`marketing-plan-agent`、`regulation-check-agent`、`brochure-gen-agent` のいずれか |
 | `status` | `string` | `running` または `completed` |
 | `step` | `int` | 現在の段階 |
-| `total_steps` | `int` | 現状は 4 |
+| `total_steps` | `int` | 現状は 5（4 エージェント + 1 承認ステップ） |
 
 注: Azure の主フローでは `pipeline` 名で出るのが基本です。個別エージェント名はモックや修正モードで多く出ます。
 
@@ -317,7 +317,7 @@ data: <json>
 }
 ```
 
-注: このイベントは現状、モック / デモ経路と再修正経路で主に使われます。Azure の主フローでは途中停止しません。
+注: このイベントは Azure モードの主フローでも Agent2 完了後に送信されます。モック / デモ経路でも同様に使われます。
 
 ### `safety`
 
@@ -372,10 +372,16 @@ data: <json>
 
 ```text
 1. agent_progress (pipeline, running)
-2. text           (pipeline)
-3. safety
-4. done
-5. text           (quality-review-agent, optional)
+2. text           (pipeline — Agent1 + Agent2 results)
+3. approval_request
+   — user approves via POST /api/chat/{thread_id}/approve —
+4. agent_progress (regulation-check-agent)
+5. text           (regulation-check-agent)
+6. agent_progress (brochure-gen-agent)
+7. text           (brochure-gen-agent)
+8. safety
+9. done
+10. text           (quality-review-agent, optional)
 ```
 
 ### モック / デモモードの新規会話

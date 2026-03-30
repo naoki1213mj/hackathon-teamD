@@ -600,10 +600,10 @@ async def _execute_agent(
 
             if attempt == max_attempts or not _is_retryable_agent_error(exc):
                 logger.exception("エージェント(%s)の実行に失敗", agent_name)
-                exc_detail = f"{type(exc).__name__}: {exc}"
-                error_msg = f"{agent_name} の実行に失敗しました。({exc_detail})"
+                # クライアントには内部詳細を返さない
+                error_msg = f"{agent_name} の実行に失敗しました。しばらく待ってから再試行してください。"
                 if "429" in str(exc) or "too many requests" in str(exc).lower():
-                    error_msg = "API のレート制限に達しました。30 秒ほど待ってから「再試行」を押してください。"
+                    error_msg = "API のレート制限に達しました。30 秒ほど待ってから再試行してください。"
                 events.append(
                     format_sse(
                         SSEEventType.ERROR,

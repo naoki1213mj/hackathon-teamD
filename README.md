@@ -11,14 +11,15 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - Four primary agents in a Python `SequentialBuilder` workflow: data search, marketing plan, regulation check, and brochure generation
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
 - Azure integrations for Microsoft Foundry, Content Safety, Azure AI Search, Cosmos DB, Logic Apps callback, Content Understanding, and Speech / Photo Avatar
-- `azd` + Bicep provisioning for Container Apps, ACR, APIM AI Gateway, Azure Functions, Cosmos DB, Key Vault, VNet, Log Analytics, and Application Insights
+- `azd` + Bicep provisioning for Container Apps, ACR, APIM AI Gateway, Cosmos DB, Key Vault, VNet, Log Analytics, and Application Insights
 
 ## Current Implementation Notes
 
-- The Azure-backed runtime currently calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`.
-- APIM AI Gateway is provisioned in Azure, but application runtime traffic is not yet routed through `APIM_GATEWAY_URL`.
-- `POST /api/chat` in Azure mode runs the full 4-agent workflow end-to-end without pausing for approval.
-- `approval_request` SSE events are currently produced by mock/demo flows and approval-continuation paths, not by the default Azure-backed workflow path.
+- The Azure-backed runtime calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`.
+- APIM AI Gateway is provisioned and configured via `scripts/postprovision.py`, which creates an AI Gateway connection in Foundry and applies token-limit policies to the auto-generated foundry APIs.
+- `POST /api/chat` in Azure mode pauses for approval after Agent2 (marketing-plan-agent) and resumes Agent3 → Agent4 upon user approval.
+- The pipeline uses 5 steps (4 agents + 1 approval step).
+- A model selector in the frontend lets users choose between `gpt-5-4-mini` (default), `gpt-5.4`, `gpt-4-1-mini`, and `gpt-4.1`.
 - Runtime knowledge-base queries use Managed Identity. `scripts/setup_knowledge_base.py` still supports direct Azure AI Search API-key bootstrap as an optional setup path.
 
 See [docs/azure-architecture.md](docs/azure-architecture.md) for the current Azure architecture and diagram set.
@@ -35,7 +36,8 @@ flowchart LR
     a1 --> fabric[Fabric Lakehouse or CSV fallback]
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
-    flow --> a3[regulation-check-agent]
+    flow --> approval{approval_request}
+    approval --> a3[regulation-check-agent]
     a3 --> kb[Azure AI Search / Foundry IQ]
     a3 --> safeweb[Web Search for safety info]
     flow --> a4[brochure-gen-agent]
@@ -95,7 +97,7 @@ azd auth login
 azd up
 ```
 
-After provisioning, complete the post-provision Azure tasks in [docs/azure-setup.md](docs/azure-setup.md). Those steps cover image-model deployment, Azure AI Search setup, and optional Speech / Logic Apps configuration.
+After provisioning, `scripts/postprovision.py` automatically configures the AI Gateway connection and APIM policies. See [docs/azure-setup.md](docs/azure-setup.md) for remaining manual steps such as Azure AI Search setup and optional Speech / Logic Apps configuration.
 
 ## Key Environment Variables
 
@@ -103,7 +105,7 @@ After provisioning, complete the post-provision Azure tasks in [docs/azure-setup
 |---|---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | Production | Microsoft Foundry project endpoint for runtime agent calls |
 | `CONTENT_SAFETY_ENDPOINT` | Production | Content Safety / Text Analysis endpoint |
-| `MODEL_NAME` | Optional | Text deployment name, default `gpt-5-4-mini` |
+| `MODEL_NAME` | Optional | Text deployment name, default `gpt-5-4-mini`. Frontend model selector also offers `gpt-5.4`, `gpt-4-1-mini`, `gpt-4.1` |
 | `ENVIRONMENT` | Optional | `development`, `staging`, or `production` |
 | `COSMOS_DB_ENDPOINT` | Optional | Conversation storage; otherwise in-memory fallback |
 | `FABRIC_SQL_ENDPOINT` | Optional | Fabric Lakehouse SQL endpoint |
@@ -120,7 +122,6 @@ See [.env.example](.env.example) for the complete local example file.
 ```text
 src/                 FastAPI app, agent definitions, workflow orchestration, middleware
 frontend/            React UI, SSE hooks, artifact views, conversation history
-functions/           Azure Functions-based MCP-style helpers
 infra/               Bicep templates for Azure resources
 data/                Demo data and replay payloads
 regulations/         Regulation source documents for the knowledge base

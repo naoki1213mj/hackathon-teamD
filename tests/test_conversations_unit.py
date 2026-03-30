@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import src.conversations as _conv_mod
 from src.conversations import (
     _get_container,
     _get_cosmos_client,
@@ -19,11 +20,16 @@ from src.conversations import (
 
 @pytest.fixture(autouse=True)
 def _clear_memory_store(monkeypatch):
-    """各テスト前にインメモリストアをクリアし、Cosmos DB を無効化する"""
+    """各テスト前にインメモリストアをクリアし、Cosmos DB シングルトンをリセットする"""
     _memory_store.clear()
     monkeypatch.delenv("COSMOS_DB_ENDPOINT", raising=False)
+    # シングルトンをリセットして各テストが独立して初期化できるようにする
+    _conv_mod._cosmos_client = None
+    _conv_mod._cosmos_initialized = False
     yield
     _memory_store.clear()
+    _conv_mod._cosmos_client = None
+    _conv_mod._cosmos_initialized = False
 
 
 # --- 既存テスト ---

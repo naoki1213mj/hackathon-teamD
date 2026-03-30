@@ -9,9 +9,22 @@ logger = logging.getLogger(__name__)
 # インメモリストア（Cosmos DB 未設定時のフォールバック）
 _memory_store: dict[str, dict] = {}
 
+# Cosmos DB クライアントのシングルトン（接続プーリングを再利用するため）
+_cosmos_client = None
+_cosmos_initialized = False
+
 
 def _get_cosmos_client():
-    """Cosmos DB クライアントを取得する。未設定時は None を返す。"""
+    """Cosmos DB クライアントを取得する。未設定時は None を返す。
+
+    CosmosClient は接続プーリングを内蔵しているため、モジュールレベルで
+    シングルトンとして保持し、呼び出しごとの再生成を避ける。
+    """
+    global _cosmos_client, _cosmos_initialized
+    if _cosmos_initialized:
+        return _cosmos_client
+    _cosmos_initialized = True
+
     endpoint = os.environ.get("COSMOS_DB_ENDPOINT", "")
     if not endpoint:
         return None
@@ -19,8 +32,8 @@ def _get_cosmos_client():
         from azure.cosmos import CosmosClient
         from azure.identity import DefaultAzureCredential
 
-        credential = DefaultAzureCredential()
-        return CosmosClient(url=endpoint, credential=credential)
+        _cosmos_client = CosmosClient(url=endpoint, credential=DefaultAzureCredential())
+        return _cosmos_client
     except ImportError:
         logger.warning("azure-cosmos がインストールされていません")
         return None

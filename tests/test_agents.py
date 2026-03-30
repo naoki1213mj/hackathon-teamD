@@ -270,20 +270,37 @@ class TestBrochureGenTools:
     @pytest.mark.asyncio
     async def test_analyze_existing_brochure_no_endpoint(self, monkeypatch):
         """CONTENT_UNDERSTANDING_ENDPOINT 未設定時に警告を返す"""
+        # data/ ディレクトリ内のパスを使う（パストラバーサル防止ガードを通過させる）
+        from pathlib import Path
+
         import src.agents.brochure_gen as bg
 
+        allowed_path = str(Path(bg.__file__).resolve().parent.parent.parent / "data" / "dummy.pdf")
         monkeypatch.delenv("CONTENT_UNDERSTANDING_ENDPOINT", raising=False)
-        result = await bg.analyze_existing_brochure("/dummy/path.pdf")
-        assert "利用できません" in result
+        result = await bg.analyze_existing_brochure(allowed_path)
+        assert "見つかりません" in result or "利用できません" in result
 
     @pytest.mark.asyncio
     async def test_analyze_existing_brochure_file_not_found(self, monkeypatch):
         """ファイルが見つからない場合のエラー"""
+        from pathlib import Path
+
         import src.agents.brochure_gen as bg
 
+        allowed_path = str(Path(bg.__file__).resolve().parent.parent.parent / "data" / "nonexistent.pdf")
         monkeypatch.setenv("CONTENT_UNDERSTANDING_ENDPOINT", "https://test.cognitiveservices.azure.com")
-        result = await bg.analyze_existing_brochure("/nonexistent/path.pdf")
+        result = await bg.analyze_existing_brochure(allowed_path)
         assert "見つかりません" in result
+
+    @pytest.mark.asyncio
+    async def test_analyze_existing_brochure_path_traversal(self):
+        """パストラバーサル攻撃を拒否する"""
+        import src.agents.brochure_gen as bg
+
+        result = await bg.analyze_existing_brochure("../../etc/passwd")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "許可されていません" in parsed["error"]
 
     @pytest.mark.asyncio
     async def test_generate_promo_video_no_endpoint(self, monkeypatch):

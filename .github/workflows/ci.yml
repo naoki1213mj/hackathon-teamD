@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   lint-and-test:
@@ -36,7 +37,7 @@ jobs:
           node-version: "22"
 
       - name: Install frontend dependencies
-        run: cd frontend && npm install --no-package-lock
+        run: cd frontend && npm ci
 
       - name: Frontend lint
         run: cd frontend && npm run lint

@@ -12,11 +12,11 @@
 | AI Services account | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、SKU `S0` |
 | Microsoft Foundry project | `accounts/projects@2025-06-01` |
 | 既定テキストモデル | `gpt-5-4-mini` を `gpt-5.4-mini` から配備 |
+| 画像生成モデル | `gpt-image-1-5` を `gpt-image-1.5` から配備 |
 | Container Apps Environment | Log Analytics 接続済み |
 | Container App | System-assigned MI、`/api/health` と `/api/ready` probe、0-3 replicas |
 | Azure Container Registry | Basic SKU |
 | API Management | BasicV2、Managed Identity、AI Gateway policy |
-| Azure Functions | Flex Consumption、Python 3.13 |
 | Logic Apps | Consumption、HTTP trigger ベース |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、RBAC、Private Endpoint |
 | Key Vault | Private Endpoint、RBAC |
@@ -27,14 +27,12 @@
 
 | 項目 | 必要理由 |
 |---|---|
-| `gpt-image-1.5` の配備 | Agent4 の画像生成 |
 | Azure AI Search の作成 | Foundry IQ / `search_knowledge_base()` の実データ検索 |
 | `regulations-index` の投入 | 規制ドキュメント検索 |
 | Foundry project への Azure AI Search 接続追加 | `connections.get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Promo video 生成で使用 |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
-| `TEAMS_WEBHOOK_URL` / `SHAREPOINT_SITE_URL` | Functions 補助ツールで使用 |
 
 ## 3. 認証と権限
 
@@ -88,7 +86,16 @@ azd up
 - `AZURE_APIM_GATEWAY_URL`
 - `SERVICE_WEB_ENDPOINTS`
 
-### 4.3 `gpt-image-1.5` を追加配備
+### 4.3 postprovision フック
+
+`azd up` 完了後に `scripts/postprovision.py` が自動実行されます。このスクリプトは以下を行います:
+
+1. **AI Gateway 接続の作成**: Foundry project に `travel-ai-gateway` という名前の APIM 接続を作成し、`ProjectManagedIdentity` 認証を設定
+2. **トークン制限ポリシーの適用**: APIM の foundry-* API に `llm-token-limit`（80,000 tokens/min）と `llm-emit-token-metric` ポリシーを適用
+
+`AZURE_APIM_NAME` が未設定の場合、APIM 関連の設定はスキップされます。スクリプトは冪等で、複数回実行しても安全です。
+
+### 4.4 画像生成モデルの確認
 
 最新の IaC では `gpt-image-1.5` を自動配備します。既存環境が古いテンプレートで作成されている場合のみ、ポータルまたは CLI で追加してください。
 
@@ -107,7 +114,7 @@ az cognitiveservices account deployment create \
 
 アプリの `brochure_gen.py` はモデル名 `gpt-image-1.5` を参照します。未配備時は透明 PNG フォールバックです。
 
-### 4.4 Azure AI Search を作成し、規制文書を投入
+### 4.5 Azure AI Search を作成し、規制文書を投入
 
 ```bash
 az search service create \
@@ -128,14 +135,14 @@ uv run python scripts/setup_knowledge_base.py
 
 期待されるインデックス名は `regulations-index` です。
 
-### 4.5 Foundry project に Azure AI Search 接続を追加
+### 4.6 Foundry project に Azure AI Search 接続を追加
 
 Foundry ポータルで Azure AI Search connection を追加し、既定 connection にしてください。`regulation_check.py` は次を前提にしています。
 
 - `ConnectionType.AZURE_AI_SEARCH`
 - `connections.get_default(...)`
 
-### 4.6 Container App に追加環境変数を入れる
+### 4.7 Container App に追加環境変数を入れる
 
 最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` を自動注入します。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
 
@@ -151,15 +158,6 @@ az containerapp update \
 ```
 
   必要に応じて `FABRIC_SQL_ENDPOINT` も追加してください。Fabric Lakehouse / SQL endpoint 自体は引き続き別途構成が必要です。
-
-### 4.7 Functions 補助ツールの環境変数
-
-Functions で以下を使う場合は追加設定します。
-
-- `TEAMS_WEBHOOK_URL`
-- `SHAREPOINT_SITE_URL`
-
-未設定でも Functions は動きますが、実送信や実アップロードはスキップされます。
 
 ## 5. 検証
 
@@ -188,13 +186,13 @@ curl https://<container-app-fqdn>/api/ready
 
 ## 6. 実装差分として知っておくこと
 
-- APIM AI Gateway は Azure に作成されるが、アプリ本体の runtime path はまだ direct project endpoint
+- APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で AI Gateway 接続とポリシーが自動構成される
 - 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行する
+- パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）
 - 品質レビューは主 workflow participant ではなく、主処理後の追加 `text` イベント
 - Logic Apps callback URL は IaC から Container App secret として注入する
 - Azure AI Search の実行時アクセスは MI だが、bootstrap script には API-key 経路も残る
 
 ## 7. 補足
 
-- Azure Functions は Flex Consumption を前提にしています
-- 旧 Consumption プランは前提にしていません
+- `gpt-image-1.5` は IaC で自動配備される。古いテンプレートで作成済みの環境のみ手動追加が必要

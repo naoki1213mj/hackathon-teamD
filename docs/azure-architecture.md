@@ -18,7 +18,8 @@ flowchart LR
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
 
-    flow --> a3[regulation-check-agent]
+    flow --> approval{approval_request}
+    approval --> a3[regulation-check-agent]
     a3 --> search[Azure AI Search / Foundry IQ]
     a3 --> safetyweb[Web Search for safety info]
 
@@ -53,9 +54,6 @@ flowchart TB
     apim[API Management AI Gateway] -. provisioned .-> aiServices
     ca -. not in active runtime path yet .-> apim
 
-    functions[Azure Functions Flex Consumption] --> teams[Teams webhook]
-    functions --> sharepoint[SharePoint via Graph]
-
     aiSearch[Azure AI Search] --> foundryProject
 
     subgraph network[Network boundary]
@@ -78,7 +76,6 @@ flowchart TB
 | Foundry project | `accounts/projects@2025-06-01` |
 | Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
 | APIM | BasicV2、Managed Identity、AI Gateway ポリシー、トークン制限とメトリクス発行 |
-| Azure Functions | Flex Consumption、Python 3.13 |
 | Logic Apps | Consumption、HTTP trigger ベース |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
 | Key Vault | Private Endpoint、RBAC |
@@ -88,13 +85,11 @@ flowchart TB
 
 | 項目 | 理由 |
 |---|---|
-| `gpt-image-1.5` の配備 | IaC は既定のテキストモデルのみ作成するため |
 | Azure AI Search の作成と `regulations-index` の投入 | Foundry IQ の実データ検索に必要 |
 | Foundry project と Azure AI Search の接続 | `search_knowledge_base()` の既定接続に必要 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Promo video 生成ツールが参照 |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の HTTP callback に必要 |
-| `TEAMS_WEBHOOK_URL` / `SHAREPOINT_SITE_URL` | Functions 側の通知・保存補助ツールで使用 |
 
 ## 5. 認証モデル
 
@@ -102,15 +97,13 @@ flowchart TB
 |---|---|---|
 | FastAPI / Container App | `DefaultAzureCredential` | Foundry、Cosmos DB、Azure AI Search、Content Safety |
 | APIM | Managed Identity | Foundry バックエンドへの認証 |
-| Azure Functions | Function auth + Managed Identity | Storage、外部連携 |
 | AI Search bootstrap script | Foundry 接続または API key | 初期インデックス投入 |
 
 Container App の Managed Identity には、Bicep で Foundry 関連ロール、Cosmos DB Data Contributor、Key Vault Secrets User、AcrPull が割り当てられます。
 
 ## 6. 現在の実装メモ
 
-- `POST /api/chat` の Azure モードは、FastAPI 内の `SequentialBuilder` を最後まで実行する構成です。
-- APIM は Azure 側に作られますが、アプリケーション実行時のモデル呼び出しは現状 direct project endpoint です。
-- `approval_request` SSE はモック / デモ経路と承認継続経路で利用されます。既定の Azure 実行経路では途中停止しません。
+- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
+- APIM は Azure 側に作られ、`scripts/postprovision.py` で AI Gateway 接続の作成とトークン制限ポリシーの適用が自動実行されます。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。

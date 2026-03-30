@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 import urllib.request
+from pathlib import Path
 
 from agent_framework import tool
 from agent_framework.azure import AzureOpenAIResponsesClient
@@ -136,28 +138,31 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 # --- Side-channel 画像ストア ---
 # 画像の base64 をツール出力に含めるとコンテキストウインドウを超過するため、
 # side-channel で保存し、パイプライン完了後に別途取得する（social-ai-studio パターン）
+_images_lock = threading.Lock()
 _pending_images: dict[str, str] = {}
 
 
 def pop_pending_images() -> dict[str, str]:
-    """保存済み画像を取得しクリアする。"""
-    global _pending_images
-    images = _pending_images.copy()
-    _pending_images = {}
-    return images
+    """保存済み画像を取得しクリアする（スレッドセーフ）。"""
+    with _images_lock:
+        images = _pending_images.copy()
+        _pending_images.clear()
+        return images
 
 
 # --- Side-channel 動画ジョブストア ---
 # Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
+_video_lock = threading.Lock()
 _pending_video_job: dict[str, str] | None = None
 
 
 def pop_pending_video_job() -> dict[str, str] | None:
-    """保留中の動画生成ジョブ情報を取得してクリアする。"""
+    """保留中の動画生成ジョブ情報を取得してクリアする（スレッドセーフ）。"""
     global _pending_video_job
-    job = _pending_video_job
-    _pending_video_job = None
-    return job
+    with _video_lock:
+        job = _pending_video_job
+        _pending_video_job = None
+        return job
 
 
 # --- ツール定義 ---
@@ -178,7 +183,8 @@ async def generate_hero_image(
     """
     full_prompt = f"{style} travel photo of {destination}. {prompt}"
     data_uri = await _generate_image(full_prompt, "1536x1024")
-    _pending_images["hero"] = data_uri
+    with _images_lock:
+        _pending_images["hero"] = data_uri
     return json.dumps(
         {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
     )
@@ -197,7 +203,8 @@ async def generate_banner_image(
     """
     size = "1024x1024" if platform == "instagram" else "1536x1024"
     data_uri = await _generate_image(prompt, size)
-    _pending_images[f"banner_{platform}"] = data_uri
+    with _images_lock:
+        _pending_images[f"banner_{platform}"] = data_uri
     return json.dumps(
         {
             "status": "generated",
@@ -219,6 +226,14 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
     Args:
         pdf_path: 解析対象の PDF ファイルパス
     """
+    # パストラバーサル防止: data/ ディレクトリ内のみアクセスを許可
+    allowed_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    resolved = Path(pdf_path).resolve()
+    if not str(resolved).startswith(str(allowed_dir)):
+        return json.dumps({"error": "指定されたパスはアクセスが許可されていません"}, ensure_ascii=False)
+    if not resolved.exists():
+        return json.dumps({"error": f"ファイルが見つかりません: {pdf_path}"}, ensure_ascii=False)
+
     settings = get_settings()
     endpoint = settings.get("content_understanding_endpoint", "")
     if not endpoint:
@@ -226,7 +241,7 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
 
     # PDF ファイルを読み込む
     try:
-        with open(pdf_path, "rb") as f:
+        with open(resolved, "rb") as f:
             pdf_bytes = f.read()
     except FileNotFoundError:
         return f"❌ ファイルが見つかりません: {pdf_path}"
@@ -362,10 +377,11 @@ async def generate_promo_video(
         with urllib.request.urlopen(request, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
-        # Side-channel にジョブ情報を保存
+        # Side-channel にジョブ情報を保存（スレッドセーフ）
         global _pending_video_job
         actual_job_id = result.get("id", job_id)
-        _pending_video_job = {"job_id": actual_job_id, "status": "submitted"}
+        with _video_lock:
+            _pending_video_job = {"job_id": actual_job_id, "status": "submitted"}
 
         return json.dumps(
             {

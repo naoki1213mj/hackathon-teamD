@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -39,6 +39,15 @@ jobs:
             --image travel-agents:${{ github.sha }} \
             --image travel-agents:latest \
             --file Dockerfile .
+
+      - name: Capture previous revision
+        id: prev-revision
+        run: |
+          PREV_IMAGE=$(az containerapp show \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query 'properties.template.containers[0].image' -o tsv)
+          echo "image=${PREV_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Container Apps
         run: |
@@ -80,3 +89,12 @@ jobs:
           done
           echo "Readiness check failed"
           exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Rolling back to previous image: ${{ steps.prev-revision.outputs.image }}"
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --image ${{ steps.prev-revision.outputs.image }}
