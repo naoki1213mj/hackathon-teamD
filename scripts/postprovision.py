@@ -104,9 +104,15 @@ def create_ai_gateway_connection(
     成功すると Foundry が APIM 上に foundry-* API を自動生成する。
     """
     connection_name = "travel-ai-gateway"
+    # Foundry connections は ARM API 経由で管理する
+    # project_endpoint（AI Services 形式）ではなく ARM パスを使用
+    ai_services_name = project_endpoint.split("//")[1].split(".")[0]  # ais5gg4m4g72lrdo
+    project_name = project_endpoint.rstrip("/").split("/")[-1]  # aip-5gg4m4g72lrdo
     url = (
-        f"{project_endpoint}/connections/{connection_name}"
-        "?api-version=2025-05-01-preview"
+        f"https://management.azure.com{apim_resource_id.rsplit('/providers/Microsoft.ApiManagement', 1)[0]}"
+        f"/providers/Microsoft.CognitiveServices/accounts/{ai_services_name}"
+        f"/projects/{project_name}/connections/{connection_name}"
+        "?api-version=2025-04-01-preview"
     )
 
     body = {
@@ -123,7 +129,9 @@ def create_ai_gateway_connection(
     }
 
     logger.info("AI Gateway 接続を作成中: %s → %s", connection_name, apim_name)
-    result = _rest_call(url, method="PUT", body=body)
+    # Foundry connections API は ARM 経由でアクセスする
+    # project_endpoint ではなく management.azure.com を使用
+    result = _rest_call(url, method="PUT", body=body, scope="https://management.azure.com/.default")
     if result is not None:
         logger.info("AI Gateway 接続を作成しました: %s", connection_name)
         return True
@@ -145,16 +153,15 @@ _AI_GATEWAY_POLICY_XML = """\
       counter-key="@(context.Subscription.Id)"
       estimate-prompt-tokens="true"
       remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
-    <llm-content-safety backend-id="content-safety" />
+    <llm-emit-token-metric>
+      <dimension name="API ID" />
+    </llm-emit-token-metric>
   </inbound>
   <backend>
     <base />
   </backend>
   <outbound>
     <base />
-    <llm-emit-token-metric>
-      <dimension name="API ID" />
-    </llm-emit-token-metric>
   </outbound>
   <on-error>
     <base />
