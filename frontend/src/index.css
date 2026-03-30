@@ -15,6 +15,7 @@
   --accent: #0f766e;
   --accent-strong: #115e59;
   --accent-soft: rgba(15, 118, 110, 0.14);
+  --input-bg: #f1f5f9;
   --warning-surface: #fff7ed;
   --warning-border: #fdba74;
   --warning-text: #9a3412;
@@ -40,6 +41,7 @@
   --accent: #5eead4;
   --accent-strong: #99f6e4;
   --accent-soft: rgba(45, 212, 191, 0.16);
+  --input-bg: #0f172a;
   --warning-surface: rgba(120, 53, 15, 0.28);
   --warning-border: rgba(251, 191, 36, 0.3);
   --warning-text: #fde68a;
