@@ -365,7 +365,7 @@ def create_data_search_agent(model_settings: dict | None = None):
     """データ検索エージェントを作成する。
 
     Code Interpreter はリージョン依存（East US 2 / Sweden Central 推奨）。
-    本プロジェクトは East US 2 にデプロイするため利用可能。
+    利用できない場合はテキスト分析のみで動作する。
     """
     settings = get_settings()
     endpoint = get_model_endpoint()
@@ -375,11 +375,18 @@ def create_data_search_agent(model_settings: dict | None = None):
         deployment_name=settings["model_name"],
     )
     # Code Interpreter: Foundry Agent Service 組み込みツール（§3.5 AG1-06）
-    code_interpreter_tool = client.get_code_interpreter_tool()
+    # リージョン制約で利用できない場合はスキップ
+    agent_tools: list = [search_sales_history, search_customer_reviews]
+    try:
+        code_interpreter_tool = client.get_code_interpreter_tool()
+        agent_tools.append(code_interpreter_tool)
+        logger.info("Code Interpreter ツールを追加しました")
+    except Exception as exc:
+        logger.warning("Code Interpreter ツール取得に失敗（リージョン制約の可能性）: %s", exc)
     agent_kwargs: dict = {
         "name": "data-search-agent",
         "instructions": INSTRUCTIONS,
-        "tools": [search_sales_history, search_customer_reviews, code_interpreter_tool],
+        "tools": agent_tools,
     }
     if model_settings:
         if "temperature" in model_settings:
