@@ -17,11 +17,12 @@ async def get_voice_token() -> JSONResponse:
     """Voice Live API 接続用の AAD トークンを取得する。
 
     フロントエンドが WebSocket 接続時に使用する Bearer トークンを返す。
-    scope は https://cognitiveservices.azure.com/.default
+    Voice Live は https://ai.azure.com/.default スコープを推奨。
     """
     try:
         credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        # Voice Live 公式ドキュメント推奨スコープ
+        token = credential.get_token("https://ai.azure.com/.default")
 
         # Voice Live 接続情報も返す
         resource_name = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "").split("//")[1].split(".")[0] if os.environ.get("AZURE_AI_PROJECT_ENDPOINT") else ""
@@ -33,7 +34,7 @@ async def get_voice_token() -> JSONResponse:
             "resource_name": resource_name,
             "project_name": project_name,
             "endpoint": f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime",
-            "api_version": "2025-10-01",
+            "api_version": "2026-01-01-preview",
         })
     except Exception as exc:
         logger.warning("Voice token 取得失敗: %s", exc)

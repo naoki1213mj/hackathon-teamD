@@ -42,11 +42,12 @@ export class VoiceLiveClient {
       + `&project_id=${encodeURIComponent(this.config.projectName)}`
 
     return new Promise<void>((resolve, reject) => {
-      // subprotocol で認証（ブラウザ WebSocket はカスタムヘッダー非対応）
-      this.ws = new WebSocket(url, [
-        'realtime',
-        `openai-insecure-api-key.${this.config.token}`,
-      ])
+      // Voice Live WebSocket 認証:
+      // 方式1: access_token query parameter（Azure 推奨、WSS で暗号化）
+      // 方式2: subprotocol（OpenAI 互換）
+      // ブラウザでは Authorization ヘッダーが使えないため query param を使用
+      const authUrl = `${url}&access_token=${encodeURIComponent(this.config.token)}`
+      this.ws = new WebSocket(authUrl)
 
       let opened = false
 
