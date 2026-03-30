@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import urllib.request
 
 from agent_framework import tool
@@ -13,38 +14,58 @@ from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# --- AIProjectClient（遅延初期化シングルトン — Foundry IQ KB 検索用） ---
+# --- Foundry IQ Agentic Retrieval 設定 ---
 
-_project_client: object | None = None
-_project_client_initialized: bool = False
+# Knowledge Base 名（setup_knowledge_base.py で作成）
+_KB_NAME = "regulations-kb"
+_KB_API_VERSION = "2025-11-01-preview"
 
-# Foundry IQ ナレッジベースのインデックス名
-_KB_INDEX_NAME = "regulations-index"
+# Search エンドポイントのキャッシュ
+_search_endpoint: str | None = None
+_search_api_key: str | None = None
+_search_initialized: bool = False
 
 
-def _get_project_client():
-    """AIProjectClient を遅延初期化で取得する。未設定・失敗時は None。"""
-    global _project_client, _project_client_initialized
-    if _project_client_initialized:
-        return _project_client
-    _project_client_initialized = True
+def _get_search_credentials() -> tuple[str, str]:
+    """Azure AI Search のエンドポイントと API key を取得する。"""
+    global _search_endpoint, _search_api_key, _search_initialized
+    if _search_initialized:
+        return _search_endpoint or "", _search_api_key or ""
+    _search_initialized = True
+
+    # 環境変数から直接取得
+    ep = os.environ.get("SEARCH_ENDPOINT", "")
+    key = os.environ.get("SEARCH_API_KEY", "")
+    if ep and key:
+        _search_endpoint = ep.rstrip("/")
+        _search_api_key = key
+        return _search_endpoint, _search_api_key
+
+    # Foundry project connection から取得
     try:
         settings = get_settings()
         endpoint = settings["project_endpoint"]
         if not endpoint:
-            logger.info("project_endpoint 未設定、Foundry IQ は無効")
-            return None
+            return "", ""
         from azure.ai.projects import AIProjectClient
+        from azure.ai.projects.models import ConnectionType
 
-        _project_client = AIProjectClient(
-            endpoint=endpoint,
-            credential=DefaultAzureCredential(),
+        client = AIProjectClient(endpoint=endpoint, credential=DefaultAzureCredential())
+        conn = client.connections.get_default(
+            connection_type=ConnectionType.AZURE_AI_SEARCH,
+            include_credentials=True,
         )
-        logger.info("AIProjectClient を初期化しました")
-        return _project_client
+        if conn is None:
+            return "", ""
+
+        _search_endpoint = (getattr(conn, "target", "") or "").rstrip("/")
+        credentials = getattr(conn, "credentials", None)
+        _search_api_key = credentials.get("key", "") if credentials is not None and hasattr(credentials, "get") else ""
+        logger.info("Search credentials 取得: endpoint=%s", _search_endpoint)
+        return _search_endpoint, _search_api_key
     except Exception as e:
-        logger.warning("AIProjectClient 初期化失敗: %s", e)
-        return None
+        logger.warning("Search credentials 取得失敗: %s", e)
+        return "", ""
 
 
 # --- NG 表現リスト（Foundry IQ 未接続時のフォールバック） ---
@@ -70,9 +91,6 @@ TRAVEL_LAW_CHECKLIST = [
 ]
 
 
-# --- フォールバック・ヘルパー ---
-
-
 def _get_fallback_regulations(query: str) -> str:
     """Foundry IQ 未接続時のフォールバック規制データを返す。"""
     return json.dumps(
@@ -89,35 +107,30 @@ def _get_fallback_regulations(query: str) -> str:
 
 @tool
 async def search_knowledge_base(query: str) -> str:
-    """Foundry IQ ナレッジベースから規制・法令情報を検索する。
+    """Foundry IQ ナレッジベースから規制・法令情報を検索する（Agentic Retrieval API）。
 
     Args:
         query: 検索クエリ（例: 「景品表示法 有利誤認」「旅行業法 広告規制」）
     """
-    client = _get_project_client()
-    if client is None:
-        logger.info("Foundry IQ KB 未接続、フォールバック使用")
+    search_endpoint, api_key = _get_search_credentials()
+    if not search_endpoint:
+        logger.info("Search endpoint 未設定、フォールバック使用")
         return _get_fallback_regulations(query)
+
     try:
-        from azure.ai.projects.models import ConnectionType
+        # Agentic Retrieval API で Knowledge Base にクエリを送信
+        url = f"{search_endpoint}/knowledgebases/{_KB_NAME}/retrieve?api-version={_KB_API_VERSION}"
+        request_body = {
+            "messages": [{
+                "role": "user",
+                "content": [{"type": "text", "text": query}],
+            }],
+            "retrievalReasoningEffort": {"kind": "low"},
+            "includeActivity": True,
+        }
 
-        conn = client.connections.get_default(
-            connection_type=ConnectionType.AZURE_AI_SEARCH,
-            include_credentials=True,
-        )
-        if conn is None:
-            raise ValueError("Azure AI Search 接続が未構成です")
-
-        # Azure AI Search REST API — Managed Identity を優先し、接続に API key があればフォールバックで使う
-        search_endpoint = getattr(conn, "target", "") or getattr(conn, "endpoint_url", "")
-        search_endpoint = search_endpoint.rstrip("/")
-        search_url = f"{search_endpoint}/indexes/{_KB_INDEX_NAME}/docs/search?api-version=2024-07-01"
-        body = json.dumps({"search": query, "top": 5, "queryType": "simple"}).encode()
-
+        body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        credentials = getattr(conn, "credentials", None)
-        # ApiKeyCredentials は dict-like だが isinstance(dict) は False なので hasattr で判定
-        api_key = credentials.get("key", "") if credentials is not None and hasattr(credentials, "get") else ""
         if api_key:
             headers["api-key"] = api_key
         else:
@@ -125,20 +138,28 @@ async def search_knowledge_base(query: str) -> str:
             token = credential.get_token("https://search.azure.com/.default")
             headers["Authorization"] = f"Bearer {token.token}"
 
-        req = urllib.request.Request(
-            search_url,
-            data=body,
-            headers=headers,
-            method="POST",
-        )
-        response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=30)
         data = json.loads(response.read().decode())
 
+        # Agentic Retrieval レスポンスからテキストを抽出
+        responses = data.get("response", [])
         results = []
-        for doc in data.get("value", []):
-            content = doc.get("content", doc.get("chunk", ""))
-            title = doc.get("title", "")
-            results.append({"title": title, "content": content[:500]})
+        for resp_item in responses:
+            for content_item in resp_item.get("content", []):
+                if content_item.get("type") == "text":
+                    text = content_item.get("text", "")
+                    if text.strip():
+                        results.append({"content": text[:2000], "source": "Foundry IQ Agentic Retrieval"})
+
+        # 参照情報を追加
+        references = data.get("references", [])
+        ref_summaries = []
+        for ref in references[:5]:
+            title = ref.get("title", "")
+            score = ref.get("rerankerScore", 0)
+            if title:
+                ref_summaries.append({"title": title, "score": score})
 
         if not results:
             logger.info("Foundry IQ KB 検索結果なし、フォールバック使用")
@@ -146,15 +167,46 @@ async def search_knowledge_base(query: str) -> str:
 
         return json.dumps(
             {
-                "source": "Foundry IQ Knowledge Base",
+                "source": "Foundry IQ Agentic Retrieval",
+                "knowledge_base": _KB_NAME,
                 "query": query,
                 "results": results,
+                "references": ref_summaries,
             },
             ensure_ascii=False,
         )
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")[:500]
+        logger.warning("Foundry IQ KB 検索失敗 (HTTP %d): %s", e.code, error_body)
+        # KB が未作成 (404) の場合は直接 Index 検索にフォールバック
+        if e.code == 404:
+            return await _fallback_index_search(query, search_endpoint, api_key)
+        return _get_fallback_regulations(query)
     except Exception as e:
         logger.warning("Foundry IQ KB 検索失敗: %s", e)
         return _get_fallback_regulations(query)
+
+
+async def _fallback_index_search(query: str, search_endpoint: str, api_key: str) -> str:
+    """KB が未作成の場合に直接 Index を検索するフォールバック。"""
+    try:
+        url = f"{search_endpoint}/indexes/regulations-index/docs/search?api-version=2024-07-01"
+        body = json.dumps({"search": query, "top": 5, "queryType": "simple"}).encode()
+        headers: dict[str, str] = {"Content-Type": "application/json", "api-key": api_key}
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)
+        data = json.loads(response.read().decode())
+        results = []
+        for doc in data.get("value", []):
+            content = doc.get("content", doc.get("chunk", ""))
+            title = doc.get("title", "")
+            if content:
+                results.append({"title": title, "content": content[:500]})
+        if results:
+            return json.dumps({"source": "Azure AI Search (直接検索)", "query": query, "results": results}, ensure_ascii=False)
+    except Exception as e:
+        logger.warning("Index 直接検索もも失敗: %s", e)
+    return _get_fallback_regulations(query)
 
 
 @tool
