@@ -187,10 +187,7 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
         logger.warning("Photo Avatar ポーリング: トークン取得失敗: %s", exc)
         return None
 
-    poll_url = (
-        f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}"
-        f"?api-version=2024-08-01"
-    )
+    poll_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
     headers = {"Authorization": f"Bearer {token.token}"}
 
     start = time.time()
@@ -405,9 +402,8 @@ async def generate_promo_video(
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
         # バッチ合成ジョブを作成する
-        batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses?api-version=2024-08-01"
-
         job_id = f"promo-{int(time.time())}"
+        batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
         payload = json.dumps(
             {
                 "inputKind": "PlainText",
@@ -426,7 +422,7 @@ async def generate_promo_video(
         ).encode("utf-8")
 
         request = urllib.request.Request(
-            f"{batch_url}&id={job_id}",
+            batch_url,
             data=payload,
             headers={
                 "Authorization": f"Bearer {token.token}",

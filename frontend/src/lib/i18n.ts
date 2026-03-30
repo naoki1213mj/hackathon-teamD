@@ -96,6 +96,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     'settings.iqResults': 'IQ 検索結果数',
     'settings.iqThreshold': 'IQ スコア閾値',
     'settings.reset': 'デフォルトに戻す',
+    'pdf.upload': 'PDF を添付',
+    'pdf.uploading': 'アップロード中…',
+    'pdf.error': 'PDF アップロードに失敗しました（10MB 以下の PDF ファイルを選択してください）',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -188,6 +191,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     'settings.iqResults': 'IQ Search Results',
     'settings.iqThreshold': 'IQ Score Threshold',
     'settings.reset': 'Reset to Defaults',
+    'pdf.upload': 'Attach PDF',
+    'pdf.uploading': 'Uploading…',
+    'pdf.error': 'Upload failed (select a PDF file under 10 MB)',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -280,5 +286,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     'settings.iqResults': 'IQ 搜索结果数',
     'settings.iqThreshold': 'IQ 分数阈值',
     'settings.reset': '恢复默认',
+    'pdf.upload': '附加 PDF',
+    'pdf.uploading': '上传中…',
+    'pdf.error': '上传失败（请选择 10MB 以下的 PDF 文件）',
   },
 }

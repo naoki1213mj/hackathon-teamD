@@ -6,6 +6,7 @@ import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
 import { MarkdownView } from './components/MarkdownView'
+import { PdfUpload } from './components/PdfUpload'
 import { PipelineStepper } from './components/PipelineStepper'
 import { RefineChat } from './components/RefineChat'
 import { SafetyBadge } from './components/SafetyBadge'
@@ -173,6 +174,7 @@ function App() {
                 )}
               </div>
               <VoiceInput onTranscript={sendMessage} disabled={isRunning} t={t} />
+              <PdfUpload disabled={isRunning} t={t} />
             </div>
           </div>
         </section>

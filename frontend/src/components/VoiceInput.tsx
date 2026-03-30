@@ -144,8 +144,10 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
           // エージェント応答テキスト — 将来の UI 表示用
         },
         onError: (error) => {
-          console.error('Voice Live error:', error)
+          console.warn('Voice Live error:', error)
           setState('error')
+          // 3秒後にアイドルに戻す
+          setTimeout(() => setState('idle'), 3000)
         },
         onStateChange: (s) => {
           if (s === 'listening') setState('listening')

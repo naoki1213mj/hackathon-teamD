@@ -42,10 +42,9 @@ export class VoiceLiveClient {
       + `&project_id=${encodeURIComponent(this.config.projectName)}`
 
     return new Promise<void>((resolve, reject) => {
-      this.ws = new WebSocket(url, [
-        'realtime',
-        `openai-insecure-api-key.${this.config.token}`,
-      ])
+      // api-key クエリパラメータで認証（WSS で暗号化済み）
+      const authUrl = `${url}&api-key=${encodeURIComponent(this.config.token)}`
+      this.ws = new WebSocket(authUrl)
 
       this.ws.onopen = () => {
         this.handlers.onStateChange('connected')
@@ -122,15 +121,24 @@ export class VoiceLiveClient {
           const s = Math.max(-1, Math.min(1, inputData[i]))
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
         }
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)))
+        const bytes = new Uint8Array(pcm16.buffer)
+        let binary = ''
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i])
+        }
+        const base64 = btoa(binary)
         this.ws.send(JSON.stringify({
           type: 'input_audio_buffer.append',
           audio: base64,
         }))
       }
 
+      // サイレント gain ノードでフィードバック防止
+      const silentGain = this.audioContext.createGain()
+      silentGain.gain.value = 0
       this.sourceNode.connect(this.processorNode)
-      this.processorNode.connect(this.audioContext.destination)
+      this.processorNode.connect(silentGain)
+      silentGain.connect(this.audioContext.destination)
       this.handlers.onStateChange('listening')
     } catch {
       this.handlers.onError('マイクの使用が許可されていません')

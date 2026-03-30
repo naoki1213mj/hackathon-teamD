@@ -13,8 +13,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import TypedDict
 
-from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -99,7 +99,12 @@ _TOOL_EVENT_HINTS: dict[str, list[str]] = {
     "data-search-agent": ["search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
     "regulation-check-agent": ["search_knowledge_base", "check_ng_expressions", "check_travel_law_compliance"],
-    "brochure-gen-agent": ["generate_hero_image", "generate_banner_image", "analyze_existing_brochure", "generate_promo_video"],
+    "brochure-gen-agent": [
+        "generate_hero_image",
+        "generate_banner_image",
+        "analyze_existing_brochure",
+        "generate_promo_video",
+    ],
 }
 
 
@@ -225,7 +230,7 @@ def _inject_images_into_html(html: str, images: dict[str, str]) -> str:
             if idx >= 0:
                 close = html.find(">", idx)
                 if close >= 0:
-                    html = html[:close + 1] + "\n" + img_tag + "\n" + html[close + 1:]
+                    html = html[: close + 1] + "\n" + img_tag + "\n" + html[close + 1 :]
                     break
 
     # バナー画像も埋め込む（あれば）
@@ -285,10 +290,12 @@ def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
                 # inline base64 データがある場合
                 b64_data = getattr(image_obj, "data", "") or getattr(image_obj, "b64_json", "")
                 if b64_data:
-                    images.append({
-                        "url": f"data:image/png;base64,{b64_data}",
-                        "alt": "データ分析グラフ（Code Interpreter）",
-                    })
+                    images.append(
+                        {
+                            "url": f"data:image/png;base64,{b64_data}",
+                            "alt": "データ分析グラフ（Code Interpreter）",
+                        }
+                    )
                     continue
                 # file_id 参照の場合（ログのみ。ダウンロードは別途対応）
                 file_id = getattr(image_obj, "file_id", "")
@@ -363,11 +370,11 @@ def _extract_corrected_plan(regulation_output: str) -> str | None:
     for pattern in markers:
         match = re.search(pattern, regulation_output)
         if match:
-            return regulation_output[match.start():]
+            return regulation_output[match.start() :]
     # マーカーが見つからない場合は最後の "# " 見出し以降を返す
     last_heading = regulation_output.rfind("\n# ")
     if last_heading > len(regulation_output) // 2:
-        return regulation_output[last_heading + 1:]
+        return regulation_output[last_heading + 1 :]
     return None
 
 
@@ -571,10 +578,21 @@ def _is_retryable_agent_error(exc: Exception) -> bool:
     # コンテキスト長超過やバリデーションエラーはリトライしても無駄
     if any(kw in message for kw in ["context_length_exceeded", "invalid_payload", "invalid_request_error"]):
         return False
-    return any(keyword in message for keyword in [
-        "429", "rate limit", "too many requests", "timeout", "temporarily",
-        "500", "server_error", "502", "503", "504",
-    ])
+    return any(
+        keyword in message
+        for keyword in [
+            "429",
+            "rate limit",
+            "too many requests",
+            "timeout",
+            "temporarily",
+            "500",
+            "server_error",
+            "502",
+            "503",
+            "504",
+        ]
+    )
 
 
 def _is_code_interpreter_404(exc: Exception) -> bool:
@@ -635,9 +653,7 @@ async def _execute_agent(
 
                 if _should_enable_code_interpreter():
                     set_code_interpreter_available(False)
-                    logger.warning(
-                        "Code Interpreter 404 を検出。無効化してリトライします: %s", exc
-                    )
+                    logger.warning("Code Interpreter 404 を検出。無効化してリトライします: %s", exc)
                     continue
 
             if agent_name == "brochure-gen-agent" and attempt == max_attempts:
@@ -719,7 +735,7 @@ async def _execute_agent(
 
     # Side-channel 画像の取得（brochure-gen-agent のツールが画像を side-channel に保存する）
     if agent_name == "brochure-gen-agent":
-        from src.agents.brochure_gen import pop_pending_images, pop_pending_video_job
+        from src.agents.brochure_gen import pop_pending_images
 
         pending = pop_pending_images()
 
@@ -734,8 +750,10 @@ async def _execute_agent(
                             html_content = data.get("content", "")
                             if "<html" in html_content.lower() or "<!doctype" in html_content.lower():
                                 data["content"] = _inject_images_into_html(html_content, pending)
-                                events[i] = f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-                        except (json.JSONDecodeError, AttributeError):
+                                events[i] = (
+                                    f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                                )
+                        except json.JSONDecodeError, AttributeError:
                             pass
                     break
 
@@ -748,19 +766,8 @@ async def _execute_agent(
                 )
             )
 
-        # Side-channel 動画ジョブの取得（Photo Avatar バッチ合成）
-        video_job = pop_pending_video_job()
-        if video_job:
-            events.append(
-                format_sse(
-                    SSEEventType.TEXT,
-                    {
-                        "agent": "brochure-gen-agent",
-                        "content": f"🎬 販促動画を生成中です（ジョブID: {video_job['job_id']}）。完了まで数分かかります。",
-                        "content_type": "text",
-                    },
-                )
-            )
+        # 注: 動画ジョブの pop + polling は _post_approval_events() で一括処理する。
+        # ここで pop すると二重消費になるため、通知メッセージのみ出す。
 
     # Code Interpreter 画像の取得（data-search-agent がグラフを生成する場合）
     if agent_name == "data-search-agent" and result is not None:
@@ -1401,10 +1408,11 @@ def _get_reference_brochure_path() -> str | None:
     settings = get_settings()
     if not settings.get("content_understanding_endpoint"):
         return None
-    # data/ ディレクトリに sample_brochure.pdf があれば使用
-    sample_path = Path(__file__).resolve().parent.parent.parent / "data" / "sample_brochure.pdf"
-    if sample_path.exists():
-        return str(sample_path)
+    # data/ ディレクトリ内の PDF ファイルを検索（最新アップロード優先）
+    data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    pdf_files = sorted(data_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if pdf_files:
+        return str(pdf_files[0])
     return None
 
 
@@ -1461,12 +1469,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     brochure_input = _extract_corrected_plan(regulation_outcome["text"]) or context["plan_markdown"]
 
     # 旅行先を入力に明示（画像生成の精度向上）
-    destination_match = re.search(r'(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]', brochure_input)
+    destination_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", brochure_input)
     if destination_match:
         destination_text = destination_match.group(1).strip()
     else:
         destination_text = None
-        for place in ['北海道', '沖縄', '京都', '東京', '九州', '東北', '四国', '北陸']:
+        for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
             if place in brochure_input:
                 destination_text = place
                 break
@@ -1505,7 +1513,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
             },
         )
         video_url = await poll_video_job(video_job["job_id"], max_wait=120)
-        if video_url:
+        if video_url and video_url.startswith("https://"):
             yield format_sse(
                 SSEEventType.TEXT,
                 {
@@ -1514,6 +1522,8 @@ async def _post_approval_events(user_response: str, conversation_id: str):
                     "content_type": "video",
                 },
             )
+        elif video_url:
+            logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
 
     review_input = "\n\n".join(
         part
@@ -1802,3 +1812,37 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
             "X-Accel-Buffering": "no",
         },
     )
+
+
+_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+@router.post("/upload-pdf")
+@limiter.limit("5/minute")
+async def upload_pdf(request: Request, file: UploadFile) -> JSONResponse:
+    """既存パンフレット PDF をアップロードし、data/ に保存する。
+
+    Content Understanding (Agent4) が参照するための前処理。
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        return JSONResponse({"error": "PDF ファイルのみアップロード可能です"}, status_code=400)
+
+    # ファイル名のサニタイズ（ディレクトリトラバーサル防止）
+    safe_name = Path(file.filename).name
+    if not safe_name or safe_name.startswith("."):
+        return JSONResponse({"error": "無効なファイル名です"}, status_code=400)
+
+    content = await file.read()
+    if len(content) > _UPLOAD_MAX_BYTES:
+        return JSONResponse({"error": "ファイルサイズが上限（10MB）を超えています"}, status_code=413)
+
+    # PDF 先頭バイト検証
+    if not content[:5].startswith(b"%PDF-"):
+        return JSONResponse({"error": "有効な PDF ファイルではありません"}, status_code=400)
+
+    dest = _ALLOWED_DIR / safe_name
+    dest.write_bytes(content)
+    logger.info("PDF アップロード完了: %s (%d bytes)", safe_name, len(content))
+
+    return JSONResponse({"filename": safe_name, "size": len(content)})
