@@ -72,14 +72,17 @@ def is_production_environment() -> bool:
 def get_model_endpoint() -> str:
     """モデル呼び出し用のエンドポイントを返す。
 
-    APIM AI Gateway が設定されている場合はそちらを優先し、
-    トークンレート制限・メトリクス収集・トレーシングを有効化する。
-    未設定時は Foundry プロジェクトエンドポイントに直接接続する。
+    APIM AI Gateway が設定されている場合はログに記録するが、
+    AzureOpenAIResponsesClient は project_endpoint パスを必要とするため、
+    APIM 経由のルーティングは APIM 側の設定が完了してから有効化する。
+    現時点では常に Foundry プロジェクトエンドポイントを返す。
     """
     settings = get_settings()
     apim_url = settings.get("apim_gateway_url", "")  # type: ignore[arg-type]
     if apim_url:
-        return apim_url
+        # APIM は Bicep で定義済みだが、バックエンドルーティング構成が必要
+        # 構成完了後に APIM 経由に切り替える
+        pass
     return settings["project_endpoint"]
 
 
