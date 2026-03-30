@@ -36,40 +36,45 @@ export class VoiceLiveClient {
   async connect(): Promise<void> {
     this.handlers.onStateChange('connecting')
 
+    // Voice Live API: agent_id と project_id を使用（agent_name/project_name ではない）
     const url = `${this.config.endpoint}?api-version=${this.config.apiVersion}`
-      + `&agent_name=${encodeURIComponent(this.config.agentName)}`
-      + `&project_name=${encodeURIComponent(this.config.projectName)}`
+      + `&agent_id=${encodeURIComponent(this.config.agentName)}`
+      + `&project_id=${encodeURIComponent(this.config.projectName)}`
 
-    this.ws = new WebSocket(url, [
-      'realtime',
-      `openai-insecure-api-key.${this.config.token}`,
-    ])
+    return new Promise<void>((resolve, reject) => {
+      this.ws = new WebSocket(url, [
+        'realtime',
+        `openai-insecure-api-key.${this.config.token}`,
+      ])
 
-    this.ws.onopen = () => {
-      this.handlers.onStateChange('connected')
-      this.sendSessionUpdate()
-      this.startMicrophone()
-    }
-
-    this.ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data !== 'string') return
-      try {
-        const data = JSON.parse(event.data) as Record<string, unknown>
-        this.handleServerEvent(data)
-      } catch {
-        // バイナリ音声データの場合は無視
+      this.ws.onopen = () => {
+        this.handlers.onStateChange('connected')
+        this.sendSessionUpdate()
+        this.startMicrophone()
+        resolve()
       }
-    }
 
-    this.ws.onerror = () => {
-      this.handlers.onError('Voice Live 接続エラー')
-      this.handlers.onStateChange('disconnected')
-    }
+      this.ws.onmessage = (event: MessageEvent) => {
+        if (typeof event.data !== 'string') return
+        try {
+          const data = JSON.parse(event.data) as Record<string, unknown>
+          this.handleServerEvent(data)
+        } catch {
+          // バイナリ音声データの場合は無視
+        }
+      }
 
-    this.ws.onclose = () => {
-      this.handlers.onStateChange('disconnected')
-      this.cleanup()
-    }
+      this.ws.onerror = () => {
+        this.handlers.onError('Voice Live 接続エラー')
+        this.handlers.onStateChange('disconnected')
+        reject(new Error('Voice Live WebSocket connection failed'))
+      }
+
+      this.ws.onclose = () => {
+        this.handlers.onStateChange('disconnected')
+        this.cleanup()
+      }
+    })
   }
 
   private sendSessionUpdate(): void {

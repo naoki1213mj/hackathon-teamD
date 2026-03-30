@@ -159,8 +159,11 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
 
       await client.connect()
       clientRef.current = client
-    } catch {
-      setState('error')
+    } catch (err) {
+      console.warn('Voice Live 接続失敗、Web Speech API にフォールバック:', err)
+      setState('idle')
+      // Voice Live が使えない場合は Web Speech API にフォールバック
+      setUseVoiceLive(false)
       startWebSpeech()
     }
   }, [onTranscript, startWebSpeech])
