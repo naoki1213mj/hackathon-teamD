@@ -46,8 +46,8 @@ function App() {
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
-  const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
-  const revisionContent = state.textContents.find(c => c.agent === 'plan-revision-agent')
+  const planContent = state.textContents.findLast(c => c.agent === 'marketing-plan-agent')
+  const revisionContent = state.textContents.findLast(c => c.agent === 'plan-revision-agent')
   // revision agent が修正済み企画書を出力するまでは「確認中」として表示
   const showFinalPlan = revisionContent || isCompleted
   const statusLabel = t(`status.${state.status}`)
@@ -214,7 +214,7 @@ function App() {
                         <EvaluationPanel
                           query={state.userMessages[0] || ''}
                           response={planContent?.content || ''}
-                          html={state.textContents.find(c => c.content_type === 'html')?.content || ''}
+                          html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
                           t={t}
                           onRefine={sendMessage}
                         />
@@ -240,7 +240,7 @@ function App() {
               { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
               { key: 'video', label: `🎬 ${t('tab.video') || '動画'}`, content: (
                 <VideoPreview
-                  videoUrl={state.textContents.find(c => c.content_type === 'video')?.content}
+                  videoUrl={state.textContents.findLast(c => c.content_type === 'video')?.content}
                   t={t}
                 />
               )},

@@ -216,7 +216,10 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             <button
               onClick={() => {
                 const feedback = buildFeedback(result, t)
-                if (feedback) onRefine(feedback)
+                if (feedback) {
+                  setResult(null)  // 改善実行後に評価結果をリセット（再評価しやすく）
+                  onRefine(feedback)
+                }
               }}
               className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-2 text-xs font-medium text-[var(--accent-strong)] transition-colors hover:bg-[var(--accent)]/20"
             >
