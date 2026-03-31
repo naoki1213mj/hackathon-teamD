@@ -1574,6 +1574,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     total_tool_calls += revision_outcome["tool_calls"]
     total_tokens_sum += revision_outcome.get("total_tokens", 0)
 
+    # 規制チェック+修正完了 → 販促物生成フェーズへ即座に遷移（UI の待ち時間解消）
+    yield format_sse(
+        SSEEventType.AGENT_PROGRESS,
+        {"agent": "brochure-gen-agent", "status": "running", "step": 5, "total_steps": _PIPELINE_TOTAL_STEPS},
+    )
+
     # Agent4 への入力は修正版企画書
     brochure_input = revision_outcome["text"]
 
