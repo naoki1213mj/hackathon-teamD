@@ -59,22 +59,23 @@ def _evaluate_travel_law_compliance(response: str, html: str) -> dict:
 
 
 def _evaluate_brochure_accessibility(html: str) -> dict:
-    """ブローシャ HTML のアクセシビリティ評価（code-based カスタム評価器）。"""
-    if not html:
-        return {"score": 0.0, "details": {}, "reason": "HTML が提供されていません"}
+    """コンバージョン期待度（code-based カスタム評価器）。
 
+    予約につながる要素（CTA・価格明確さ・限定感・特典）の有無をスコア化する。
+    """
+    text = html or ""
     checks = {
-        "lang属性": 'lang="' in html or "lang='" in html,
-        "alt属性": "<img" not in html or 'alt="' in html,
-        "フッター": "<footer" in html or "登録" in html,
-        "フォントサイズ": "font-size" in html,
-        "レスポンシブ": "viewport" in html or "max-w" in html or "responsive" in html.lower(),
+        "CTA（予約導線）": any(kw in text for kw in ["予約", "申込", "お問い合わせ", "電話", "URL", "QR"]),
+        "価格表示の明確さ": any(kw in text for kw in ["円", "税込", "～", "から"]),
+        "限定感の訴求": any(kw in text for kw in ["期間限定", "先着", "早割", "残りわずか", "特別"]),
+        "特典・付加価値": any(kw in text for kw in ["特典", "無料", "プレゼント", "ポイント", "割引"]),
+        "安心感の提供": any(kw in text for kw in ["キャンセル", "全額返金", "保証", "サポート", "添乗員"]),
     }
     score = sum(1 for v in checks.values() if v) / len(checks)
     return {
         "score": round(score, 2),
         "details": checks,
-        "reason": f"{len(checks)} 項目中 {sum(1 for v in checks.values() if v)} 項目が適合",
+        "reason": f"{len(checks)} 項目中 {sum(1 for v in checks.values() if v)} 項目が含まれています",
     }
 
 
@@ -195,10 +196,10 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
 以下のユーザー依頼と企画書を評価し、JSON 形式で結果を返してください。
 
 ## 評価基準（各 1〜5 点）
-1. **target_clarity**: ターゲット顧客の明確さ（年代・家族構成・旅行動機が具体的か）
+1. **appeal**: 顧客訴求力（キャッチコピーの魅力・ターゲットへの共感度・「行きたい」と思わせる力）
 2. **differentiation**: 差別化ポイントの具体性（競合との違いが明確か）
 3. **kpi_validity**: KPI の妥当性（測定可能で現実的な目標か）
-4. **creativity**: 企画の創造性（キャッチコピー・プラン内容の魅力）
+4. **brand_tone**: ブランド一貫性（トーンの統一・ターゲット層に適した表現・景品表示法 NG 表現の回避）
 
 ## ユーザー依頼
 {query}
@@ -208,10 +209,10 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
 
 ## 出力形式（JSON のみ、他のテキストは出力しない）
 {{
-  "target_clarity": <1-5>,
+  "appeal": <1-5>,
   "differentiation": <1-5>,
   "kpi_validity": <1-5>,
-  "creativity": <1-5>,
+  "brand_tone": <1-5>,
   "overall": <1-5（4項目の平均）>,
   "reason": "<50文字以内の総合コメント>"
 }}"""
@@ -320,8 +321,7 @@ async def evaluate_artifacts(request: Request, body: EvaluateRequest) -> JSONRes
     # Code-based カスタム評価器（即座に実行）
     results["custom"] = {
         "travel_law_compliance": _evaluate_travel_law_compliance(body.response, body.html),
-        "plan_structure": _evaluate_plan_structure(body.response),
-        "brochure_accessibility": _evaluate_brochure_accessibility(body.html),
+        "conversion_potential": _evaluate_brochure_accessibility(body.html or body.response),
     }
 
     # Built-in AI-assisted 評価器

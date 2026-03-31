@@ -51,7 +51,7 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
 
   // Marketing quality: スコア 3 未満の項目
   if (result.marketing_quality) {
-    for (const key of ['target_clarity', 'differentiation', 'kpi_validity', 'creativity']) {
+    for (const key of ['appeal', 'differentiation', 'kpi_validity', 'brand_tone']) {
       const val = result.marketing_quality[key]
       if (typeof val === 'number' && val < 3) {
         issues.push(`${t(`eval.${key}`) || key}が低い（${val}/5）`)
@@ -159,7 +159,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             <div>
               <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.marketing')}</p>
               <div className="flex flex-wrap gap-4">
-                {['target_clarity', 'differentiation', 'kpi_validity', 'creativity', 'overall'].map(key => {
+                {['appeal', 'differentiation', 'kpi_validity', 'brand_tone', 'overall'].map(key => {
                   const val = result.marketing_quality?.[key]
                   return typeof val === 'number' ? (
                     <div key={key} className="text-center">
