@@ -10,6 +10,7 @@ import { LanguageSwitcher } from './components/LanguageSwitcher'
 import { MarkdownView } from './components/MarkdownView'
 import { PdfUpload } from './components/PdfUpload'
 import { PipelineStepper } from './components/PipelineStepper'
+import { PlanVersionTabs, buildPlanVersions } from './components/PlanVersionTabs'
 import { RefineChat } from './components/RefineChat'
 import { SafetyBadge } from './components/SafetyBadge'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -42,6 +43,7 @@ function App() {
 
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceText, setVoiceText] = useState('')
+  const [planVersionIdx, setPlanVersionIdx] = useState(0)
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
@@ -202,24 +204,38 @@ function App() {
                 label: `📝 ${t('tab.plan')}`,
                 content: planContent ? (
                   showFinalPlan ? (
-                    <>
-                      <MarkdownView content={revisionContent?.content || planContent.content} />
-                      <button
-                        onClick={() => exportPlanMarkdown(state.textContents)}
-                        className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
-                      >
-                        💾 {t('export.plan')}
-                      </button>
-                      {isCompleted && (
-                        <EvaluationPanel
-                          query={state.userMessages[0] || ''}
-                          response={planContent?.content || ''}
-                          html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
-                          t={t}
-                          onRefine={sendMessage}
-                        />
-                      )}
-                    </>
+                    (() => {
+                      const planVersions = buildPlanVersions(state.textContents, t)
+                      const displayContent = planVersions.length > 1
+                        ? planVersions[planVersionIdx]?.content || planContent.content
+                        : revisionContent?.content || planContent.content
+                      return (
+                        <>
+                          <PlanVersionTabs
+                            versions={planVersions}
+                            t={t}
+                            activeIndex={planVersionIdx}
+                            onChangeIndex={setPlanVersionIdx}
+                          />
+                          <MarkdownView content={displayContent} />
+                          <button
+                            onClick={() => exportPlanMarkdown(state.textContents)}
+                            className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+                          >
+                            💾 {t('export.plan')}
+                          </button>
+                          {isCompleted && (
+                            <EvaluationPanel
+                              query={state.userMessages[0] || ''}
+                              response={displayContent}
+                              html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
+                              t={t}
+                              onRefine={sendMessage}
+                            />
+                          )}
+                        </>
+                      )
+                    })()
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />

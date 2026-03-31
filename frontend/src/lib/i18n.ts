@@ -121,6 +121,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.brochure_accessibility': 'アクセシビリティ',
     'eval.portal': 'Foundry ポータルで詳細を見る',
     'eval.refine': '評価結果をもとに改善する',
+    'eval.version.original': '改善前',
+    'eval.version.refined': '改善後',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -238,6 +240,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.brochure_accessibility': 'Accessibility',
     'eval.portal': 'View in Foundry Portal',
     'eval.refine': 'Refine based on evaluation',
+    'eval.version.original': 'Original',
+    'eval.version.refined': 'Refined',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -355,5 +359,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.brochure_accessibility': '无障碍性',
     'eval.portal': '在 Foundry 门户中查看',
     'eval.refine': '根据评估结果改进',
+    'eval.version.original': '改进前',
+    'eval.version.refined': '改进后',
   },
 }
