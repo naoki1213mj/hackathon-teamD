@@ -69,7 +69,6 @@ def is_production_environment() -> bool:
     return environment in _PRODUCTION_ENVIRONMENTS
 
 
-
 def get_missing_required_settings() -> list[str]:
     """現在の環境で不足している必須設定の環境変数名を返す。"""
     required: list[str] = []

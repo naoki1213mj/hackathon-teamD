@@ -87,7 +87,7 @@ async def _query_data_agent(question: str) -> str | None:
             # クリーンアップ
             try:
                 client.beta.threads.delete(thread.id)
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 pass
             return None
 
@@ -103,7 +103,7 @@ async def _query_data_agent(question: str) -> str | None:
         # クリーンアップ
         try:
             client.beta.threads.delete(thread.id)
-        except (ValueError, OSError):
+        except ValueError, OSError:
             pass
 
         answer = "\n".join(answer_parts).strip()
@@ -118,6 +118,7 @@ async def _query_data_agent(question: str) -> str | None:
     except Exception as exc:
         logger.warning("Fabric Data Agent で予期しないエラー: %s", exc)
         return None
+
 
 # --- Code Interpreter 自動検出 ---
 # None = 未テスト、True = 利用可能、False = 利用不可（404 等で失敗済み）
@@ -424,7 +425,10 @@ async def query_data_agent(question: str) -> str:
             ensure_ascii=False,
         )
     return json.dumps(
-        {"source": "fallback", "message": "Fabric Data Agent は現在利用できません。search_sales_history / search_customer_reviews をお使いください。"},
+        {
+            "source": "fallback",
+            "message": "Fabric Data Agent は現在利用できません。search_sales_history / search_customer_reviews をお使いください。",
+        },
         ensure_ascii=False,
     )
 

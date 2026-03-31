@@ -1558,8 +1558,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
 
     # Agent3b: 規制チェック結果を反映した修正版企画書を生成
     revision_input = (
-        f"## 元の企画書\n\n{context['plan_markdown']}\n\n"
-        f"## 規制チェック結果\n\n{regulation_outcome['text']}"
+        f"## 元の企画書\n\n{context['plan_markdown']}\n\n## 規制チェック結果\n\n{regulation_outcome['text']}"
     )
     revision_outcome = await _execute_agent(
         agent_name="plan-revision-agent",
