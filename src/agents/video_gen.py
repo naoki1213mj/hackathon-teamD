@@ -137,7 +137,7 @@ async def generate_promo_video(
     # アバタースタイルに応じた Photo Avatar キャラクター ID のマッピング
     avatar_characters: dict[str, str] = {
         "concierge": "lisa",
-        "guide": "harry",
+        "guide": "lori",
         "presenter": "lisa",
     }
     character = avatar_characters.get(avatar_style, "lisa")
@@ -155,13 +155,13 @@ async def generate_promo_video(
                 "inputs": [{"content": summary_text}],
                 "avatarConfig": {
                     "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": "casual-sitting",
+                    "talkingAvatarStyle": "graceful-sitting",
                     "videoFormat": "mp4",
                     "videoCodec": "h264",
                     "subtitleType": "soft_embedded",
                     "backgroundColor": "#FFFFFFFF",
                 },
-                "synthesisConfig": {"voice": "ja-JP-NanamiNeural"},
+                "synthesisConfig": {"voice": "ja-JP-NanamiDragonHDLatestNeural"},
             },
             ensure_ascii=False,
         ).encode("utf-8")

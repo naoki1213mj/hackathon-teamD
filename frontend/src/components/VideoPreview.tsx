@@ -27,6 +27,17 @@ export function VideoPreview({ videoUrl, t }: VideoPreviewProps) {
         <track kind="captions" />
         {t('video.unsupported')}
       </video>
+      <div className="p-3">
+        <a
+          href={videoUrl}
+          download="avatar-video.mp4"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+        >
+          💾 {t('export.video')}
+        </a>
+      </div>
     </div>
   )
 }

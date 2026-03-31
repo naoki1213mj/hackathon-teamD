@@ -201,7 +201,15 @@ function App() {
                 label: `📝 ${t('tab.plan')}`,
                 content: planContent ? (
                   showFinalPlan ? (
-                    <MarkdownView content={revisionContent?.content || planContent.content} />
+                    <>
+                      <MarkdownView content={revisionContent?.content || planContent.content} />
+                      <button
+                        onClick={() => exportPlanMarkdown(state.textContents)}
+                        className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+                      >
+                        💾 {t('export.plan')}
+                      </button>
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />

@@ -22,6 +22,13 @@ export function ImageGallery({ images, t }: ImageGalleryProps) {
               className="h-auto w-full rounded-[18px] object-cover"
             />
             <p className="mt-2 text-xs text-[var(--text-muted)]">{img.alt}</p>
+            <a
+              href={img.url}
+              download={`travel-image-${i + 1}.png`}
+              className="mt-2 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+            >
+              💾 {t('export.image')}
+            </a>
           </div>
         ))}
       </div>
