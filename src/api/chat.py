@@ -1429,23 +1429,60 @@ async def _refine_events(refine_text: str, conversation_id: str):
     # 評価フィードバック（品質評価結果に基づく改善指示）は常に企画書修正として処理
     is_eval_feedback = "品質評価" in refine_text or "evaluation" in text_lower
     if is_eval_feedback:
-        target_agent = "marketing-plan-agent"
-        step = 2
-        # 元の企画書コンテキストを復元して修正プロンプトを構築
+        # 評価フィードバック → 企画書を再生成して承認フローに再突入
         conversation = await get_conversation(conversation_id)
         original_plan = ""
+        analysis_markdown = ""
+        user_input = ""
         if conversation:
+            user_input = conversation.get("input", "")
             for msg in conversation.get("messages", []):
                 data = msg.get("data", {})
+                if msg.get("event") == "text" and data.get("agent") == "data-search-agent" and not analysis_markdown:
+                    analysis_markdown = data.get("content", "")
                 if msg.get("event") == "text" and data.get("agent") == "marketing-plan-agent":
                     original_plan = data.get("content", "")
-        if original_plan:
-            refine_text = (
-                f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
-                f"## 現在の企画書\n{original_plan[:3000]}\n\n"
-                f"## 改善指示\n{refine_text}"
-            )
-    elif any(k in text_lower for k in ["画像", "バナー", "イメージ", "色", "明るく"]):
+
+        revision_prompt = (
+            f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
+            f"## 元の依頼\n{user_input}\n\n"
+            f"## 現在の企画書\n{original_plan[:3000]}\n\n"
+            f"## 改善指示\n{refine_text}"
+        )
+
+        outcome = await _execute_agent(
+            agent_name="marketing-plan-agent",
+            agent_step=2,
+            user_input=revision_prompt,
+            conversation_id=conversation_id,
+        )
+        for event in outcome["events"]:
+            yield event
+        if not outcome["success"]:
+            return
+
+        # 承認コンテキストを構築して承認フローに再突入
+        _pending_approvals[conversation_id] = {
+            "user_input": user_input,
+            "analysis_markdown": analysis_markdown,
+            "plan_markdown": outcome["text"],
+            "model_settings": None,
+        }
+        yield format_sse(
+            SSEEventType.AGENT_PROGRESS,
+            {"agent": "approval", "status": "running", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
+        )
+        yield format_sse(
+            SSEEventType.APPROVAL_REQUEST,
+            {
+                "prompt": "改善した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
+                "conversation_id": conversation_id,
+                "plan_markdown": outcome["text"],
+            },
+        )
+        return
+
+    if any(k in text_lower for k in ["画像", "バナー", "イメージ", "色", "明るく"]):
         target_agent = "brochure-gen-agent"
         step = 5
     elif any(k in text_lower for k in ["規制", "法令", "チェック", "表現"]):
