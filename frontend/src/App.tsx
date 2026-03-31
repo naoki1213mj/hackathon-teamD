@@ -3,6 +3,7 @@ import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { BrochurePreview } from './components/BrochurePreview'
 import { ConversationHistory } from './components/ConversationHistory'
+import { EvaluationPanel } from './components/EvaluationPanel'
 import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
@@ -237,6 +238,13 @@ function App() {
             ]} t={t} />
 
             {isCompleted && (
+              <>
+              <EvaluationPanel
+                query={state.userMessages[0] || ''}
+                response={planContent?.content || ''}
+                html={state.textContents.find(c => c.content_type === 'html')?.content || ''}
+                t={t}
+              />
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--panel-border)] pt-4">
                 <VersionSelector
                   versions={state.versions.map((_, i) => i + 1)}
@@ -265,6 +273,7 @@ function App() {
                 </button>
                 </div>
               </div>
+              </>
             )}
             </>
           )}
