@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 interface PlanVersion {
   label: string
   content: string
@@ -12,15 +10,7 @@ interface PlanVersionTabsProps {
 }
 
 export function PlanVersionTabs({ versions, activeIndex, onChangeIndex }: PlanVersionTabsProps) {
-  const [internal, setInternal] = useState(versions.length - 1)
-  const active = activeIndex ?? internal
-
-  // 新バージョン追加時に最新に切り替え
-  useEffect(() => {
-    const latest = versions.length - 1
-    if (onChangeIndex) onChangeIndex(latest)
-    else setInternal(latest)
-  }, [versions.length, onChangeIndex])
+  const active = activeIndex ?? versions.length - 1
 
   if (versions.length <= 1) return null
 
@@ -29,7 +19,7 @@ export function PlanVersionTabs({ versions, activeIndex, onChangeIndex }: PlanVe
       {versions.map((v, i) => (
         <button
           key={i}
-          onClick={() => onChangeIndex ? onChangeIndex(i) : setInternal(i)}
+          onClick={() => onChangeIndex?.(i)}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
             i === active
               ? 'bg-[var(--accent-strong)] text-white'
@@ -41,18 +31,4 @@ export function PlanVersionTabs({ versions, activeIndex, onChangeIndex }: PlanVe
       ))}
     </div>
   )
-}
-
-/** 改善前/後のバージョンラベルを付けたプランリストを構築する */
-export function buildPlanVersions(
-  textContents: Array<{ agent?: string; content?: string }>,
-  t: (key: string) => string,
-): PlanVersion[] {
-  const plans = textContents.filter(c => c.agent === 'marketing-plan-agent' && c.content)
-  if (plans.length <= 1) return []
-
-  return plans.map((p, i) => ({
-    label: i === 0 ? t('eval.version.original') : `${t('eval.version.refined')} ${i > 1 ? i : ''}`.trim(),
-    content: p.content || '',
-  }))
 }
