@@ -72,7 +72,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     return 'pending'
   }
 
-  const getContent = (agentKey: string) => textContents.find(c => c.agent === agentKey)
+  const getContent = (agentKey: string) => textContents.findLast(c => c.agent === agentKey)
   const getToolEvents = (agentKey: string) => toolEvents.filter(e => e.agent === agentKey)
 
   return (
