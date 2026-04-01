@@ -170,9 +170,10 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                     <MarkdownView content={content.content} />
                   )
                 ) : isActive ? (
-                  <div className="flex items-center gap-2 py-4 text-sm text-[var(--text-muted)]">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-                    {t('status.running')}…
+                  <div className="space-y-3 py-4">
+                    <div className="h-3 w-3/4 animate-pulse rounded-full bg-[var(--panel-border)]" />
+                    <div className="h-3 w-1/2 animate-pulse rounded-full bg-[var(--panel-border)]" />
+                    <div className="h-3 w-2/3 animate-pulse rounded-full bg-[var(--panel-border)]" />
                   </div>
                 ) : null}
               </div>

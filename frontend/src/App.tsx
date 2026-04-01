@@ -1,5 +1,5 @@
-import { Clock, Download } from 'lucide-react'
-import { useState } from 'react'
+import { Download } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { BrochurePreview } from './components/BrochurePreview'
@@ -44,6 +44,14 @@ function App() {
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceText, setVoiceText] = useState('')
 
+  // Esc キーでリセット
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && state.status === 'completed') reset()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [state.status, reset])
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
@@ -57,22 +65,18 @@ function App() {
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:px-8">
-      <header className="relative z-20 rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-5 py-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">{t('app.kicker')}</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('app.title')}</h1>
-              <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
-                {statusLabel}
-              </span>
-            </div>
-            <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{t('app.subtitle')}</p>
+      <header className="relative z-20 rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-6 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)] backdrop-blur">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold tracking-tight">{t('app.title')}</h1>
+            <span className="rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[10px] font-medium text-[var(--accent-strong)]">
+              {statusLabel}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-          <SafetyBadge result={state.safetyResult} t={t} />
-          <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
-          <ThemeToggle theme={theme} onChange={setTheme} t={t} />
+          <div className="flex items-center gap-2">
+            <SafetyBadge result={state.safetyResult} t={t} />
+            <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
+            <ThemeToggle theme={theme} onChange={setTheme} t={t} />
           </div>
         </div>
       </header>
@@ -107,16 +111,11 @@ function App() {
               <>
                 <PipelineStepper progress={state.agentProgress} t={t} />
                 {isRunning && (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                    <Clock className="h-4 w-4" />
-                    <span>{elapsed}s</span>
-                    {state.agentProgress && state.agentProgress.agent !== 'approval' && (
-                      <span>— {t(AGENT_STEP_KEY[state.agentProgress.agent] || '')} {t('status.running')}</span>
-                    )}
-                    {state.agentProgress?.agent === 'approval' && (
-                      <span>— {t('status.approval')}</span>
-                    )}
-                  </div>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    {elapsed}s
+                    {state.agentProgress && state.agentProgress.agent !== 'approval' && ` · ${t(AGENT_STEP_KEY[state.agentProgress.agent] || '')}`}
+                    {state.agentProgress?.agent === 'approval' && ` · ${t('status.approval')}`}
+                  </p>
                 )}
               </>
             )}
@@ -141,9 +140,11 @@ function App() {
             />
           </div>
 
-          {/* 承認バナー（スクロール領域の外、固定位置） */}
+          {/* 承認バナー（モーダル風オーバーレイ） */}
           {state.status === 'approval' && state.approvalRequest && (
-            <ApprovalBanner request={state.approvalRequest} onApprove={approve} t={t} />
+            <div className="relative">
+              <ApprovalBanner request={state.approvalRequest} onApprove={approve} t={t} />
+            </div>
           )}
 
           <div className="border-t border-[var(--panel-border)] px-5 py-4">
@@ -191,9 +192,11 @@ function App() {
           {state.status === 'idle' ? (
             <div className="flex h-full min-h-80 items-center justify-center rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] px-8 py-12">
               <div className="max-w-sm text-center">
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">Preview</p>
-                <h3 className="mt-4 text-2xl font-semibold tracking-tight">{t('preview.empty.title')}</h3>
-                <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{t('preview.empty.subtitle')}</p>
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-soft)]">
+                  <div className="h-3 w-3 animate-pulse rounded-full bg-[var(--accent)]" />
+                </div>
+                <h3 className="text-xl font-semibold tracking-tight">{t('preview.empty.title')}</h3>
+                <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{t('preview.empty.subtitle')}</p>
               </div>
             </div>
           ) : (
@@ -256,7 +259,7 @@ function App() {
                   t={t}
                 />
               )},
-            ]} t={t} />
+            ]} t={t} activeAgent={state.agentProgress?.agent} />
 
             {isCompleted && (
               <>

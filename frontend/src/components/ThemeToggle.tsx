@@ -1,3 +1,5 @@
+import { Monitor, Moon, Sun } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { Theme } from '../hooks/useTheme';
 
 interface ThemeToggleProps {
@@ -6,10 +8,10 @@ interface ThemeToggleProps {
   t: (key: string) => string
 }
 
-const THEMES: { value: Theme; icon: string; labelKey: string }[] = [
-  { value: 'light', icon: '☀', labelKey: 'theme.light' },
-  { value: 'dark', icon: '◐', labelKey: 'theme.dark' },
-  { value: 'system', icon: '⌘', labelKey: 'theme.system' },
+const THEMES: { value: Theme; icon: ReactNode; labelKey: string }[] = [
+  { value: 'light', icon: <Sun className="h-3.5 w-3.5" />, labelKey: 'theme.light' },
+  { value: 'dark', icon: <Moon className="h-3.5 w-3.5" />, labelKey: 'theme.dark' },
+  { value: 'system', icon: <Monitor className="h-3.5 w-3.5" />, labelKey: 'theme.system' },
 ]
 
 export function ThemeToggle({ theme, onChange, t }: ThemeToggleProps) {
@@ -32,7 +34,7 @@ export function ThemeToggle({ theme, onChange, t }: ThemeToggleProps) {
           `}
           title={t(option.labelKey)}
         >
-          <span aria-hidden="true">{option.icon}</span>
+          {option.icon}
           <span>{t(option.labelKey)}</span>
         </button>
       ))}

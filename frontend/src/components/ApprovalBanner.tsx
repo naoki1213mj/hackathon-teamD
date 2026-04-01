@@ -1,4 +1,4 @@
-import { Check, Pencil } from 'lucide-react';
+import { Check, MessageSquareWarning, Pencil } from 'lucide-react';
 import { useState } from 'react';
 
 interface ApprovalBannerProps {
@@ -12,16 +12,14 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
   const [revision, setRevision] = useState('')
 
   return (
-    <div className="border-t-2 border-amber-400 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 px-5 py-4 shadow-[0_-4px_20px_rgba(251,191,36,0.12)]">
-      <div className="flex items-center gap-3 mb-3">
-        <span className="relative flex h-3 w-3">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
-        </span>
-        <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-          ⚡ {t('approval.title')}
+    <div className="absolute inset-x-0 bottom-0 z-30 mx-4 mb-4 rounded-2xl border border-amber-300 bg-white/95 dark:bg-slate-900/95 px-6 py-5 shadow-[0_8px_40px_rgba(251,191,36,0.2)] backdrop-blur-lg">
+        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-200 mb-3">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+          </span>
+          <MessageSquareWarning className="h-4 w-4" /> {t('approval.title')}
         </h3>
-      </div>
 
       {mode === 'action' ? (
         <div className="flex items-center gap-3">
