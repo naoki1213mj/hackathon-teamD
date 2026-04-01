@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
 import { FileText, Image, Layout, Video } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
 interface Tab {
   key: string
@@ -20,22 +20,20 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   video: <Video className="h-3.5 w-3.5" />,
 }
 
-export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
-  const [activeTab, setActiveTab] = useState(tabs[0]?.key || '')
+const AGENT_TAB_MAP: Record<string, string> = {
+  'marketing-plan-agent': 'plan',
+  'plan-revision-agent': 'plan',
+  'regulation-check-agent': 'plan',
+  'brochure-gen-agent': 'brochure',
+  'video-gen-agent': 'video',
+}
 
-  // エージェント進捗に応じてタブを自動切替
-  useEffect(() => {
-    if (!activeAgent) return
-    const agentTabMap: Record<string, string> = {
-      'marketing-plan-agent': 'plan',
-      'plan-revision-agent': 'plan',
-      'regulation-check-agent': 'plan',
-      'brochure-gen-agent': 'brochure',
-      'video-gen-agent': 'video',
-    }
-    const tab = agentTabMap[activeAgent]
-    if (tab) setActiveTab(tab)
-  }, [activeAgent])
+export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
+  const [userSelectedTab, setUserSelectedTab] = useState<string | null>(null)
+
+  // activeAgent から推奨タブを決定。ユーザーが手動選択していればそちらを優先
+  const agentSuggestedTab = activeAgent ? AGENT_TAB_MAP[activeAgent] : undefined
+  const activeTab = userSelectedTab ?? agentSuggestedTab ?? tabs[0]?.key ?? ''
 
   const activeTabs = tabs.filter(tab => tab.content !== null)
 
@@ -55,7 +53,7 @@ export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
             role="tab"
             data-selected={effectiveActiveTab === tab.key ? 'true' : 'false'}
             aria-controls={`artifact-panel-${tab.key}`}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => setUserSelectedTab(tab.key)}
             className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]
               ${effectiveActiveTab === tab.key
                 ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
