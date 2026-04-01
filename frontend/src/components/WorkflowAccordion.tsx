@@ -43,9 +43,18 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   const autoCollapsed = useMemo(() => {
     const result: Record<string, boolean> = {}
     STEPS.forEach((step) => {
-      if (step.step < currentStep) result[step.key] = true
-      else if (step.key === currentAgent) result[step.key] = false
-      else result[step.key] = false
+      if (step.step < currentStep) {
+        // 完了済みステップは折りたたむ
+        result[step.key] = true
+      } else if (step.key === currentAgent) {
+        // 実行中のステップは開く
+        result[step.key] = false
+      } else if (currentAgent === 'approval' && step.step > currentStep) {
+        // 承認待ち中は、まだ未実行のステップを折りたたむ
+        result[step.key] = true
+      } else {
+        result[step.key] = false
+      }
     })
     return result
   }, [currentStep, currentAgent])
