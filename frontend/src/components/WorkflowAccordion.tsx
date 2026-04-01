@@ -132,6 +132,13 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     if (isPastRound) return 'completed'
     if (!agentProgress) return 'pending'
     const hasContent = roundContents.some(c => c.agent === stepKey)
+
+    // brochure-gen と video-gen は同じ step 5 を共有。
+    // video-gen が running のときは brochure セクションも「実行中」扱い
+    if (stepKey === 'brochure-gen-agent' && agentProgress.agent === 'video-gen-agent') {
+      return agentProgress.status === 'running' ? 'active' : 'completed'
+    }
+
     if (hasContent && agentProgress.agent !== stepKey) return 'completed'
     if (stepNum < agentProgress.step) return 'completed'
     if (agentProgress.agent === stepKey && agentProgress.status === 'running') return 'active'
