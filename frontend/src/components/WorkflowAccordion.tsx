@@ -1,4 +1,4 @@
-import { BarChart3, Check, FileText, Palette, Scale } from 'lucide-react'
+import { BarChart3, Check, ChevronDown, FileText, History, Palette, Scale } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
 import { AnalysisView } from './AnalysisView'
@@ -90,7 +90,51 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   }
 
   const getContent = (agentKey: string) => textContents.findLast(c => c.agent === agentKey)
+  const getAllContents = (agentKey: string) => textContents.filter(c => c.agent === agentKey)
   const getToolEvents = (agentKey: string) => toolEvents.filter(e => e.agent === agentKey)
+
+  /** 複数回実行されたエージェントのコンテンツをバージョン付きで表示する */
+  const renderVersionedContent = (agentKey: string) => {
+    const contents = getAllContents(agentKey)
+    if (contents.length === 0) return null
+    if (contents.length === 1) {
+      // 1 回のみ — 従来通り
+      if (agentKey === 'regulation-check-agent') return <RegulationResults contents={textContents} t={t} />
+      return <MarkdownView content={contents[0].content} />
+    }
+    // 複数回 — 最新を先頭、旧バージョンは折りたたみ
+    return (
+      <div className="space-y-3">
+        {/* 最新バージョン（常に表示） */}
+        <div>
+          <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[10px] font-semibold text-[var(--accent-strong)]">
+            v{contents.length} — {t('version.latest')}
+          </p>
+          {agentKey === 'regulation-check-agent'
+            ? <RegulationResults contents={textContents} t={t} />
+            : <MarkdownView content={contents[contents.length - 1].content} />}
+        </div>
+        {/* 旧バージョン（折りたたみ） */}
+        <details className="group rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)]">
+          <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+            <History className="h-3 w-3" />
+            {t('version.history')} ({contents.length - 1})
+            <ChevronDown className="ml-auto h-3 w-3 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="space-y-3 border-t border-[var(--panel-border)] px-3 py-3">
+            {contents.slice(0, -1).reverse().map((c, i) => (
+              <div key={i} className="rounded-lg border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
+                <p className="mb-1.5 text-[10px] font-medium text-[var(--text-muted)]">v{contents.length - 1 - i}</p>
+                <div className="max-h-48 overflow-y-auto text-sm">
+                  <MarkdownView content={c.content} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2">
@@ -157,7 +201,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                   step.key === 'data-search-agent' ? (
                     <AnalysisView contents={textContents} t={t} />
                   ) : step.key === 'regulation-check-agent' ? (
-                    <RegulationResults contents={textContents} t={t} />
+                    renderVersionedContent(step.key)
                   ) : step.key === 'brochure-gen-agent' ? (
                     // ブローシャ HTML は右パネルで表示。ここでは完了サマリ
                     <div className="py-3 space-y-2">
@@ -176,7 +220,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                       })()}
                     </div>
                   ) : (
-                    <MarkdownView content={content.content} />
+                    renderVersionedContent(step.key)
                   )
                 ) : isActive ? (
                   <div className="space-y-3 py-4">
