@@ -75,6 +75,11 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
   const currentStep = agentProgress?.step ?? 0
   const currentAgent = agentProgress?.agent ?? ''
+  const activeStepKey = currentAgent === 'plan-revision-agent'
+    ? 'regulation-check-agent'
+    : currentAgent === 'video-gen-agent'
+      ? 'brochure-gen-agent'
+      : currentAgent
 
   const rounds = useMemo(() => splitIntoRounds(textContents), [textContents])
   const totalRounds = rounds.length || 1
@@ -98,7 +103,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
       if (step.step < currentStep) {
         result[step.key] = true
-      } else if (step.key === currentAgent) {
+      } else if (step.key === activeStepKey) {
         result[step.key] = false
       } else if (currentAgent === 'approval' && step.step > currentStep) {
         result[step.key] = true
@@ -110,7 +115,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
       }
     })
     return result
-  }, [currentStep, currentAgent, agentProgress, rounds])
+  }, [activeStepKey, currentStep, currentAgent, agentProgress, rounds])
 
   // 手動トグル用の state（ユーザー操作のみ）
   const [userToggled, setUserToggled] = useState<{ step: number; overrides: Record<string, boolean> }>({ step: 0, overrides: {} })
@@ -136,6 +141,10 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     // brochure-gen と video-gen は同じ step 5 を共有。
     // video-gen が running のときは brochure セクションも「実行中」扱い
     if (stepKey === 'brochure-gen-agent' && agentProgress.agent === 'video-gen-agent') {
+      return agentProgress.status === 'running' ? 'active' : 'completed'
+    }
+
+    if (stepKey === 'regulation-check-agent' && agentProgress.agent === 'plan-revision-agent') {
       return agentProgress.status === 'running' ? 'active' : 'completed'
     }
 
@@ -176,7 +185,6 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
         <button
           onClick={() => { if (!isPastRound) toggle(step.key) }}
           className="flex w-full items-center justify-between px-4 py-3 text-left"
-          aria-expanded={!sectionCollapsed}
         >
           <div className="flex items-center gap-3">
             <span className="text-lg">{STEP_ICONS[step.key]}</span>

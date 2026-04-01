@@ -8,6 +8,7 @@ import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50
+const PIPELINE_TOTAL_STEPS = 5
 
 export interface AgentProgress {
   agent: string
@@ -64,6 +65,29 @@ export type PipelineStatus = 'idle' | 'running' | 'approval' | 'completed' | 'er
 export interface ArtifactSnapshot {
   textContents: TextContent[]
   images: ImageContent[]
+  toolEvents: ToolEvent[]
+  metrics: PipelineMetrics | null
+  safetyResult: SafetyResult | null
+}
+
+interface SnapshotSource {
+  textContents: TextContent[]
+  images: ImageContent[]
+  toolEvents: ToolEvent[]
+  metrics: PipelineMetrics | null
+  safetyResult: SafetyResult | null
+}
+
+export interface ConversationEvent {
+  event?: string
+  data?: Record<string, unknown>
+}
+
+export interface ConversationDocument {
+  id?: string
+  input?: string
+  status?: string
+  messages?: ConversationEvent[]
 }
 
 export interface PipelineState {
@@ -100,11 +124,196 @@ const initialState: PipelineState = {
   userMessages: [],
 }
 
+function cloneTextContents(textContents: TextContent[]): TextContent[] {
+  return textContents.map(item => ({ ...item }))
+}
+
+function cloneImages(images: ImageContent[]): ImageContent[] {
+  return images.map(item => ({ ...item }))
+}
+
+function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
+  return toolEvents.map(item => ({ ...item }))
+}
+
+export function createArtifactSnapshot(source: SnapshotSource): ArtifactSnapshot {
+  return {
+    textContents: cloneTextContents(source.textContents),
+    images: cloneImages(source.images),
+    toolEvents: cloneToolEvents(source.toolEvents),
+    metrics: source.metrics ? { ...source.metrics } : null,
+    safetyResult: source.safetyResult ? { ...source.safetyResult } : null,
+  }
+}
+
+function getLatestPlanMarkdown(textContents: TextContent[]): string | undefined {
+  for (let index = textContents.length - 1; index >= 0; index -= 1) {
+    const content = textContents[index]
+    if (content.agent === 'plan-revision-agent' || content.agent === 'marketing-plan-agent') {
+      return content.content
+    }
+  }
+  return undefined
+}
+
+export function buildRestoredPipelineState(
+  doc: ConversationDocument,
+  conversationId: string,
+  settings: ModelSettings,
+): PipelineState {
+  const textContents: TextContent[] = []
+  const images: ImageContent[] = []
+  let toolEvents: ToolEvent[] = []
+  let safetyResult: SafetyResult | null = null
+  let metrics: PipelineMetrics | null = null
+  let error: ErrorData | null = null
+  let approvalRequest: ApprovalRequest | null = null
+  let latestAgentProgress: AgentProgress | null = null
+  const versions: ArtifactSnapshot[] = []
+
+  for (const event of doc.messages ?? []) {
+    const data = event.data ?? {}
+
+    switch (event.event) {
+      case 'agent_progress':
+        latestAgentProgress = {
+          agent: String(data.agent || ''),
+          status: data.status === 'completed' ? 'completed' : 'running',
+          step: Number(data.step || 0),
+          total_steps: Number(data.total_steps || 0),
+        }
+        break
+      case 'text':
+        textContents.push({
+          content: String(data.content || ''),
+          agent: String(data.agent || ''),
+          content_type: data.content_type ? String(data.content_type) : undefined,
+        })
+        break
+      case 'image':
+        images.push({
+          url: String(data.url || ''),
+          alt: String(data.alt || ''),
+          agent: String(data.agent || ''),
+        })
+        break
+      case 'tool_event':
+        toolEvents = [
+          ...toolEvents,
+          {
+            tool: String(data.tool || ''),
+            status: String(data.status || ''),
+            agent: String(data.agent || ''),
+          },
+        ].slice(-MAX_TOOL_EVENTS)
+        break
+      case 'approval_request':
+        approvalRequest = {
+          prompt: String(data.prompt || ''),
+          conversation_id: String(data.conversation_id || conversationId),
+          plan_markdown: data.plan_markdown ? String(data.plan_markdown) : undefined,
+        }
+        latestAgentProgress = {
+          agent: 'approval',
+          status: 'running',
+          step: 3,
+          total_steps: PIPELINE_TOTAL_STEPS,
+        }
+        break
+      case 'safety':
+        safetyResult = {
+          hate: Number(data.hate || 0),
+          self_harm: Number(data.self_harm || 0),
+          sexual: Number(data.sexual || 0),
+          violence: Number(data.violence || 0),
+          status: data.status === 'warning' || data.status === 'error' ? data.status : 'safe',
+        }
+        break
+      case 'error':
+        error = {
+          message: String(data.message || ''),
+          code: String(data.code || ''),
+        }
+        break
+      case 'done':
+        metrics = (data.metrics as PipelineMetrics | undefined) ?? null
+        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, safetyResult }))
+        break
+    }
+  }
+
+  if (approvalRequest && !approvalRequest.plan_markdown) {
+    approvalRequest = {
+      ...approvalRequest,
+      plan_markdown: getLatestPlanMarkdown(textContents),
+    }
+  }
+
+  const status = doc.status === 'awaiting_approval'
+    ? 'approval'
+    : doc.status === 'error'
+      ? 'error'
+      : 'completed'
+
+  if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
+    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, safetyResult }))
+  }
+
+  return {
+    ...initialState,
+    status,
+    conversationId,
+    agentProgress: status === 'approval'
+      ? latestAgentProgress ?? {
+          agent: 'approval',
+          status: 'running',
+          step: 3,
+          total_steps: PIPELINE_TOTAL_STEPS,
+        }
+      : latestAgentProgress,
+    toolEvents: cloneToolEvents(toolEvents),
+    textContents: cloneTextContents(textContents),
+    images: cloneImages(images),
+    approvalRequest: status === 'approval'
+      ? approvalRequest ?? {
+          prompt: '',
+          conversation_id: conversationId,
+          plan_markdown: getLatestPlanMarkdown(textContents),
+        }
+      : null,
+    safetyResult,
+    metrics,
+    error,
+    versions,
+    currentVersion: versions.length,
+    settings: { ...settings },
+    userMessages: doc.input ? [doc.input] : [],
+  }
+}
+
+function syncToLatestSnapshot(state: PipelineState): PipelineState {
+  const latestSnapshot = state.versions[state.versions.length - 1]
+  if (!latestSnapshot || state.currentVersion === 0 || state.currentVersion === state.versions.length) {
+    return state
+  }
+
+  return {
+    ...state,
+    textContents: cloneTextContents(latestSnapshot.textContents),
+    images: cloneImages(latestSnapshot.images),
+    toolEvents: cloneToolEvents(latestSnapshot.toolEvents),
+    metrics: latestSnapshot.metrics ? { ...latestSnapshot.metrics } : null,
+    safetyResult: latestSnapshot.safetyResult ? { ...latestSnapshot.safetyResult } : null,
+    currentVersion: state.versions.length,
+  }
+}
+
 export function useSSE() {
   const [state, setState] = useState<PipelineState>(initialState)
   const conversationIdRef = useRef<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const stateRef = useRef<PipelineState>(initialState)
+  const activeRequestIdRef = useRef(0)
 
   // stateRef を常に最新に保つ（effect 内で更新）
   useEffect(() => {
@@ -115,11 +324,13 @@ export function useSSE() {
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort()
+      abortControllerRef.current = null
     }
   }, [])
 
-  const createHandlers = useCallback((): SSEHandlers => ({
+  const createHandlers = useCallback((requestId: number): SSEHandlers => ({
     agent_progress: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       const progress = data as AgentProgress
       setState(prev => ({
         ...prev,
@@ -128,24 +339,28 @@ export function useSSE() {
       }))
     },
     tool_event: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
         ...prev,
         toolEvents: [...prev.toolEvents, data as ToolEvent].slice(-MAX_TOOL_EVENTS),
       }))
     },
     text: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
         ...prev,
         textContents: [...prev.textContents, data as TextContent],
       }))
     },
     image: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
         ...prev,
         images: [...prev.images, data as ImageContent],
       }))
     },
     approval_request: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       const request = data as ApprovalRequest
       conversationIdRef.current = request.conversation_id
       setState(prev => ({
@@ -156,12 +371,14 @@ export function useSSE() {
       }))
     },
     safety: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
         ...prev,
         safetyResult: data as SafetyResult,
       }))
     },
     error: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
         ...prev,
         error: data as ErrorData,
@@ -169,12 +386,16 @@ export function useSSE() {
       }))
     },
     done: (data) => {
+      if (requestId !== activeRequestIdRef.current) return
       const doneData = data as { conversation_id: string; metrics: PipelineMetrics }
       setState(prev => {
-        const snapshot: ArtifactSnapshot = {
+        const snapshot = createArtifactSnapshot({
           textContents: prev.textContents,
           images: prev.images,
-        }
+          toolEvents: prev.toolEvents,
+          metrics: doneData.metrics,
+          safetyResult: prev.safetyResult,
+        })
         const newVersions = [...prev.versions, snapshot]
         return {
           ...prev,
@@ -192,18 +413,26 @@ export function useSSE() {
     abortControllerRef.current?.abort()
     const controller = new AbortController()
     abortControllerRef.current = controller
+    const requestId = activeRequestIdRef.current + 1
+    activeRequestIdRef.current = requestId
     const existingConversationId = conversationIdRef.current
     setState(prev => ({
-      ...prev,
+      ...syncToLatestSnapshot(prev),
       status: 'running',
       error: null,
       approvalRequest: null,
       agentProgress: null,
-      userMessages: [...prev.userMessages, message],
+      userMessages: [...syncToLatestSnapshot(prev).userMessages, message],
     }))
-    const handlers = createHandlers()
+    const handlers = createHandlers(requestId)
     const currentSettings = stateRef.current.settings
-    await connectSSE(message, handlers, existingConversationId || undefined, controller.signal, currentSettings)
+    try {
+      await connectSSE(message, handlers, existingConversationId || undefined, controller.signal, currentSettings)
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null
+      }
+    }
   }, [createHandlers])
 
   const approve = useCallback(async (response: string) => {
@@ -212,12 +441,23 @@ export function useSSE() {
     abortControllerRef.current?.abort()
     const controller = new AbortController()
     abortControllerRef.current = controller
-    setState(prev => ({ ...prev, status: 'running', approvalRequest: null }))
-    const handlers = createHandlers()
-    await sendApproval(threadId, response, handlers, controller.signal)
+    const requestId = activeRequestIdRef.current + 1
+    activeRequestIdRef.current = requestId
+    setState(prev => ({ ...prev, status: 'running', approvalRequest: null, error: null }))
+    const handlers = createHandlers(requestId)
+    try {
+      await sendApproval(threadId, response, handlers, controller.signal)
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null
+      }
+    }
   }, [createHandlers])
 
   const reset = useCallback(() => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    activeRequestIdRef.current += 1
     setState(initialState)
     conversationIdRef.current = null
   }, [])
@@ -230,6 +470,11 @@ export function useSSE() {
         ...prev,
         textContents: snapshot.textContents,
         images: snapshot.images,
+        toolEvents: snapshot.toolEvents,
+        metrics: snapshot.metrics,
+        safetyResult: snapshot.safetyResult,
+        approvalRequest: null,
+        error: null,
         currentVersion: version,
       }
     })
@@ -241,59 +486,18 @@ export function useSSE() {
 
   /** 保存済み会話を復元する（新規推論を実行しない） */
   const restoreConversation = useCallback(async (conversationId: string) => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    const requestId = activeRequestIdRef.current + 1
+    activeRequestIdRef.current = requestId
+
     try {
       const resp = await fetch(`/api/conversations/${conversationId}`)
       if (!resp.ok) return
-      const doc = await resp.json()
+      const doc = await resp.json() as ConversationDocument
+      if (requestId !== activeRequestIdRef.current) return
 
-      const events: Array<{ event?: string; data?: Record<string, unknown> }> = doc.messages || []
-
-      const textContents: TextContent[] = []
-      const images: ImageContent[] = []
-      const toolEvents: ToolEvent[] = []
-      let safetyResult: SafetyResult | null = null
-      let metrics: PipelineMetrics | null = null
-      const userMessages: string[] = doc.input ? [doc.input] : []
-
-      for (const evt of events) {
-        const data = evt.data || {}
-        switch (evt.event) {
-          case 'text':
-            textContents.push({ content: (data.content as string) || '', agent: (data.agent as string) || '', content_type: (data.content_type as string) || undefined })
-            break
-          case 'image':
-            images.push({ url: (data.url as string) || '', alt: (data.alt as string) || '', agent: (data.agent as string) || '' })
-            break
-          case 'tool_event':
-            toolEvents.push({ tool: (data.tool as string) || '', status: (data.status as string) || '', agent: (data.agent as string) || '' })
-            break
-          case 'safety':
-            safetyResult = { hate: (data.hate as number) || 0, self_harm: (data.self_harm as number) || 0, sexual: (data.sexual as number) || 0, violence: (data.violence as number) || 0, status: (data.status as SafetyResult['status']) || 'safe' }
-            break
-          case 'done':
-            metrics = (data.metrics as PipelineMetrics) || null
-            break
-        }
-      }
-
-      const snapshot: ArtifactSnapshot = { textContents, images }
-
-      setState(prev => ({
-        ...prev,
-        status: 'completed',
-        conversationId,
-        textContents,
-        images,
-        toolEvents,
-        safetyResult,
-        metrics,
-        userMessages,
-        error: null,
-        approvalRequest: null,
-        agentProgress: null,
-        versions: [snapshot],
-        currentVersion: 1,
-      }))
+      setState(buildRestoredPipelineState(doc, conversationId, stateRef.current.settings))
 
       conversationIdRef.current = conversationId
     } catch (err) {

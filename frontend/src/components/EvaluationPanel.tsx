@@ -1,5 +1,5 @@
 import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 interface EvaluationResult {
   builtin?: Record<string, { score: number; reason?: string }>
@@ -15,6 +15,10 @@ interface EvaluationPanelProps {
   html: string
   t: (key: string) => string
   onRefine?: (feedback: string) => void
+}
+
+function buildEvaluationKey(query: string, response: string, html: string): string {
+  return JSON.stringify([query, response.slice(0, 5000), html.slice(0, 5000)])
 }
 
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
@@ -97,9 +101,11 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
 }
 
 export function EvaluationPanel({ query, response, html, t, onRefine }: EvaluationPanelProps) {
-  const [history, setHistory] = useState<EvaluationResult[]>([])
+  const [histories, setHistories] = useState<Record<string, EvaluationResult[]>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const evaluationKey = useMemo(() => buildEvaluationKey(query, response, html), [query, response, html])
+  const history = histories[evaluationKey] ?? []
 
   const result = history.length > 0 ? history[history.length - 1] : null
   const previousResult = history.length > 1 ? history[history.length - 2] : null
@@ -118,7 +124,10 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
         return
       }
       const data = await res.json() as EvaluationResult
-      setHistory(prev => [...prev, data])
+      setHistories(prev => ({
+        ...prev,
+        [evaluationKey]: [...(prev[evaluationKey] ?? []), data],
+      }))
     } catch (err) {
       setError(String(err))
     } finally {

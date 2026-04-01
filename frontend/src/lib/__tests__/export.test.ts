@@ -91,6 +91,21 @@ describe('exportPlanMarkdown', () => {
     const result = await getCapturedText()
     expect(result).toBe('# Marketing Plan\nDetails here')
   })
+
+  it('prefers the latest revised plan when multiple rounds exist', async () => {
+    const { exportPlanMarkdown } = await import('../export')
+    const contents: TextContent[] = [
+      { content: '# Plan v1', agent: 'marketing-plan-agent' },
+      { content: '# Revised v1', agent: 'plan-revision-agent' },
+      { content: '# Plan v2', agent: 'marketing-plan-agent' },
+      { content: '# Revised v2', agent: 'plan-revision-agent' },
+    ]
+
+    exportPlanMarkdown(contents)
+
+    const result = await getCapturedText()
+    expect(result).toBe('# Revised v2')
+  })
 })
 
 describe('exportAllAsJson', () => {
@@ -115,5 +130,30 @@ describe('exportAllAsJson', () => {
     expect(parsed.analysis).toBe('analysis content')
     expect(parsed.images).toHaveLength(1)
     expect(parsed.images[0].url).toBe('data:image/png;base64,abc')
+  })
+
+  it('uses the latest artifacts for multi-round exports', async () => {
+    const { exportAllAsJson } = await import('../export')
+    const contents: TextContent[] = [
+      { content: 'plan v1', agent: 'marketing-plan-agent' },
+      { content: 'revised v1', agent: 'plan-revision-agent' },
+      { content: 'reg v1', agent: 'regulation-check-agent' },
+      { content: '<h1>brochure v1</h1>', agent: 'brochure-gen-agent', content_type: 'html' },
+      { content: 'analysis v1', agent: 'data-search-agent' },
+      { content: 'plan v2', agent: 'marketing-plan-agent' },
+      { content: 'revised v2', agent: 'plan-revision-agent' },
+      { content: 'reg v2', agent: 'regulation-check-agent' },
+      { content: '<h1>brochure v2</h1>', agent: 'brochure-gen-agent', content_type: 'html' },
+      { content: 'analysis v2', agent: 'data-search-agent' },
+    ]
+
+    exportAllAsJson(contents, [], 'conv-latest')
+
+    const parsed = JSON.parse(await getCapturedText())
+    expect(parsed.plan).toBe('plan v2')
+    expect(parsed.revised_plan).toBe('revised v2')
+    expect(parsed.regulation_check).toBe('reg v2')
+    expect(parsed.brochure_html).toBe('<h1>brochure v2</h1>')
+    expect(parsed.analysis).toBe('analysis v2')
   })
 })

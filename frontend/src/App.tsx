@@ -31,9 +31,9 @@ const AGENT_STEP_KEY: Record<string, string> = {
   'marketing-plan-agent': 'step.marketing_plan',
   'approval': 'step.approval',
   'regulation-check-agent': 'step.regulation',
-  'plan-revision-agent': 'step.regulation',
+  'plan-revision-agent': 'step.plan_revision',
   'brochure-gen-agent': 'step.brochure',
-  'video-gen-agent': 'step.brochure',
+  'video-gen-agent': 'step.video',
 }
 
 function App() {
@@ -42,7 +42,7 @@ function App() {
   const { locale, setLocale, t } = useI18n()
 
   // 音声入力テキスト — InputForm に挿入して確認後に送信
-  const [voiceText, setVoiceText] = useState('')
+  const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
 
   // Esc キーでリセット
   useEffect(() => {
@@ -61,6 +61,11 @@ function App() {
   // revision agent が修正済み企画書を出力するまでは「確認中」として表示
   const showFinalPlan = revisionContent || isCompleted
   const statusLabel = t(`status.${state.status}`)
+  const pendingPlanLabel = state.status === 'approval'
+    ? t('status.approval')
+    : state.agentProgress?.agent === 'plan-revision-agent'
+      ? t('step.plan_revision')
+      : t('step.regulation')
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
@@ -167,16 +172,21 @@ function App() {
                   />
                 ) : (
                   <InputForm
-                    onSubmit={(msg) => { sendMessage(msg); setVoiceText('') }}
+                    key={voiceDraft.id}
+                    onSubmit={(msg) => { sendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
                     disabled={isRunning}
                     placeholder={t('input.placeholder')}
                     sendLabel={t('input.send')}
                     label={t('input.label')}
-                    initialValue={voiceText}
+                    initialValue={voiceDraft.text}
                   />
                 )}
               </div>
-              <VoiceInput onTranscript={setVoiceText} disabled={isRunning} t={t} />
+              <VoiceInput
+                onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
+                disabled={isRunning}
+                t={t}
+              />
               <PdfUpload disabled={isRunning} t={t} />
             </div>
           </div>
@@ -237,7 +247,7 @@ function App() {
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
                       <p className="text-sm">
-                        {state.status === 'approval' ? t('status.approval') : t('step.regulation')}…
+                        {pendingPlanLabel}…
                       </p>
                       <p className="text-xs mt-1">{t('preview.unavailable')}</p>
                     </div>

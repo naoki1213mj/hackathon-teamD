@@ -1,20 +1,24 @@
-import { BarChart3, Check, FileText, Palette, Scale, ShieldCheck } from 'lucide-react'
+import { BarChart3, Check, FileText, Palette, Pencil, Scale, ShieldCheck, Video } from 'lucide-react'
 import type { AgentProgress } from '../hooks/useSSE'
 
-const STEP_ICONS: Record<string, React.ReactNode> = {
+const PHASE_ICONS: Record<string, React.ReactNode> = {
   'data-search-agent': <BarChart3 className="h-4 w-4" />,
   'marketing-plan-agent': <FileText className="h-4 w-4" />,
   'approval': <ShieldCheck className="h-4 w-4" />,
   'regulation-check-agent': <Scale className="h-4 w-4" />,
+  'plan-revision-agent': <Pencil className="h-4 w-4" />,
   'brochure-gen-agent': <Palette className="h-4 w-4" />,
+  'video-gen-agent': <Video className="h-4 w-4" />,
 }
 
-const STEPS = [
+const PHASES = [
   { key: 'data-search-agent', label: 'step.data_search' },
   { key: 'marketing-plan-agent', label: 'step.marketing_plan' },
   { key: 'approval', label: 'step.approval' },
   { key: 'regulation-check-agent', label: 'step.regulation' },
+  { key: 'plan-revision-agent', label: 'step.plan_revision' },
   { key: 'brochure-gen-agent', label: 'step.brochure' },
+  { key: 'video-gen-agent', label: 'step.video' },
 ]
 
 interface PipelineStepperProps {
@@ -23,23 +27,22 @@ interface PipelineStepperProps {
 }
 
 export function PipelineStepper({ progress, t }: PipelineStepperProps) {
-  const currentStep = progress ? progress.step : 0
   const currentAgent = progress?.agent || ''
+  const currentPhaseIndex = progress ? PHASES.findIndex(phase => phase.key === currentAgent) : -1
 
   return (
-    <div className="flex items-center gap-1 py-3">
-      {STEPS.map((step, i) => {
-        const stepNum = i + 1
-        const isActive = step.key === currentAgent && progress?.status === 'running'
-        const isCompleted = stepNum < currentStep ||
-          (stepNum === currentStep && progress?.status === 'completed') ||
-          (step.key === 'approval' && currentStep > 2)
+    <div className="overflow-x-auto pb-1">
+      <div className="flex min-w-max items-center gap-1 py-3">
+      {PHASES.map((step, i) => {
+        const isActive = i === currentPhaseIndex && progress?.status === 'running'
+        const isCompleted = currentPhaseIndex > i ||
+          (currentPhaseIndex === i && progress?.status === 'completed')
         const isPending = !isActive && !isCompleted
 
         return (
           <div key={step.key} className="flex items-center gap-1">
             {i > 0 && (
-              <div className={`h-0.5 w-6 ${isCompleted ? 'bg-[var(--accent)]' : 'bg-[var(--panel-border)]'}`} />
+              <div className={`h-0.5 w-6 ${currentPhaseIndex >= i ? 'bg-[var(--accent)]' : 'bg-[var(--panel-border)]'}`} />
             )}
             <div className="flex flex-col items-center gap-1">
               <div
@@ -48,7 +51,7 @@ export function PipelineStepper({ progress, t }: PipelineStepperProps) {
                   ${isActive ? 'animate-pulse bg-[var(--accent-soft)] text-[var(--accent-strong)] ring-2 ring-[var(--accent)]/40' : ''}
                   ${isPending ? 'bg-[var(--panel-strong)] text-[var(--text-muted)]' : ''}`}
               >
-                {isCompleted ? <Check className="h-4 w-4" /> : STEP_ICONS[step.key]}
+                {isCompleted ? <Check className="h-4 w-4" /> : PHASE_ICONS[step.key]}
               </div>
               <span className={`text-xs whitespace-nowrap
                 ${isActive ? 'font-medium text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>
@@ -58,6 +61,7 @@ export function PipelineStepper({ progress, t }: PipelineStepperProps) {
           </div>
         )
       })}
+      </div>
     </div>
   )
 }
