@@ -1,11 +1,20 @@
+import { BarChart3, Check, FileText, Palette, Scale, ShieldCheck } from 'lucide-react'
 import type { AgentProgress } from '../hooks/useSSE'
 
+const STEP_ICONS: Record<string, React.ReactNode> = {
+  'data-search-agent': <BarChart3 className="h-4 w-4" />,
+  'marketing-plan-agent': <FileText className="h-4 w-4" />,
+  'approval': <ShieldCheck className="h-4 w-4" />,
+  'regulation-check-agent': <Scale className="h-4 w-4" />,
+  'brochure-gen-agent': <Palette className="h-4 w-4" />,
+}
+
 const STEPS = [
-  { key: 'data-search-agent', label: 'step.data_search', icon: '📊' },
-  { key: 'marketing-plan-agent', label: 'step.marketing_plan', icon: '📝' },
-  { key: 'approval', label: 'step.approval', icon: '✅' },
-  { key: 'regulation-check-agent', label: 'step.regulation', icon: '⚖️' },
-  { key: 'brochure-gen-agent', label: 'step.brochure', icon: '🎨' },
+  { key: 'data-search-agent', label: 'step.data_search' },
+  { key: 'marketing-plan-agent', label: 'step.marketing_plan' },
+  { key: 'approval', label: 'step.approval' },
+  { key: 'regulation-check-agent', label: 'step.regulation' },
+  { key: 'brochure-gen-agent', label: 'step.brochure' },
 ]
 
 interface PipelineStepperProps {
@@ -39,7 +48,7 @@ export function PipelineStepper({ progress, t }: PipelineStepperProps) {
                   ${isActive ? 'animate-pulse bg-[var(--accent-soft)] text-[var(--accent-strong)] ring-2 ring-[var(--accent)]/40' : ''}
                   ${isPending ? 'bg-[var(--panel-strong)] text-[var(--text-muted)]' : ''}`}
               >
-                {isCompleted ? '✓' : step.icon}
+                {isCompleted ? <Check className="h-4 w-4" /> : STEP_ICONS[step.key]}
               </div>
               <span className={`text-xs whitespace-nowrap
                 ${isActive ? 'font-medium text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>

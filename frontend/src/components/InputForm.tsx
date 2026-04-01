@@ -13,10 +13,10 @@ interface InputFormProps {
 }
 
 const QUICK_CHIPS = [
-  { label: '🌸 春の沖縄ファミリー', prompt: '春の沖縄ファミリー向けプランを企画して' },
-  { label: '⛷ 冬の北海道カップル', prompt: '冬の北海道カップル向けプランを企画して' },
-  { label: '🍁 秋の京都シニア', prompt: '秋の京都シニア向けプランを企画して' },
-  { label: '🏖 夏のハワイ学生', prompt: '夏のハワイ学生旅行向けプランを企画して' },
+  { label: '春の沖縄ファミリー', prompt: '春の沖縄ファミリー向けプランを企画して' },
+  { label: '冬の北海道カップル', prompt: '冬の北海道カップル向けプランを企画して' },
+  { label: '秋の京都シニア', prompt: '秋の京都シニア向けプランを企画して' },
+  { label: '夏のハワイ学生', prompt: '夏のハワイ学生旅行向けプランを企画して' },
 ]
 
 export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, initialValue }: InputFormProps) {

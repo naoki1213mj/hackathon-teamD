@@ -1,3 +1,4 @@
+import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import type { ApprovalRequest } from '../hooks/useSSE'
 import { MarkdownView } from './MarkdownView'
@@ -14,8 +15,8 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
 
   return (
     <div className="space-y-4 rounded-[24px] border border-[var(--warning-border)] bg-[var(--warning-surface)] p-5">
-      <h3 className="text-sm font-medium text-[var(--warning-text)]">
-        ✅ {t('approval.title')}
+      <h3 className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--warning-text)]">
+        <ShieldCheck className="h-4 w-4" /> {t('approval.title')}
       </h3>
 
       {request.plan_markdown && (

@@ -4,9 +4,9 @@
  * 利用不可の場合は Web Speech API にフォールバック。
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getVoiceLiveToken } from '../lib/msal-auth'
+import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void
@@ -222,7 +222,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const isActive = state !== 'idle' && state !== 'error'
   const stateLabel = state === 'listening' ? t('voice.listening')
     : state === 'processing' ? t('voice.processing')
-    : state === 'speaking' ? '🔊'
+    : state === 'speaking' ? t('voice.speaking')
     : state === 'connecting' ? '...'
     : state === 'error' ? t('voice.unsupported')
     : ''

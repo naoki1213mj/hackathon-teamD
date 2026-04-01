@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 import type { ErrorData } from '../hooks/useSSE'
 
 interface ErrorRetryProps {
@@ -11,7 +12,7 @@ export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
   return (
     <div className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-surface)] p-5">
       <div className="flex items-start gap-3">
-        <span className="text-lg">⚠️</span>
+        <AlertTriangle className="h-5 w-5 text-[var(--danger-text)]" />
         <div className="flex-1">
           <p className="text-sm font-medium text-[var(--danger-text)]">
             {t('error.title')}

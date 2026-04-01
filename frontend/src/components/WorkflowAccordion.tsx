@@ -1,3 +1,4 @@
+import { BarChart3, Check, FileText, Palette, Scale } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
 import { AnalysisView } from './AnalysisView'
@@ -7,11 +8,18 @@ import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
 import { ToolEventBadges } from './ToolEventBadges'
 
+const STEP_ICONS: Record<string, React.ReactNode> = {
+  'data-search-agent': <BarChart3 className="h-4 w-4" />,
+  'marketing-plan-agent': <FileText className="h-4 w-4" />,
+  'regulation-check-agent': <Scale className="h-4 w-4" />,
+  'brochure-gen-agent': <Palette className="h-4 w-4" />,
+}
+
 const STEPS = [
-  { key: 'data-search-agent', icon: '📊', labelKey: 'step.data_search', step: 1 },
-  { key: 'marketing-plan-agent', icon: '📝', labelKey: 'step.marketing_plan', step: 2 },
-  { key: 'regulation-check-agent', icon: '⚖️', labelKey: 'step.regulation', step: 4 },
-  { key: 'brochure-gen-agent', icon: '🎨', labelKey: 'step.brochure', step: 5 },
+  { key: 'data-search-agent', labelKey: 'step.data_search', step: 1 },
+  { key: 'marketing-plan-agent', labelKey: 'step.marketing_plan', step: 2 },
+  { key: 'regulation-check-agent', labelKey: 'step.regulation', step: 4 },
+  { key: 'brochure-gen-agent', labelKey: 'step.brochure', step: 5 },
 ]
 
 interface Props {
@@ -103,11 +111,11 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
               aria-expanded={!sectionCollapsed}
             >
               <div className="flex items-center gap-3">
-                <span className="text-lg">{step.icon}</span>
+                <span className="text-lg">{STEP_ICONS[step.key]}</span>
                 <span className="text-sm font-medium">{t(step.labelKey)}</span>
                 {status === 'completed' && (
                   <span className="rounded-full bg-green-100 dark:bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-200">
-                    ✓
+                    <Check className="h-3 w-3" />
                   </span>
                 )}
                 {isActive && (
@@ -144,16 +152,16 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                   ) : step.key === 'brochure-gen-agent' ? (
                     // ブローシャ HTML は右パネルで表示。ここでは完了サマリ
                     <div className="py-3 space-y-2">
-                      <p className="text-sm text-[var(--text-secondary)]">✅ ブローシャ・画像の生成が完了しました。</p>
+                      <p className="text-sm text-[var(--text-secondary)]">ブローシャ・画像の生成が完了しました。</p>
                       <p className="text-xs text-[var(--text-muted)]">右側の「ブローシャ」「販促用画像」タブでプレビューできます。</p>
                       {(() => {
                         const videoContent = textContents.find(c => c.content_type === 'video')
                         const videoProgress = textContents.find(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')
                         if (videoContent) {
-                          return <p className="text-sm text-[var(--text-secondary)]">🎬 アバター動画の生成が完了しました。「アバター動画」タブで再生できます。</p>
+                          return <p className="text-sm text-[var(--text-secondary)]">アバター動画の生成が完了しました。「アバター動画」タブで再生できます。</p>
                         }
                         if (videoProgress) {
-                          return <p className="text-sm text-[var(--text-muted)]">🎬 アバター動画を生成中...</p>
+                          return <p className="text-sm text-[var(--text-muted)]">アバター動画を生成中...</p>
                         }
                         return null
                       })()}

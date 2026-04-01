@@ -1,3 +1,4 @@
+import { AlertTriangle, CheckCircle, HelpCircle } from 'lucide-react'
 import type { SafetyResult } from '../hooks/useSSE'
 
 interface SafetyBadgeProps {
@@ -27,7 +28,7 @@ export function SafetyBadge({ result, t }: SafetyBadgeProps) {
           : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300'
       }`}
     >
-      <span>{isSafe ? '✅' : isError ? '❓' : '⚠️'}</span>
+      <span>{isSafe ? <CheckCircle className="h-3.5 w-3.5" /> : isError ? <HelpCircle className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}</span>
       <span>{isSafe ? t('safety.safe') : isError ? t('safety.error') : t('safety.warning')}</span>
     </span>
   )

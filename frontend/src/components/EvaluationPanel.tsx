@@ -1,3 +1,4 @@
+import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 interface EvaluationResult {
@@ -30,7 +31,7 @@ function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
 function CheckItem({ label, passed }: { label: string; passed: boolean }) {
   return (
     <span className="inline-flex items-center gap-1 text-xs">
-      <span>{passed ? '✅' : '❌'}</span>
+      <span>{passed ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}</span>
       <span className={passed ? 'text-[var(--text-secondary)]' : 'text-red-400'}>{label}</span>
     </span>
   )
@@ -128,13 +129,13 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
               {t('eval.running')}
             </>
           ) : (
-            <>🔍 {t('eval.run')}</>
+            <><Search className="h-3.5 w-3.5" /> {t('eval.run')}</>
           )}
         </button>
       </div>
 
       {error && (
-        <p className="text-xs text-red-500">❌ {error}</p>
+        <p className="inline-flex items-center gap-1 text-xs text-red-500"><XCircle className="h-3.5 w-3.5" /> {error}</p>
       )}
 
       {result && (
@@ -170,7 +171,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
                 })}
               </div>
               {result.marketing_quality.reason && (
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">💬 {String(result.marketing_quality.reason)}</p>
+                <p className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--text-secondary)]"><MessageSquare className="h-3 w-3" /> {String(result.marketing_quality.reason)}</p>
               )}
             </div>
           )}
@@ -207,7 +208,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs text-[var(--accent-strong)] hover:underline"
             >
-              📊 {t('eval.portal')} →
+              <ExternalLink className="h-3.5 w-3.5" /> {t('eval.portal')}
             </a>
           )}
 
@@ -223,7 +224,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
               }}
               className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-2 text-xs font-medium text-[var(--accent-strong)] transition-colors hover:bg-[var(--accent)]/20"
             >
-              ✨ {t('eval.refine')}
+              <Sparkles className="h-3.5 w-3.5" /> {t('eval.refine')}
             </button>
           )}
         </div>

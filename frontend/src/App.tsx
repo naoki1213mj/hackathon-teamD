@@ -1,3 +1,4 @@
+import { Clock, Download } from 'lucide-react'
 import { useState } from 'react'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
@@ -107,7 +108,7 @@ function App() {
                 <PipelineStepper progress={state.agentProgress} t={t} />
                 {isRunning && (
                   <div className="mt-2 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                    <span>⏱</span>
+                    <Clock className="h-4 w-4" />
                     <span>{elapsed}s</span>
                     {state.agentProgress && state.agentProgress.agent !== 'approval' && (
                       <span>— {t(AGENT_STEP_KEY[state.agentProgress.agent] || '')} {t('status.running')}</span>
@@ -210,7 +211,7 @@ function App() {
             <ArtifactTabs tabs={[
               {
                 key: 'plan',
-                label: `📝 ${t('tab.plan')}`,
+                label: t('tab.plan'),
                 content: planContent ? (
                   showFinalPlan ? (
                     <>
@@ -219,7 +220,7 @@ function App() {
                         onClick={() => exportPlanMarkdown(state.textContents)}
                         className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
                       >
-                        💾 {t('export.plan')}
+                        <Download className="h-3.5 w-3.5" /> {t('export.plan')}
                       </button>
                       {isCompleted && (
                         <EvaluationPanel
@@ -249,7 +250,7 @@ function App() {
               },
               { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
               { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
-              { key: 'video', label: `🎬 ${t('tab.video') || '動画'}`, content: (
+              { key: 'video', label: t('tab.video') || '動画', content: (
                 <VideoPreview
                   videoUrl={state.textContents.findLast(c => c.content_type === 'video')?.content}
                   t={t}
