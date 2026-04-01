@@ -95,7 +95,14 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
         except (httpx.RequestError, json.JSONDecodeError) as exc:
             logger.warning("Photo Avatar ポーリングエラー: %s", exc)
 
-        await asyncio.sleep(10)
+        # 適応型ポーリング: 初期は短く、徐々に延長
+        elapsed_s = time.time() - start
+        if elapsed_s < 15:
+            await asyncio.sleep(3)
+        elif elapsed_s < 45:
+            await asyncio.sleep(6)
+        else:
+            await asyncio.sleep(10)
 
     logger.warning("Photo Avatar ポーリングタイムアウト (job_id=%s)", job_id)
     return None

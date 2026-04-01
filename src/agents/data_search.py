@@ -39,9 +39,9 @@ async def _query_data_agent(question: str) -> str | None:
         return None
 
     try:
-        from azure.identity import DefaultAzureCredential as _Cred
+        from src.agent_client import get_shared_credential
 
-        credential = _Cred()
+        credential = get_shared_credential()
         token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
     except (ValueError, OSError) as exc:
         logger.warning("Fabric Data Agent: トークン取得失敗: %s", exc)

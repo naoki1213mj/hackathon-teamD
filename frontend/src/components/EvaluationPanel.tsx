@@ -37,6 +37,18 @@ function CheckItem({ label, passed }: { label: string; passed: boolean }) {
   )
 }
 
+function ScoreDelta({ current, previous }: { current: number; previous: number }) {
+  if (current < 0 || previous < 0) return null
+  const delta = current - previous
+  if (Math.abs(delta) < 0.05) return null
+  const isUp = delta > 0
+  return (
+    <span className={`ml-1 text-[10px] font-medium ${isUp ? 'text-green-500' : 'text-red-400'}`}>
+      {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
+    </span>
+  )
+}
+
 /** 評価結果から低スコア項目を抽出し、修正プロンプトを自動生成する */
 function buildFeedback(result: EvaluationResult, t: (key: string) => string): string {
   const issues: string[] = []
@@ -85,9 +97,12 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
 }
 
 export function EvaluationPanel({ query, response, html, t, onRefine }: EvaluationPanelProps) {
-  const [result, setResult] = useState<EvaluationResult | null>(null)
+  const [history, setHistory] = useState<EvaluationResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const result = history.length > 0 ? history[history.length - 1] : null
+  const previousResult = history.length > 1 ? history[history.length - 2] : null
 
   const runEvaluation = async () => {
     setLoading(true)
@@ -102,7 +117,8 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
         setError(`HTTP ${res.status}`)
         return
       }
-      setResult(await res.json() as EvaluationResult)
+      const data = await res.json() as EvaluationResult
+      setHistory(prev => [...prev, data])
     } catch (err) {
       setError(String(err))
     } finally {
@@ -140,6 +156,12 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
 
       {result && (
         <div className="space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+          {history.length > 1 && (
+            <p className="text-[10px] font-medium text-[var(--text-muted)]">
+              {t('eval.round').replace('{n}', String(history.length))}
+            </p>
+          )}
+
           {/* Built-in 評価器 */}
           {result.builtin && !('error' in result.builtin) && (
             <div>
@@ -148,6 +170,9 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
                 {Object.entries(result.builtin).map(([name, val]) => (
                   <div key={name} className="text-center">
                     <ScoreBadge score={val.score} />
+                    {previousResult?.builtin?.[name] != null && (
+                      <ScoreDelta current={val.score} previous={previousResult.builtin![name].score} />
+                    )}
                     <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{t(`eval.${name}`) || name}</p>
                   </div>
                 ))}
@@ -162,9 +187,11 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
               <div className="flex flex-wrap gap-4">
                 {['appeal', 'differentiation', 'kpi_validity', 'brand_tone', 'overall'].map(key => {
                   const val = result.marketing_quality?.[key]
+                  const prevVal = previousResult?.marketing_quality?.[key]
                   return typeof val === 'number' ? (
                     <div key={key} className="text-center">
                       <ScoreBadge score={val} />
+                      {typeof prevVal === 'number' && <ScoreDelta current={val} previous={prevVal} />}
                       <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{t(`eval.${key}`) || key}</p>
                     </div>
                   ) : null
@@ -213,12 +240,11 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
           )}
 
           {/* 評価結果に基づく改善ボタン */}
-          {onRefine && (
+          {onRefine && result && (
             <button
               onClick={() => {
                 const feedback = buildFeedback(result, t)
                 if (feedback) {
-                  setResult(null)  // 改善実行後に評価結果をリセット（再評価しやすく）
                   onRefine(feedback)
                 }
               }}

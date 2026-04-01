@@ -129,6 +129,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.refine': '評価結果をもとに改善する',
     'eval.version.original': '改善前',
     'eval.version.refined': '改善後',
+    'eval.round': '評価 #{n}',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -254,6 +255,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.refine': 'Refine based on evaluation',
     'eval.version.original': 'Original',
     'eval.version.refined': 'Refined',
+    'eval.round': 'Evaluation #{n}',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -379,5 +381,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.refine': '根据评估结果改进',
     'eval.version.original': '改进前',
     'eval.version.refined': '改进后',
+    'eval.round': '评估 #{n}',
   },
 }

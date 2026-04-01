@@ -53,6 +53,19 @@ def _get_allowed_origins() -> list[str]:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """アプリケーション起動・終了時のライフサイクル管理"""
     _configure_observability()
+
+    # エージェントクライアントのプリウォーム（初回レイテンシ削減）
+    try:
+        from src.agent_client import get_responses_client, get_shared_credential
+
+        get_shared_credential()  # DefaultAzureCredential の初期化
+        settings = get_settings()
+        if settings["project_endpoint"]:
+            get_responses_client()  # デフォルトモデルのクライアントを事前作成
+            logger.info("エージェントクライアント プリウォーム完了")
+    except (ImportError, ValueError, OSError) as exc:
+        logger.info("エージェントクライアント プリウォーム スキップ: %s", exc)
+
     yield
     # httpx クライアントのクリーンアップ
     try:

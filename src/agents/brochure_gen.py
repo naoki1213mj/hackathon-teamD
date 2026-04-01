@@ -114,7 +114,7 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
                 tools=[{"type": "image_generation", "size": size, "quality": "medium"}],
             )
 
-        response = await asyncio.to_thread(_sync_generate)
+        response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=30)
 
         # Responses API の出力から画像データを抽出
         image_items = [item for item in (response.output or []) if item.type == "image_generation_call"]
@@ -125,6 +125,9 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 
         b64_data = image_items[0].result
         return f"data:image/png;base64,{b64_data}"
+    except TimeoutError:
+        logger.warning("画像生成タイムアウト（30秒）。フォールバック画像を返します")
+        return _FALLBACK_IMAGE
     except (ValueError, OSError) as exc:
         logger.warning("画像生成に失敗。フォールバック画像を返します: %s", exc)
         return _FALLBACK_IMAGE
