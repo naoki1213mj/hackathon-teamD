@@ -114,7 +114,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
 
   return (
     <div className="mt-4 space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
           {t('eval.title')}
         </h4>
