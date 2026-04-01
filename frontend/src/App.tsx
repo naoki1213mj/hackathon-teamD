@@ -225,15 +225,13 @@ function App() {
                       >
                         <Download className="h-3.5 w-3.5" /> {t('export.plan')}
                       </button>
-                      {isCompleted && (
-                        <EvaluationPanel
-                          query={state.userMessages[0] || ''}
-                          response={revisionContent?.content || planContent.content}
-                          html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
-                          t={t}
-                          onRefine={sendMessage}
-                        />
-                      )}
+                      <EvaluationPanel
+                        query={state.userMessages[0] || ''}
+                        response={revisionContent?.content || planContent.content}
+                        html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
+                        t={t}
+                        onRefine={isRunning ? undefined : sendMessage}
+                      />
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
