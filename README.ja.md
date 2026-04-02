@@ -6,11 +6,11 @@
 
 ## 現在の実装範囲
 
-- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）、企画書タブ内の評価パネル、成果物全体の v1/v2 切替
+- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）、企画書タブ内の評価パネル、版比較カード付きの改善ラウンド比較、生成中でも確定版を参照できる成果物バージョン切替
 - FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信、`/api/evaluate` 品質評価 API
 - パイプラインの 7 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、企画書修正、販促物生成（顧客向け HTML）、動画生成（Photo Avatar）、品質レビュー。ユーザーには 5 ステップ表示
 - Fabric データアクセス: `FABRIC_DATA_AGENT_URL` がある場合は Fabric Data Agent Published URL を優先し、利用不可時は Fabric Lakehouse SQL、その次に CSV へフォールバック
-- Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、評価起点の再改善
+- Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、改善ラウンド比較を前提にした評価起点の再改善
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
 - Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
 - Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
@@ -34,6 +34,9 @@
 - `POST /api/evaluate` は `azure-ai-evaluation` の Built-in 評価器（Relevance / Coherence / Fluency）と、code-based / prompt-based のカスタム評価器を組み合わせ、成功時は Foundry ポータル URL も返します。
 - 評価結果からの改善は `POST /api/chat` にフィードバック文を戻して企画書を再生成し、新しい `approval_request` を返します。承認すると規制チェック以降の成果物も再生成されます。
 - フロントエンドは完了ごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
+- 新しい版の生成中は、右ペイン全体がそのラウンドのライブワークスペースとして更新されます。一方で、上部の `VersionSelector` から確定済みの旧版を読み取り専用で確認でき、生成中チップからライブ表示へ戻せます。
+- 評価パネルの比較はメインの成果物プレビューを切り替えずに行います。比較領域の上部には「現在の版」と「比較対象版」の両方を要約カードで表示します。
+- 評価レスポンスに `task_adherence` が含まれていても、現状はノイズが大きいため、フロントエンドではスコア表示、比較差分、総合サマリ、改善フィードバック生成から除外しています。
 - Voice Live API は MSAL.js による Entra アプリ登録認証です。`VoiceInput` コンポーネントは Voice Live + Web Speech API のデュアルモードで動作します。
 - 会話履歴は Cosmos DB から `restoreConversation()` で復元され、再推論は行いません。
 - ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。

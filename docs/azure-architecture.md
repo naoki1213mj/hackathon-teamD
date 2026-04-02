@@ -130,6 +130,9 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 - APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。加えて Voice Live 用 Prompt Agent と Entra SPA アプリ登録も作成します。
 - `/api/evaluate` は Built-in 評価器（Relevance / Coherence / Fluency）に加え、旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーンを返し、成功時は Foundry にログします。
 - フロントエンドは各 `done` イベントごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
+- 新しい版の生成中は、右ペインはそのラウンドのライブワークスペースとして更新されます。同時に `VersionSelector` から確定済みバージョンを読み取り専用で確認でき、生成中チップでライブ表示に戻せます。
+- 評価比較 UI はフロントエンド内で完結し、現在の版と比較対象版を上部カードで併記します。比較対象を変えてもメインの成果物プレビューは切り替わりません。
+- 評価レスポンスに `task_adherence` が含まれる場合でも、現行 UI ではノイズ低減のため比較差分、総合サマリ、改善フィードバックから除外しています。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 orchestration step ではありません。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - モデル配備側のガードレールを主軸にしつつ、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードでブロックします。Prompt Shields や tool-response 介入などの追加 guardrail は Azure / Foundry 側で明示設定した場合のみ有効です。

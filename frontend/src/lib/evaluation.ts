@@ -49,6 +49,7 @@ export interface EvaluationDetailChange {
 }
 
 const MARKETING_KEYS = ['appeal', 'differentiation', 'kpi_validity', 'brand_tone', 'overall'] as const
+const HIDDEN_BUILTIN_METRICS = new Set(['task_adherence'])
 
 function average(values: number[]): number {
   if (values.length === 0) return -1
@@ -57,6 +58,10 @@ function average(values: number[]): number {
 
 export function hasBuiltinMetrics(builtin: BuiltinEvaluationResult | undefined): builtin is Record<string, EvaluationMetric> {
   return builtin !== undefined && !('error' in builtin)
+}
+
+export function shouldDisplayBuiltinMetric(metricKey: string): boolean {
+  return !HIDDEN_BUILTIN_METRICS.has(metricKey)
 }
 
 export function cloneEvaluationResult(result: EvaluationResult): EvaluationResult {
@@ -77,8 +82,9 @@ export function getLatestEvaluation(evaluations: EvaluationRecord[]): Evaluation
 function getBuiltinAverage(result: EvaluationResult): number {
   if (!hasBuiltinMetrics(result.builtin)) return -1
 
-  const scores = Object.values(result.builtin)
-    .map(metric => metric.score)
+  const scores = Object.entries(result.builtin)
+    .filter(([metricKey]) => shouldDisplayBuiltinMetric(metricKey))
+    .map(([, metric]) => metric.score)
     .filter(score => Number.isFinite(score) && score >= 0)
 
   return average(scores)
@@ -127,6 +133,7 @@ export function getEvaluationDeltaItems(current: EvaluationResult, previous: Eva
   if (hasBuiltinMetrics(current.builtin) && hasBuiltinMetrics(previous.builtin)) {
     const metricKeys = new Set([...Object.keys(current.builtin), ...Object.keys(previous.builtin)])
     for (const key of metricKeys) {
+      if (!shouldDisplayBuiltinMetric(key)) continue
       const currentMetric = current.builtin[key]
       const previousMetric = previous.builtin[key]
       if (!currentMetric || !previousMetric) continue

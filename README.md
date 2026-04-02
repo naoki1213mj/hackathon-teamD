@@ -6,11 +6,11 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 
 ## What Works Today
 
-- React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), dark mode with WCAG AA contrast, a plan-tab evaluation panel, and a global artifact version selector for v1/v2 comparison
+- React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), dark mode with WCAG AA contrast, a plan-tab evaluation panel with side-by-side version comparison, and a global artifact version selector that can inspect committed versions while a new round is still generating
 - FastAPI backend with rate limiting, liveness/readiness probes, static asset serving from the built frontend, and a dedicated `/api/evaluate` endpoint
 - Seven agents in the pipeline (data search, marketing plan, regulation check, plan revision, brochure generation, video generation, and quality review) with 5 user-facing steps: data → plan → approval → regulation + revision → brochure + video
 - Fabric data access via Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) when available, then Fabric Lakehouse SQL via pyodbc, then CSV fallback
-- Foundry Evaluation integration with built-in metrics (relevance, coherence, fluency), custom business metrics (travel-law compliance, conversion potential, appeal, differentiation, KPI validity, brand tone), optional Foundry portal logging, and evaluation-driven refinement
+- Foundry Evaluation integration with built-in metrics (relevance, coherence, fluency), custom business metrics (travel-law compliance, conversion potential, appeal, differentiation, KPI validity, brand tone), optional Foundry portal logging, and evaluation-driven refinement with frontend-side round comparison
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
 - Photo Avatar video generation (`casual-sitting` style, MP4/H.264 with soft-embedded subtitles)
 - Voice Live API with MSAL.js authentication (Entra App Registration) and Web Speech API fallback
@@ -34,6 +34,9 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - `POST /api/evaluate` combines `azure-ai-evaluation` built-in evaluators (Relevance / Coherence / Fluency) with code-based and prompt-based custom evaluators, and can return a Foundry portal URL for the logged evaluation run.
 - Evaluation-driven refinement sends generated feedback back into `POST /api/chat`, regenerates the marketing plan, returns a fresh `approval_request`, and on approval reruns regulation, brochure, image, and video generation.
 - The frontend snapshots every completed run and `VersionSelector` restores plan, brochure, images, and video together.
+- While a new version is generating, the right pane becomes the live workspace for that round, but users can still inspect any committed version in read-only mode and jump back to the live pending view from the generating chip.
+- The evaluation panel compares the current artifact version against a selected saved version without changing the main artifact preview. It now shows both versions as summary cards at the top of the comparison area.
+- If the raw evaluation payload contains `task_adherence`, the frontend intentionally excludes it from visible score cards, comparison deltas, overall round summaries, and generated refinement feedback because it is currently too noisy to guide iteration.
 - Voice Live API is authenticated via MSAL.js with Entra App Registration. The `VoiceInput` component supports dual-mode: Voice Live for real-time voice, with automatic fallback to Web Speech API.
 - Conversation history is restored from Cosmos DB via `restoreConversation()` without re-running inference.
 - Runtime knowledge-base queries use Managed Identity. `scripts/setup_knowledge_base.py` still supports direct Azure AI Search API-key bootstrap as an optional setup path.

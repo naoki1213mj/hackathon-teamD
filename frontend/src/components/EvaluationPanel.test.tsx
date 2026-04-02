@@ -9,7 +9,10 @@ const evaluationV1 = {
   round: 1,
   createdAt: '2026-04-02T00:00:00+00:00',
   result: {
-    builtin: { relevance: { score: 4, reason: 'good' } },
+    builtin: {
+      relevance: { score: 4, reason: 'good' },
+      task_adherence: { score: 1, reason: 'stuck' },
+    },
     marketing_quality: { overall: 4, appeal: 4, differentiation: 3, kpi_validity: 4, brand_tone: 4 },
     custom: {
       travel_law_compliance: { score: 1, details: { disclaimer: true, fee_display: false } },
@@ -22,7 +25,10 @@ const evaluationV2 = {
   round: 1,
   createdAt: '2026-04-02T02:00:00+00:00',
   result: {
-    builtin: { relevance: { score: 5, reason: 'great' } },
+    builtin: {
+      relevance: { score: 5, reason: 'great' },
+      task_adherence: { score: 1, reason: 'stuck' },
+    },
     marketing_quality: { overall: 5, appeal: 5, differentiation: 5, kpi_validity: 4, brand_tone: 5 },
     custom: {
       travel_law_compliance: { score: 1, details: { disclaimer: true, fee_display: true } },
@@ -55,6 +61,9 @@ describe('EvaluationPanel', () => {
     'eval.round': 'Evaluation #{n}',
     'eval.compare.preview_hint': 'Comparison changes only inside this panel.',
     'eval.compare.selection': 'Comparing {current} against {target}',
+    'eval.compare.current': 'Current version',
+    'eval.compare.target': 'Compared version',
+    'eval.compare.switch_target': 'Switch comparison target',
     'eval.compare.improved': 'Improved',
     'eval.compare.degraded': 'Regressed',
     'eval.compare.unchanged': 'Unchanged',
@@ -63,6 +72,7 @@ describe('EvaluationPanel', () => {
     'eval.marketing': 'Appeal & Brand Quality',
     'eval.compliance': 'Compliance & Conversion',
     'eval.relevance': 'Relevance',
+    'eval.task_adherence': 'Task Adherence',
     'eval.travel_law_compliance': 'Travel Law',
   }[key] ?? key)
 
@@ -177,26 +187,29 @@ describe('EvaluationPanel', () => {
     })
   })
 
-  it('shows detailed comparison across versions without switching the preview', () => {
+  it('shows both compared versions while hiding task adherence from the comparison UI', async () => {
     render(
       <EvaluationPanel
         query="q"
         response="plan A"
         html="<p>B</p>"
-        artifactVersion={1}
-        evaluations={[evaluationV1]}
+        artifactVersion={2}
+        evaluations={[evaluationV2]}
         versions={[makeSnapshot([evaluationV1]), makeSnapshot([evaluationV2])]}
         t={t}
       />,
     )
 
-    expect(screen.getByText('Improvement Round Comparison')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+    await waitFor(() => {
+      expect(screen.getByText('Comparing v2 against v1')).not.toBeNull()
+    })
 
-    expect(screen.getByText('Comparing v1 against v2')).not.toBeNull()
+    expect(screen.getByText('Current version')).not.toBeNull()
+    expect(screen.getByText('Compared version')).not.toBeNull()
     expect(screen.getByText('Improved')).not.toBeNull()
     expect(screen.getByText('Checks that changed state')).not.toBeNull()
     expect(screen.getAllByText(/fee_display/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Relevance').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Task Adherence')).toBeNull()
   })
 })

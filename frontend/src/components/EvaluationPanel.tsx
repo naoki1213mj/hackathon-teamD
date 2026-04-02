@@ -7,6 +7,7 @@ import {
     getEvaluationDetailChanges,
     getLatestEvaluation,
     hasBuiltinMetrics,
+    shouldDisplayBuiltinMetric,
     summarizeEvaluationDiff,
     type EvaluationDeltaItem,
     type EvaluationDetailChange,
@@ -92,6 +93,37 @@ function ComparisonSummaryPill({ label, value, tone }: { label: string; value: n
   )
 }
 
+function ComparisonVersionCard({
+  label,
+  version,
+  roundLabel,
+  score,
+  emphasis = 'neutral',
+}: {
+  label: string
+  version: number
+  roundLabel: string
+  score: number
+  emphasis?: 'accent' | 'neutral'
+}) {
+  const accent = emphasis === 'accent'
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${accent ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)]/50' : 'border-[var(--panel-border)] bg-[var(--panel-strong)]'}`}>
+      <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${accent ? 'text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>
+        {label}
+      </p>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">v{version}</p>
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">{roundLabel}</p>
+        </div>
+        <ScoreBadge score={score} />
+      </div>
+    </div>
+  )
+}
+
 function getDefaultComparisonVersion(currentVersion: number | undefined, availableVersions: number[]): number | null {
   if (!currentVersion) return null
 
@@ -106,6 +138,7 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
 
   if (hasBuiltinMetrics(result.builtin)) {
     for (const [name, val] of Object.entries(result.builtin)) {
+      if (!shouldDisplayBuiltinMetric(name)) continue
       if (val.score >= 0 && val.score < 3) {
         issues.push(`${t(`eval.${name}`) || name}が低い（${val.score}/5）${val.reason ? ': ' + val.reason : ''}`)
       }
@@ -197,6 +230,14 @@ export function EvaluationPanel({
   }, [artifactVersion, availableComparisonVersions, defaultComparisonVersion])
 
   const selectedComparison = versionComparisons.find(item => item.version === comparisonVersion) ?? null
+  const currentVersionSummary = artifactVersion && latestRecord
+    ? {
+        version: artifactVersion,
+        overall: calculateEvaluationOverall(latestRecord.result),
+        roundLabel: t('eval.round').replace('{n}', String(latestRecord.round)),
+      }
+    : null
+  const comparisonTargets = versionComparisons.filter(item => item.version !== artifactVersion)
   const comparisonDeltaItems = result && selectedComparison
     ? getEvaluationDeltaItems(result, selectedComparison.latest.result)
     : []
@@ -207,6 +248,9 @@ export function EvaluationPanel({
   const builtinComparisonItems = comparisonDeltaItems.filter(item => item.section === 'builtin')
   const marketingComparisonItems = comparisonDeltaItems.filter(item => item.section === 'marketing')
   const customComparisonItems = comparisonDeltaItems.filter(item => item.section === 'custom')
+  const visibleBuiltinMetrics = hasBuiltinMetrics(result?.builtin)
+    ? Object.entries(result.builtin).filter(([name]) => shouldDisplayBuiltinMetric(name))
+    : []
 
   const runEvaluation = async () => {
     setLoading(true)
@@ -356,9 +400,28 @@ export function EvaluationPanel({
                   </p>
                 )}
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {versionComparisons
-                  .filter(item => item.version !== artifactVersion)
+              {selectedComparison && currentVersionSummary && (
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                  <ComparisonVersionCard
+                    label={t('eval.compare.current')}
+                    version={currentVersionSummary.version}
+                    roundLabel={currentVersionSummary.roundLabel}
+                    score={currentVersionSummary.overall}
+                    emphasis="accent"
+                  />
+                  <ComparisonVersionCard
+                    label={t('eval.compare.target')}
+                    version={selectedComparison.version}
+                    roundLabel={t('eval.round').replace('{n}', String(selectedComparison.latest.round))}
+                    score={selectedComparison.overall}
+                  />
+                </div>
+              )}
+              {comparisonTargets.length > 1 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[11px] text-[var(--text-muted)]">{t('eval.compare.switch_target')}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {comparisonTargets
                   .map(item => (
                     <button
                       key={item.version}
@@ -376,7 +439,9 @@ export function EvaluationPanel({
                       <span className="mt-1 block"><ScoreBadge score={item.overall} /></span>
                     </button>
                   ))}
-              </div>
+                  </div>
+                </div>
+              )}
               {selectedComparison && (
                 <div className="mt-3 space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
                   <div className="flex flex-wrap gap-2">
@@ -399,11 +464,11 @@ export function EvaluationPanel({
             </p>
           )}
 
-          {hasBuiltinMetrics(result.builtin) && (
+          {visibleBuiltinMetrics.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.builtin')}</p>
               <div className="flex flex-wrap gap-4">
-                {Object.entries(result.builtin).map(([name, val]) => (
+                {visibleBuiltinMetrics.map(([name, val]) => (
                   <div key={name} className="text-center">
                     <ScoreBadge score={val.score} />
                     {previousBuiltin?.[name] != null && (

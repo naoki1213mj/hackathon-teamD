@@ -237,6 +237,13 @@ curl -N -X POST http://localhost:8000/api/chat \
 - フロントエンドでは企画書タブの評価パネルから呼ばれます
 - `AZURE_AI_PROJECT_ENDPOINT` が未設定でも呼び出せますが、Built-in 評価と prompt-based 評価はエラー / 低機能モードになります
 
+### フロントエンドでの表示ルール
+
+- ラウンド比較は API ではなくフロントエンド側の責務です。保存済みバージョンごとの評価結果を比較して差分 UI を構成します。
+- 評価パネルの比較対象を切り替えても、右側の成果物プレビュー自体は切り替わりません。成果物全体の切替は `VersionSelector` が担当します。
+- 比較 UI は「現在の版」と「比較対象版」を上部の要約カードで並べて表示し、その下に改善 / 悪化 / 変化なしの集計と指標差分を出します。
+- `builtin` に `task_adherence` が返ってくる場合でも、現行フロントエンドでは比較・総合スコア・改善フィードバック生成には使いません。
+
 ### リクエストボディ
 
 ```json
@@ -301,7 +308,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `custom` | `object` | code-based カスタム評価。現在は `travel_law_compliance` と `conversion_potential` |
-| `builtin` | `object` | `azure-ai-evaluation` による `relevance` / `coherence` / `fluency` |
+| `builtin` | `object` | `azure-ai-evaluation` による Built-in 指標。現行フロントエンドの主要表示対象は `relevance` / `coherence` / `fluency` で、`task_adherence` が含まれていても UI 比較と総合集計からは除外される |
 | `marketing_quality` | `object` | prompt-based LLM ジャッジ。`appeal` / `differentiation` / `kpi_validity` / `brand_tone` / `overall` |
 | `foundry_portal_url` | `string?` | Foundry への評価ログに成功した場合のみ返るポータル URL |
 
@@ -510,6 +517,10 @@ data: <json>
 7. approval_request
 9. 承認後は通常の承認継続フローで下流成果物を再生成
 ```
+
+補足:
+
+- フロントエンドが生成する改善フィードバック文は、表示対象にしている評価指標だけを使います。`task_adherence` がレスポンスに存在しても、現状は改善指示へ反映しません。
 
 ## Input Guard
 
