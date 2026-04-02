@@ -1,24 +1,27 @@
-import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react';
-import { useMemo, useState } from 'react';
-
-interface EvaluationResult {
-  builtin?: Record<string, { score: number; reason?: string }>
-  custom?: Record<string, { score: number; details?: Record<string, boolean>; reason?: string }>
-  marketing_quality?: Record<string, number | string>
-  foundry_portal_url?: string
-  error?: string
-}
+import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import type { ArtifactSnapshot } from '../hooks/useSSE'
+import {
+    calculateEvaluationOverall,
+    getLatestEvaluation,
+    hasBuiltinMetrics,
+    type EvaluationRecord,
+    type EvaluationResult,
+} from '../lib/evaluation'
 
 interface EvaluationPanelProps {
   query: string
   response: string
   html: string
   t: (key: string) => string
+  conversationId?: string | null
+  artifactVersion?: number
+  evaluations?: EvaluationRecord[]
+  versions?: ArtifactSnapshot[]
+  isLatestVersion?: boolean
+  onSelectVersion?: (version: number) => void
+  onEvaluationRecorded?: (record: EvaluationRecord) => void
   onRefine?: (feedback: string) => void
-}
-
-function buildEvaluationKey(query: string, response: string): string {
-  return JSON.stringify([query, response])
 }
 
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
@@ -53,12 +56,10 @@ function ScoreDelta({ current, previous }: { current: number; previous: number }
   )
 }
 
-/** 評価結果から低スコア項目を抽出し、修正プロンプトを自動生成する */
 function buildFeedback(result: EvaluationResult, t: (key: string) => string): string {
   const issues: string[] = []
 
-  // Built-in: スコア 3 未満の指標
-  if (result.builtin && !('error' in result.builtin)) {
+  if (hasBuiltinMetrics(result.builtin)) {
     for (const [name, val] of Object.entries(result.builtin)) {
       if (val.score >= 0 && val.score < 3) {
         issues.push(`${t(`eval.${name}`) || name}が低い（${val.score}/5）${val.reason ? ': ' + val.reason : ''}`)
@@ -66,7 +67,6 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
     }
   }
 
-  // Marketing quality: スコア 3 未満の項目
   if (result.marketing_quality) {
     for (const key of ['appeal', 'differentiation', 'kpi_validity', 'brand_tone']) {
       const val = result.marketing_quality[key]
@@ -79,16 +79,14 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
     }
   }
 
-  // Compliance: 不適合項目
   if (result.custom) {
     for (const [name, val] of Object.entries(result.custom)) {
-      if (val.details) {
-        const missing = Object.entries(val.details)
-          .filter(([, passed]) => !passed)
-          .map(([item]) => item)
-        if (missing.length > 0) {
-          issues.push(`${t(`eval.${name}`) || name}: ${missing.join('・')}が不足`)
-        }
+      if (!val.details) continue
+      const missing = Object.entries(val.details)
+        .filter(([, passed]) => !passed)
+        .map(([item]) => item)
+      if (missing.length > 0) {
+        issues.push(`${t(`eval.${name}`) || name}: ${missing.join('・')}が不足`)
       }
     }
   }
@@ -97,18 +95,50 @@ function buildFeedback(result: EvaluationResult, t: (key: string) => string): st
     return '品質評価の結果、全項目が基準を満たしています。さらにクオリティを高めてください。'
   }
 
-  return `以下の品質評価結果に基づいて企画書を改善してください:\n${issues.map(i => `- ${i}`).join('\n')}`
+  return `以下の品質評価結果に基づいて企画書を改善してください:\n${issues.map(item => `- ${item}`).join('\n')}`
 }
 
-export function EvaluationPanel({ query, response, html, t, onRefine }: EvaluationPanelProps) {
-  const [histories, setHistories] = useState<Record<string, EvaluationResult[]>>({})
+export function EvaluationPanel({
+  query,
+  response,
+  html,
+  t,
+  conversationId,
+  artifactVersion,
+  evaluations = [],
+  versions = [],
+  isLatestVersion = true,
+  onSelectVersion,
+  onEvaluationRecorded,
+  onRefine,
+}: EvaluationPanelProps) {
+  const [draftHistories, setDraftHistories] = useState<Record<string, EvaluationRecord[]>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const evaluationKey = useMemo(() => buildEvaluationKey(query, response), [query, response])
-  const history = histories[evaluationKey] ?? []
+  const evaluationKey = useMemo(
+    () => JSON.stringify([conversationId ?? 'draft', artifactVersion ?? 0, query, response]),
+    [artifactVersion, conversationId, query, response],
+  )
+  const history = artifactVersion && artifactVersion > 0
+    ? evaluations
+    : (draftHistories[evaluationKey] ?? [])
 
-  const result = history.length > 0 ? history[history.length - 1] : null
-  const previousResult = history.length > 1 ? history[history.length - 2] : null
+  const latestRecord = getLatestEvaluation(history)
+  const previousRecord = history.length > 1 ? history[history.length - 2] : null
+  const result = latestRecord?.result ?? null
+  const previousResult = previousRecord?.result ?? null
+  const previousBuiltin = previousResult && hasBuiltinMetrics(previousResult.builtin) ? previousResult.builtin : undefined
+  const versionComparisons = versions
+    .map((snapshot, index) => {
+      const latest = getLatestEvaluation(snapshot.evaluations)
+      if (!latest) return null
+      return {
+        version: index + 1,
+        latest,
+        overall: calculateEvaluationOverall(latest.result),
+      }
+    })
+    .filter((item): item is { version: number; latest: EvaluationRecord; overall: number } => item !== null)
 
   const runEvaluation = async () => {
     setLoading(true)
@@ -117,17 +147,43 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, response, html }),
+        body: JSON.stringify({
+          query,
+          response,
+          html,
+          conversation_id: conversationId,
+          artifact_version: artifactVersion,
+        }),
       })
       if (!res.ok) {
         setError(`HTTP ${res.status}`)
         return
       }
-      const data = await res.json() as EvaluationResult
-      setHistories(prev => ({
-        ...prev,
-        [evaluationKey]: [...(prev[evaluationKey] ?? []), data],
-      }))
+
+      const data = await res.json() as EvaluationResult & {
+        evaluation_meta?: { version: number; round: number; created_at: string } | null
+      }
+      const record: EvaluationRecord = {
+        version: data.evaluation_meta?.version ?? artifactVersion ?? 1,
+        round: data.evaluation_meta?.round ?? (history.length + 1),
+        createdAt: data.evaluation_meta?.created_at ?? new Date().toISOString(),
+        result: {
+          builtin: data.builtin,
+          custom: data.custom,
+          marketing_quality: data.marketing_quality,
+          foundry_portal_url: data.foundry_portal_url,
+          error: data.error,
+        },
+      }
+
+      if (artifactVersion && artifactVersion > 0) {
+        onEvaluationRecorded?.(record)
+      } else {
+        setDraftHistories(prev => ({
+          ...prev,
+          [evaluationKey]: [...(prev[evaluationKey] ?? []), record],
+        }))
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -165,22 +221,58 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
 
       {result && (
         <div className="space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
-          {history.length > 1 && (
+          {versionComparisons.length > 1 && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare')}</p>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {versionComparisons.map(item => {
+                  const previousVersion = versionComparisons.find(candidate => candidate.version === item.version - 1)
+                  return (
+                    <button
+                      key={item.version}
+                      type="button"
+                      disabled={!onSelectVersion}
+                      onClick={() => onSelectVersion?.(item.version)}
+                      className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                        item.version === artifactVersion
+                          ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                          : 'border-[var(--panel-border)] bg-[var(--panel-bg)] hover:border-[var(--accent)]/40 disabled:hover:border-[var(--panel-border)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">v{item.version}</p>
+                          <p className="mt-1 text-xs font-medium text-[var(--text-secondary)]">
+                            {t('eval.round').replace('{n}', String(item.latest.round))}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <ScoreBadge score={item.overall} />
+                          {previousVersion && <ScoreDelta current={item.overall} previous={previousVersion.overall} />}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {latestRecord && (
             <p className="text-[10px] font-medium text-[var(--text-muted)]">
-              {t('eval.round').replace('{n}', String(history.length))}
+              {t('eval.round').replace('{n}', String(latestRecord.round))}
             </p>
           )}
 
-          {/* Built-in 評価器 */}
-          {result.builtin && !('error' in result.builtin) && (
+          {hasBuiltinMetrics(result.builtin) && (
             <div>
               <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.builtin')}</p>
               <div className="flex flex-wrap gap-4">
                 {Object.entries(result.builtin).map(([name, val]) => (
                   <div key={name} className="text-center">
                     <ScoreBadge score={val.score} />
-                    {previousResult?.builtin?.[name] != null && (
-                      <ScoreDelta current={val.score} previous={previousResult.builtin![name].score} />
+                    {previousBuiltin?.[name] != null && (
+                      <ScoreDelta current={val.score} previous={previousBuiltin[name].score} />
                     )}
                     <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{t(`eval.${name}`) || name}</p>
                   </div>
@@ -189,7 +281,6 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             </div>
           )}
 
-          {/* カスタム: 企画書品質（Prompt-based LLM ジャッジ） */}
           {result.marketing_quality && !('score' in result.marketing_quality && result.marketing_quality.score === -1) && (
             <div>
               <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.marketing')}</p>
@@ -212,7 +303,6 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             </div>
           )}
 
-          {/* カスタム: Code-based チェック */}
           {result.custom && (
             <div>
               <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compliance')}</p>
@@ -236,7 +326,6 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             </div>
           )}
 
-          {/* Foundry ポータルリンク */}
           {result.foundry_portal_url && (
             <a
               href={result.foundry_portal_url}
@@ -248,8 +337,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
             </a>
           )}
 
-          {/* 評価結果に基づく改善ボタン */}
-          {onRefine && result && (
+          {onRefine && result && isLatestVersion && (
             <button
               onClick={() => {
                 const feedback = buildFeedback(result, t)
@@ -262,6 +350,16 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
               <Sparkles className="h-3.5 w-3.5" /> {t('eval.refine')}
             </button>
           )}
+
+          {onRefine && result && !isLatestVersion && (
+            <p className="text-xs text-[var(--text-muted)]">{t('eval.refine.latest_only')}</p>
+          )}
+        </div>
+      )}
+
+      {!result && versionComparisons.length > 0 && artifactVersion && artifactVersion > 0 && (
+        <div className="rounded-2xl border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-3 text-xs text-[var(--text-muted)]">
+          {t('eval.no_result')}
         </div>
       )}
     </div>

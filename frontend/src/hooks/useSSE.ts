@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
+import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
 
 /** toolEvents の最大保持数 */
@@ -59,6 +60,7 @@ export interface ArtifactSnapshot {
   images: ImageContent[]
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
+  evaluations: EvaluationRecord[]
 }
 
 interface SnapshotSource {
@@ -66,6 +68,7 @@ interface SnapshotSource {
   images: ImageContent[]
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
+  evaluations?: EvaluationRecord[]
 }
 
 export interface ConversationEvent {
@@ -124,12 +127,35 @@ function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map(item => ({ ...item }))
 }
 
+function cloneEvaluations(evaluations: EvaluationRecord[]): EvaluationRecord[] {
+  return evaluations.map(cloneEvaluationRecord)
+}
+
+function buildEvaluationRecord(data: Record<string, unknown>, fallbackVersion: number): EvaluationRecord | null {
+  const version = Number(data.version || fallbackVersion)
+  const round = Number(data.round || 1)
+  const createdAt = typeof data.created_at === 'string' ? data.created_at : new Date(0).toISOString()
+  const result = data.result
+
+  if (version < 1 || round < 1 || !result || typeof result !== 'object') {
+    return null
+  }
+
+  return {
+    version,
+    round,
+    createdAt,
+    result: result as EvaluationRecord['result'],
+  }
+}
+
 export function createArtifactSnapshot(source: SnapshotSource): ArtifactSnapshot {
   return {
     textContents: cloneTextContents(source.textContents),
     images: cloneImages(source.images),
     toolEvents: cloneToolEvents(source.toolEvents),
     metrics: source.metrics ? { ...source.metrics } : null,
+    evaluations: cloneEvaluations(source.evaluations ?? []),
   }
 }
 
@@ -214,8 +240,16 @@ export function buildRestoredPipelineState(
         break
       case 'done':
         metrics = (data.metrics as PipelineMetrics | undefined) ?? null
-        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics }))
+        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
         break
+      case 'evaluation_result': {
+        const evaluation = buildEvaluationRecord(data, versions.length)
+        if (!evaluation) break
+        const snapshot = versions[evaluation.version - 1]
+        if (!snapshot) break
+        snapshot.evaluations = [...snapshot.evaluations, cloneEvaluationRecord(evaluation)]
+        break
+      }
     }
   }
 
@@ -233,7 +267,7 @@ export function buildRestoredPipelineState(
       : 'completed'
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
-    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics }))
+    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
   }
 
   return {
@@ -373,6 +407,7 @@ export function useSSE() {
           images: prev.images,
           toolEvents: prev.toolEvents,
           metrics: doneData.metrics,
+          evaluations: [],
         })
         const newVersions = [...prev.versions, snapshot]
         return {
@@ -461,6 +496,25 @@ export function useSSE() {
     setState(prev => ({ ...prev, settings }))
   }, [])
 
+  const saveEvaluation = useCallback((record: EvaluationRecord) => {
+    setState(prev => {
+      const targetIndex = record.version - 1
+      const targetSnapshot = prev.versions[targetIndex]
+      if (!targetSnapshot) return prev
+
+      return {
+        ...prev,
+        versions: prev.versions.map((snapshot, index) => {
+          if (index !== targetIndex) return snapshot
+          return {
+            ...snapshot,
+            evaluations: [...snapshot.evaluations, cloneEvaluationRecord(record)],
+          }
+        }),
+      }
+    })
+  }, [])
+
   /** 保存済み会話を復元する（新規推論を実行しない） */
   const restoreConversation = useCallback(async (conversationId: string) => {
     abortControllerRef.current?.abort()
@@ -482,5 +536,5 @@ export function useSSE() {
     }
   }, [])
 
-  return { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation }
+  return { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation }
 }

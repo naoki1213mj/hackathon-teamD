@@ -88,3 +88,47 @@ def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
     assert "foundry_portal_url" not in payload
     assert len(calls) == 1
     assert calls[0][0] == "春の沖縄プランを作成"
+
+
+def test_evaluate_endpoint_persists_result_for_version(monkeypatch):
+    persist_calls: list[tuple[str, int, dict]] = []
+
+    async def fake_builtin(_query: str, _response: str) -> dict:
+        return {"relevance": {"score": 4.0, "reason": "good"}}
+
+    async def fake_marketing(_query: str, _response: str) -> dict:
+        return {"overall": 4.0, "reason": "solid"}
+
+    async def fake_persist(conversation_id: str, artifact_version: int, result: dict) -> dict | None:
+        persist_calls.append((conversation_id, artifact_version, result))
+        return {"version": artifact_version, "round": 2, "created_at": "2026-04-02T01:00:00+00:00"}
+
+    async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
+        return None
+
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", fake_marketing)
+    monkeypatch.setattr(evaluate_module, "_persist_evaluation_result", fake_persist)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": "春の沖縄プランを作成",
+            "response": "# 春の沖縄プラン\nKPI: 予約数 200 件",
+            "html": "<html><body>予約はこちら</body></html>",
+            "conversation_id": "conv-1",
+            "artifact_version": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evaluation_meta"] == {
+        "version": 2,
+        "round": 2,
+        "created_at": "2026-04-02T01:00:00+00:00",
+    }
+    assert len(persist_calls) == 1
+    assert persist_calls[0][0] == "conv-1"
+    assert persist_calls[0][1] == 2

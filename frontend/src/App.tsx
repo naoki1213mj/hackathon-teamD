@@ -38,7 +38,7 @@ const AGENT_STEP_KEY: Record<string, string> = {
 }
 
 function App() {
-  const { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation } = useSSE()
+  const { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
 
@@ -74,6 +74,7 @@ function App() {
     defaultPlanVersionIndex,
   )
   const activePlanVersion = planVersions[activePlanVersionIndex]
+  const currentSnapshot = state.currentVersion > 0 ? state.versions[state.currentVersion - 1] : null
   const displayedPlan = revisionContent?.content
     || activePlanVersion?.content
     || state.approvalRequest?.plan_markdown
@@ -270,6 +271,13 @@ function App() {
                       query={state.userMessages[0] || ''}
                       response={displayedPlan}
                       html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
+                      conversationId={state.conversationId}
+                      artifactVersion={state.currentVersion || undefined}
+                      versions={state.versions}
+                      evaluations={currentSnapshot?.evaluations ?? []}
+                      isLatestVersion={state.currentVersion === state.versions.length}
+                      onSelectVersion={restoreVersion}
+                      onEvaluationRecorded={saveEvaluation}
                       t={t}
                       onRefine={state.status !== 'approval' ? sendMessage : undefined}
                     />

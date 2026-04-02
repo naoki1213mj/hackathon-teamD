@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -13,6 +14,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from src.config import get_settings
+from src.conversations import get_conversation, save_conversation
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
 logger = logging.getLogger(__name__)
@@ -25,6 +27,62 @@ class EvaluateRequest(BaseModel):
     query: str = Field(..., description="ユーザーの指示テキスト")
     response: str = Field(..., description="企画書の Markdown テキスト")
     html: str = Field("", description="ブローシャの HTML テキスト（オプション）")
+    conversation_id: str | None = Field(default=None, description="保存先の会話ID")
+    artifact_version: int | None = Field(default=None, ge=1, description="評価対象の成果物バージョン")
+
+
+async def _persist_evaluation_result(
+    conversation_id: str,
+    artifact_version: int,
+    result: dict,
+) -> dict | None:
+    """評価結果を会話イベントとして保存する。"""
+    existing = await get_conversation(conversation_id)
+    if not existing:
+        return None
+
+    messages = existing.get("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+
+    completed_versions = sum(1 for event in messages if isinstance(event, dict) and event.get("event") == "done")
+    if completed_versions and artifact_version > completed_versions:
+        return None
+
+    current_round = 0
+    for event in messages:
+        if not isinstance(event, dict) or event.get("event") != "evaluation_result":
+            continue
+        data = event.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        if int(data.get("version", 0)) != artifact_version:
+            continue
+        current_round = max(current_round, int(data.get("round", 0)))
+
+    evaluation_meta = {
+        "version": artifact_version,
+        "round": current_round + 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await save_conversation(
+        conversation_id=conversation_id,
+        user_input=str(existing.get("input", "")),
+        events=[
+            *messages,
+            {
+                "event": "evaluation_result",
+                "data": {
+                    **evaluation_meta,
+                    "result": result,
+                },
+            },
+        ],
+        metrics=existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {},
+        status=str(existing.get("status", "completed")),
+    )
+    return evaluation_meta
 
 
 # --- カスタム評価器（Code-based） ---
@@ -347,4 +405,17 @@ async def evaluate_artifacts(
     # Foundry ポータル連携はレスポンスを待たずに非同期実行する
     background_tasks.add_task(_log_to_foundry, body.query, body.response, results.copy())
 
-    return JSONResponse(results)
+    evaluation_meta = None
+    if body.conversation_id and body.artifact_version:
+        try:
+            evaluation_meta = await _persist_evaluation_result(
+                conversation_id=body.conversation_id,
+                artifact_version=body.artifact_version,
+                result=results.copy(),
+            )
+        except (ValueError, OSError) as exc:
+            logger.warning("評価結果の保存に失敗: %s", exc)
+        except Exception as exc:
+            logger.exception("評価結果の保存で予期しないエラー: %s", exc)
+
+    return JSONResponse({**results, "evaluation_meta": evaluation_meta})
