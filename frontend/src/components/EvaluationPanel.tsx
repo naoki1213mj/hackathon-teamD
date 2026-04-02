@@ -1,10 +1,15 @@
 import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import {
     calculateEvaluationOverall,
+    getEvaluationDeltaItems,
+    getEvaluationDetailChanges,
     getLatestEvaluation,
     hasBuiltinMetrics,
+    summarizeEvaluationDiff,
+    type EvaluationDeltaItem,
+    type EvaluationDetailChange,
     type EvaluationRecord,
     type EvaluationResult,
 } from '../lib/evaluation'
@@ -19,7 +24,6 @@ interface EvaluationPanelProps {
   evaluations?: EvaluationRecord[]
   versions?: ArtifactSnapshot[]
   isLatestVersion?: boolean
-  onSelectVersion?: (version: number) => void
   onEvaluationRecorded?: (record: EvaluationRecord) => void
   onRefine?: (feedback: string) => void
 }
@@ -54,6 +58,47 @@ function ScoreDelta({ current, previous }: { current: number; previous: number }
       {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
     </span>
   )
+}
+
+function ComparisonDeltaBadge({ delta }: { delta: number }) {
+  if (Math.abs(delta) < 0.05) {
+    return (
+      <span className="rounded-full bg-[var(--panel-strong)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+        {delta.toFixed(1)}
+      </span>
+    )
+  }
+
+  const isUp = delta > 0
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isUp ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+      {isUp ? '+' : ''}{delta.toFixed(1)}
+    </span>
+  )
+}
+
+function ComparisonSummaryPill({ label, value, tone }: { label: string; value: number; tone: 'positive' | 'negative' | 'neutral' }) {
+  const toneClass = tone === 'positive'
+    ? 'bg-green-500/10 text-green-600'
+    : tone === 'negative'
+      ? 'bg-red-500/10 text-red-500'
+      : 'bg-[var(--panel-bg)] text-[var(--text-secondary)]'
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium ${toneClass}`}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function getDefaultComparisonVersion(currentVersion: number | undefined, availableVersions: number[]): number | null {
+  if (!currentVersion) return null
+
+  const candidates = availableVersions.filter(version => version !== currentVersion)
+  if (candidates.length === 0) return null
+  if (candidates.includes(currentVersion - 1)) return currentVersion - 1
+  return candidates.find(version => version > currentVersion) ?? candidates[candidates.length - 1]
 }
 
 function buildFeedback(result: EvaluationResult, t: (key: string) => string): string {
@@ -108,13 +153,13 @@ export function EvaluationPanel({
   evaluations = [],
   versions = [],
   isLatestVersion = true,
-  onSelectVersion,
   onEvaluationRecorded,
   onRefine,
 }: EvaluationPanelProps) {
   const [draftHistories, setDraftHistories] = useState<Record<string, EvaluationRecord[]>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [comparisonVersion, setComparisonVersion] = useState<number | null>(null)
   const evaluationKey = useMemo(
     () => JSON.stringify([conversationId ?? 'draft', artifactVersion ?? 0, query, response]),
     [artifactVersion, conversationId, query, response],
@@ -139,6 +184,29 @@ export function EvaluationPanel({
       }
     })
     .filter((item): item is { version: number; latest: EvaluationRecord; overall: number } => item !== null)
+  const availableComparisonVersions = versionComparisons.map(item => item.version)
+  const defaultComparisonVersion = getDefaultComparisonVersion(artifactVersion, availableComparisonVersions)
+
+  useEffect(() => {
+    setComparisonVersion(previous => {
+      if (previous && availableComparisonVersions.includes(previous) && previous !== artifactVersion) {
+        return previous
+      }
+      return defaultComparisonVersion
+    })
+  }, [artifactVersion, availableComparisonVersions, defaultComparisonVersion])
+
+  const selectedComparison = versionComparisons.find(item => item.version === comparisonVersion) ?? null
+  const comparisonDeltaItems = result && selectedComparison
+    ? getEvaluationDeltaItems(result, selectedComparison.latest.result)
+    : []
+  const comparisonSummary = summarizeEvaluationDiff(comparisonDeltaItems)
+  const detailChanges = result && selectedComparison
+    ? getEvaluationDetailChanges(result, selectedComparison.latest.result)
+    : []
+  const builtinComparisonItems = comparisonDeltaItems.filter(item => item.section === 'builtin')
+  const marketingComparisonItems = comparisonDeltaItems.filter(item => item.section === 'marketing')
+  const customComparisonItems = comparisonDeltaItems.filter(item => item.section === 'custom')
 
   const runEvaluation = async () => {
     setLoading(true)
@@ -193,6 +261,56 @@ export function EvaluationPanel({
 
   if (!response) return null
 
+  const renderComparisonSection = (title: string, items: EvaluationDeltaItem[]) => {
+    if (!selectedComparison || items.length === 0 || !artifactVersion) return null
+
+    return (
+      <div>
+        <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{title}</p>
+        <div className="space-y-2">
+          {items.map(item => (
+            <div key={`${item.section}:${item.key}`} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">{t(item.labelKey) || item.key}</span>
+                <ComparisonDeltaBadge delta={item.delta} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-muted)]">
+                <div>
+                  <p>v{artifactVersion}</p>
+                  <div className="mt-1"><ScoreBadge score={item.current} max={item.max} /></div>
+                </div>
+                <div>
+                  <p>v{selectedComparison.version}</p>
+                  <div className="mt-1"><ScoreBadge score={item.previous} max={item.max} /></div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderDetailChanges = (changes: EvaluationDetailChange[]) => {
+    if (!selectedComparison || !artifactVersion || changes.length === 0) return null
+
+    return (
+      <div>
+        <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare.detail_changes')}</p>
+        <div className="flex flex-wrap gap-2">
+          {changes.map(change => (
+            <span
+              key={`${change.metricKey}:${change.item}`}
+              className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)]"
+            >
+              {t(change.metricLabelKey) || change.metricKey}: {change.item} · v{artifactVersion} {change.current ? '✓' : '✕'} / v{selectedComparison.version} {change.previous ? '✓' : '✕'}
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="mt-4 space-y-3">
       <div className="flex items-center gap-3">
@@ -221,40 +339,57 @@ export function EvaluationPanel({
 
       {result && (
         <div className="space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
-          {versionComparisons.length > 1 && (
+          {versionComparisons.length > 1 && artifactVersion && (
             <div>
-              <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare')}</p>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {versionComparisons.map(item => {
-                  const previousVersion = versionComparisons.find(candidate => candidate.version === item.version - 1)
-                  return (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare')}</p>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                    {t('eval.compare.preview_hint')}
+                  </p>
+                </div>
+                {selectedComparison && (
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {t('eval.compare.selection')
+                      .replace('{current}', `v${artifactVersion}`)
+                      .replace('{target}', `v${selectedComparison.version}`)}
+                  </p>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {versionComparisons
+                  .filter(item => item.version !== artifactVersion)
+                  .map(item => (
                     <button
                       key={item.version}
                       type="button"
-                      disabled={!onSelectVersion}
-                      onClick={() => onSelectVersion?.(item.version)}
-                      className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
-                        item.version === artifactVersion
-                          ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
-                          : 'border-[var(--panel-border)] bg-[var(--panel-bg)] hover:border-[var(--accent)]/40 disabled:hover:border-[var(--panel-border)]'
+                      aria-label={`Compare with v${item.version}`}
+                      onClick={() => setComparisonVersion(item.version)}
+                      className={`rounded-full border px-3 py-2 text-left transition-colors ${
+                        comparisonVersion === item.version
+                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                          : 'border-[var(--panel-border)] bg-[var(--panel-bg)] text-[var(--text-secondary)] hover:border-[var(--accent)]/40'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">v{item.version}</p>
-                          <p className="mt-1 text-xs font-medium text-[var(--text-secondary)]">
-                            {t('eval.round').replace('{n}', String(item.latest.round))}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <ScoreBadge score={item.overall} />
-                          {previousVersion && <ScoreDelta current={item.overall} previous={previousVersion.overall} />}
-                        </div>
-                      </div>
+                      <span className="block text-[10px] uppercase tracking-[0.18em]">v{item.version}</span>
+                      <span className="mt-1 block text-xs font-medium">{t('eval.round').replace('{n}', String(item.latest.round))}</span>
+                      <span className="mt-1 block"><ScoreBadge score={item.overall} /></span>
                     </button>
-                  )
-                })}
+                  ))}
               </div>
+              {selectedComparison && (
+                <div className="mt-3 space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <ComparisonSummaryPill label={t('eval.compare.improved')} value={comparisonSummary.improved} tone="positive" />
+                    <ComparisonSummaryPill label={t('eval.compare.degraded')} value={comparisonSummary.degraded} tone="negative" />
+                    <ComparisonSummaryPill label={t('eval.compare.unchanged')} value={comparisonSummary.unchanged} tone="neutral" />
+                  </div>
+                  {renderComparisonSection(t('eval.builtin'), builtinComparisonItems)}
+                  {renderComparisonSection(t('eval.marketing'), marketingComparisonItems)}
+                  {renderComparisonSection(t('eval.compliance'), customComparisonItems)}
+                  {renderDetailChanges(detailChanges)}
+                </div>
+              )}
             </div>
           )}
 

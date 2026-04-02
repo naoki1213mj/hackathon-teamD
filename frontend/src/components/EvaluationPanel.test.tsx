@@ -10,7 +10,23 @@ const evaluationV1 = {
   createdAt: '2026-04-02T00:00:00+00:00',
   result: {
     builtin: { relevance: { score: 4, reason: 'good' } },
-    marketing_quality: { overall: 4 },
+    marketing_quality: { overall: 4, appeal: 4, differentiation: 3, kpi_validity: 4, brand_tone: 4 },
+    custom: {
+      travel_law_compliance: { score: 1, details: { disclaimer: true, fee_display: false } },
+    },
+  },
+}
+
+const evaluationV2 = {
+  version: 2,
+  round: 1,
+  createdAt: '2026-04-02T02:00:00+00:00',
+  result: {
+    builtin: { relevance: { score: 5, reason: 'great' } },
+    marketing_quality: { overall: 5, appeal: 5, differentiation: 5, kpi_validity: 4, brand_tone: 5 },
+    custom: {
+      travel_law_compliance: { score: 1, details: { disclaimer: true, fee_display: true } },
+    },
   },
 }
 
@@ -33,7 +49,22 @@ function createJsonResponse(body: unknown): Response {
 
 describe('EvaluationPanel', () => {
   const mockFetch = vi.fn()
-  const t = (key: string) => key
+  const t = (key: string) => ({
+    'eval.run': 'Run Evaluation',
+    'eval.compare': 'Improvement Round Comparison',
+    'eval.round': 'Evaluation #{n}',
+    'eval.compare.preview_hint': 'Comparison changes only inside this panel.',
+    'eval.compare.selection': 'Comparing {current} against {target}',
+    'eval.compare.improved': 'Improved',
+    'eval.compare.degraded': 'Regressed',
+    'eval.compare.unchanged': 'Unchanged',
+    'eval.compare.detail_changes': 'Checks that changed state',
+    'eval.builtin': 'AI Quality Metrics',
+    'eval.marketing': 'Appeal & Brand Quality',
+    'eval.compliance': 'Compliance & Conversion',
+    'eval.relevance': 'Relevance',
+    'eval.travel_law_compliance': 'Travel Law',
+  }[key] ?? key)
 
   beforeEach(() => {
     globalThis.fetch = mockFetch
@@ -139,38 +170,33 @@ describe('EvaluationPanel', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'eval.run' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Run Evaluation' }))
 
     await waitFor(() => {
       expect(onEvaluationRecorded).toHaveBeenCalledWith(expect.objectContaining({ version: 2, round: 2 }))
     })
   })
 
-  it('shows comparison across refinement rounds', () => {
-    const evaluationV2 = {
-      version: 2,
-      round: 1,
-      createdAt: '2026-04-02T02:00:00+00:00',
-      result: {
-        builtin: { relevance: { score: 5, reason: 'great' } },
-        marketing_quality: { overall: 5 },
-      },
-    }
-
+  it('shows detailed comparison across versions without switching the preview', () => {
     render(
       <EvaluationPanel
         query="q"
-        response="plan B"
+        response="plan A"
         html="<p>B</p>"
-        artifactVersion={2}
-        evaluations={[evaluationV2]}
-        versions={[makeSnapshot(), makeSnapshot([evaluationV2])]}
+        artifactVersion={1}
+        evaluations={[evaluationV1]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([evaluationV2])]}
         t={t}
       />,
     )
 
-    expect(screen.getByText('eval.compare')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /v1/i })).not.toBeNull()
-    expect(screen.getByRole('button', { name: /v2/i })).not.toBeNull()
+    expect(screen.getByText('Improvement Round Comparison')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /v2/i }))
+
+    expect(screen.getByText('Comparing v1 against v2')).not.toBeNull()
+    expect(screen.getByText('Improved')).not.toBeNull()
+    expect(screen.getByText('Checks that changed state')).not.toBeNull()
+    expect(screen.getAllByText(/fee_display/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Relevance').length).toBeGreaterThan(0)
   })
 })

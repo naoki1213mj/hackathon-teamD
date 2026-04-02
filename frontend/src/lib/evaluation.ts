@@ -30,6 +30,26 @@ export interface EvaluationRecord {
   result: EvaluationResult
 }
 
+export interface EvaluationDeltaItem {
+  key: string
+  labelKey: string
+  section: 'builtin' | 'marketing' | 'custom'
+  current: number
+  previous: number
+  delta: number
+  max: number
+}
+
+export interface EvaluationDetailChange {
+  metricKey: string
+  metricLabelKey: string
+  item: string
+  current: boolean
+  previous: boolean
+}
+
+const MARKETING_KEYS = ['appeal', 'differentiation', 'kpi_validity', 'brand_tone', 'overall'] as const
+
 function average(values: number[]): number {
   if (values.length === 0) return -1
   return values.reduce((sum, value) => sum + value, 0) / values.length
@@ -99,4 +119,118 @@ export function calculateEvaluationOverall(result: EvaluationResult): number {
   ].filter(score => Number.isFinite(score) && score >= 0)
 
   return average(categoryScores)
+}
+
+export function getEvaluationDeltaItems(current: EvaluationResult, previous: EvaluationResult): EvaluationDeltaItem[] {
+  const items: EvaluationDeltaItem[] = []
+
+  if (hasBuiltinMetrics(current.builtin) && hasBuiltinMetrics(previous.builtin)) {
+    const metricKeys = new Set([...Object.keys(current.builtin), ...Object.keys(previous.builtin)])
+    for (const key of metricKeys) {
+      const currentMetric = current.builtin[key]
+      const previousMetric = previous.builtin[key]
+      if (!currentMetric || !previousMetric) continue
+      if (currentMetric.score < 0 || previousMetric.score < 0) continue
+      items.push({
+        key,
+        labelKey: `eval.${key}`,
+        section: 'builtin',
+        current: currentMetric.score,
+        previous: previousMetric.score,
+        delta: currentMetric.score - previousMetric.score,
+        max: 5,
+      })
+    }
+  }
+
+  const currentMarketing = current.marketing_quality
+  const previousMarketing = previous.marketing_quality
+  if (currentMarketing && previousMarketing) {
+    for (const key of MARKETING_KEYS) {
+      const currentMetric = currentMarketing[key]
+      const previousMetric = previousMarketing[key]
+      if (typeof currentMetric !== 'number' || typeof previousMetric !== 'number') continue
+      if (currentMetric < 0 || previousMetric < 0) continue
+      items.push({
+        key,
+        labelKey: `eval.${key}`,
+        section: 'marketing',
+        current: currentMetric,
+        previous: previousMetric,
+        delta: currentMetric - previousMetric,
+        max: 5,
+      })
+    }
+  }
+
+  if (current.custom && previous.custom) {
+    const metricKeys = new Set([...Object.keys(current.custom), ...Object.keys(previous.custom)])
+    for (const key of metricKeys) {
+      const currentMetric = current.custom[key]
+      const previousMetric = previous.custom[key]
+      if (!currentMetric || !previousMetric) continue
+      if (currentMetric.score < 0 || previousMetric.score < 0) continue
+      items.push({
+        key,
+        labelKey: `eval.${key}`,
+        section: 'custom',
+        current: currentMetric.score,
+        previous: previousMetric.score,
+        delta: currentMetric.score - previousMetric.score,
+        max: 1,
+      })
+    }
+  }
+
+  return items
+}
+
+export function summarizeEvaluationDiff(items: EvaluationDeltaItem[]): {
+  improved: number
+  degraded: number
+  unchanged: number
+} {
+  return items.reduce(
+    (summary, item) => {
+      if (item.delta > 0.05) {
+        summary.improved += 1
+      } else if (item.delta < -0.05) {
+        summary.degraded += 1
+      } else {
+        summary.unchanged += 1
+      }
+      return summary
+    },
+    { improved: 0, degraded: 0, unchanged: 0 },
+  )
+}
+
+export function getEvaluationDetailChanges(current: EvaluationResult, previous: EvaluationResult): EvaluationDetailChange[] {
+  if (!current.custom || !previous.custom) return []
+
+  const changes: EvaluationDetailChange[] = []
+  const metricKeys = new Set([...Object.keys(current.custom), ...Object.keys(previous.custom)])
+
+  for (const key of metricKeys) {
+    const currentDetails = current.custom[key]?.details
+    const previousDetails = previous.custom[key]?.details
+    if (!currentDetails || !previousDetails) continue
+
+    const detailKeys = new Set([...Object.keys(currentDetails), ...Object.keys(previousDetails)])
+    for (const item of detailKeys) {
+      const currentValue = currentDetails[item]
+      const previousValue = previousDetails[item]
+      if (typeof currentValue !== 'boolean' || typeof previousValue !== 'boolean') continue
+      if (currentValue === previousValue) continue
+      changes.push({
+        metricKey: key,
+        metricLabelKey: `eval.${key}`,
+        item,
+        current: currentValue,
+        previous: previousValue,
+      })
+    }
+  }
+
+  return changes
 }

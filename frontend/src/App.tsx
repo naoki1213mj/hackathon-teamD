@@ -59,27 +59,38 @@ function App() {
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
-  const planContent = state.textContents.findLast(c => c.agent === 'marketing-plan-agent')
-  const revisionContent = state.textContents.findLast(c => c.agent === 'plan-revision-agent')
-  const planVersions = buildPlanVersions(state.textContents)
+  const previewVersionNumber = state.pendingVersion?.version ?? state.currentVersion
+  const previewTextContents = state.pendingVersion
+    ? state.textContents.slice(state.pendingVersion.textOffset)
+    : state.textContents
+  const previewImages = state.pendingVersion
+    ? state.images.slice(state.pendingVersion.imageOffset)
+    : state.images
+  const planContent = previewTextContents.findLast(c => c.agent === 'marketing-plan-agent')
+  const revisionContent = previewTextContents.findLast(c => c.agent === 'plan-revision-agent')
+  const planVersions = buildPlanVersions(previewTextContents)
   const [selectedPlanVersionIndexes, setSelectedPlanVersionIndexes] = useState<Record<string, number>>({})
   const statusLabel = t(`status.${state.status}`)
-  const pendingPlanLabel = state.status === 'approval'
+  const pendingPlanLabel = state.pendingVersion
+    ? t('version.generating').replace('{n}', String(state.pendingVersion.version))
+    : state.status === 'approval'
     ? t('status.approval')
     : state.agentProgress?.agent === 'plan-revision-agent'
       ? t('step.plan_revision')
       : t('step.regulation')
-  const planVersionScope = `${state.conversationId ?? 'draft'}:${state.currentVersion}`
+  const planVersionScope = `${state.conversationId ?? 'draft'}:${previewVersionNumber || 'draft'}`
   const defaultPlanVersionIndex = Math.max(planVersions.length - 1, 0)
   const activePlanVersionIndex = Math.min(
     selectedPlanVersionIndexes[planVersionScope] ?? defaultPlanVersionIndex,
     defaultPlanVersionIndex,
   )
   const activePlanVersion = planVersions[activePlanVersionIndex]
-  const currentSnapshot = state.currentVersion > 0 ? state.versions[state.currentVersion - 1] : null
+  const currentSnapshot = !state.pendingVersion && state.currentVersion > 0
+    ? state.versions[state.currentVersion - 1]
+    : null
   const hasRegulationStageStarted = state.agentProgress?.agent === 'regulation-check-agent'
     || state.agentProgress?.agent === 'plan-revision-agent'
-    || state.textContents.some(c => c.agent === 'regulation-check-agent')
+    || previewTextContents.some(c => c.agent === 'regulation-check-agent')
   const shouldHidePlan = shouldHidePlanDuringPostApprovalRevision({
     status: state.status,
     hasApprovalRequest: Boolean(state.approvalRequest),
@@ -93,8 +104,31 @@ function App() {
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
+  const evaluationVersion = !state.pendingVersion && displayedPlan ? (state.currentVersion || 1) : undefined
+  const evaluationSnapshot = !state.pendingVersion && evaluationVersion
+    ? state.versions[evaluationVersion - 1] ?? null
+    : null
+  const latestCommittedVersion = evaluationVersion ? Math.max(state.versions.length, evaluationVersion) : state.versions.length
   const showDraftPlanTabs = !revisionContent && planVersions.length > 1
   const showRevisionNotice = revisionInProgress && state.status === 'running'
+  const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
+  const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
+  const pendingVersionNotice = state.pendingVersion ? (
+    <div className="mb-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--accent-strong)]">
+      <div className="flex items-center gap-2 font-medium">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent)]" />
+        {t('version.generating').replace('{n}', String(state.pendingVersion.version))}
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+        {t('preview.pending.subtitle')}
+      </p>
+      {state.versions.length > 0 && (
+        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+          {t('preview.pending.previous').replace('{n}', String(state.versions.length))}
+        </p>
+      )}
+    </div>
+  ) : null
   const handleSendMessage = (message: string) => {
     setRevisionInProgress(false)
     void sendMessage(message)
@@ -263,13 +297,15 @@ function App() {
             </div>
           ) : (
             <>
-            {isCompleted && state.versions.length > 1 && (
+            {(state.versions.length > 1 || state.pendingVersion) && (
               <div className="mb-3 flex items-center justify-center">
                 <VersionSelector
                   versions={state.versions.map((_, i) => i + 1)}
                   current={state.currentVersion}
                   onChange={restoreVersion}
                   t={t}
+                  pendingVersion={state.pendingVersion?.version}
+                  disabled={Boolean(state.pendingVersion)}
                 />
               </div>
             )}
@@ -279,6 +315,7 @@ function App() {
                 label: t('tab.plan'),
                 content: displayedPlan ? (
                   <>
+                    {pendingVersionNotice}
                     {showRevisionNotice && (
                       <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
                         {t('approval.revision_running')}
@@ -297,44 +334,54 @@ function App() {
                       />
                     )}
                     <MarkdownView content={displayedPlan} />
-                    <button
-                      onClick={() => exportPlanMarkdown(state.textContents)}
-                      className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
-                    >
-                      <Download className="h-3.5 w-3.5" /> {t('export.plan')}
-                    </button>
-                    <EvaluationPanel
-                      query={state.userMessages[0] || ''}
-                      response={displayedPlan}
-                      html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
-                      conversationId={state.conversationId}
-                      artifactVersion={state.currentVersion || undefined}
-                      versions={state.versions}
-                      evaluations={currentSnapshot?.evaluations ?? []}
-                      isLatestVersion={state.currentVersion === state.versions.length}
-                      onSelectVersion={restoreVersion}
-                      onEvaluationRecorded={saveEvaluation}
-                      t={t}
-                      onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
-                    />
+                    {!state.pendingVersion && (
+                      <>
+                        <button
+                          onClick={() => exportPlanMarkdown(state.textContents)}
+                          className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+                        >
+                          <Download className="h-3.5 w-3.5" /> {t('export.plan')}
+                        </button>
+                        <EvaluationPanel
+                          query={state.userMessages[0] || ''}
+                          response={displayedPlan}
+                          html={previewHtml}
+                          conversationId={state.conversationId}
+                          artifactVersion={evaluationVersion}
+                          versions={state.versions}
+                          evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
+                          isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
+                          onEvaluationRecorded={saveEvaluation}
+                          t={t}
+                          onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
+                        />
+                      </>
+                    )}
                   </>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
-                    <p className="text-sm">{pendingPlanLabel}…</p>
-                    {shouldHidePlan && (
-                      <p className="mt-2 max-w-sm text-center text-xs leading-5 text-[var(--text-muted)]">
-                        {t('plan.awaiting_revision')}
-                      </p>
-                    )}
-                  </div>
+                  <>
+                    {pendingVersionNotice}
+                    <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
+                      <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                      <p className="text-sm">{pendingPlanLabel}…</p>
+                      {shouldHidePlan ? (
+                        <p className="mt-2 max-w-sm text-center text-xs leading-5 text-[var(--text-muted)]">
+                          {t('plan.awaiting_revision')}
+                        </p>
+                      ) : state.pendingVersion ? (
+                        <p className="mt-2 max-w-sm text-center text-xs leading-5 text-[var(--text-muted)]">
+                          {t('preview.pending.waiting').replace('{n}', String(state.pendingVersion.version))}
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
                 ),
               },
-              { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
-              { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
+              { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={previewTextContents} t={t} /> },
+              { key: 'images', label: t('tab.images'), content: <ImageGallery images={previewImages} t={t} /> },
               { key: 'video', label: t('tab.video') || '動画', content: (
                 <VideoPreview
-                  videoUrl={state.textContents.findLast(c => c.content_type === 'video')?.content}
+                  videoUrl={previewVideoUrl}
                   t={t}
                 />
               )},

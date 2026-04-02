@@ -63,6 +63,13 @@ export interface ArtifactSnapshot {
   evaluations: EvaluationRecord[]
 }
 
+export interface PendingVersion {
+  version: number
+  textOffset: number
+  imageOffset: number
+  toolEventOffset: number
+}
+
 interface SnapshotSource {
   textContents: TextContent[]
   images: ImageContent[]
@@ -95,6 +102,7 @@ export interface PipelineState {
   error: ErrorData | null
   versions: ArtifactSnapshot[]
   currentVersion: number
+  pendingVersion: PendingVersion | null
   settings: ModelSettings
   userMessages: string[]
 }
@@ -111,6 +119,7 @@ const initialState: PipelineState = {
   error: null,
   versions: [],
   currentVersion: 0,
+  pendingVersion: null,
   settings: { ...DEFAULT_SETTINGS },
   userMessages: [],
 }
@@ -296,6 +305,7 @@ export function buildRestoredPipelineState(
     error,
     versions,
     currentVersion: versions.length,
+    pendingVersion: null,
     settings: { ...settings },
     userMessages: doc.input ? [doc.input] : [],
   }
@@ -314,6 +324,30 @@ function syncToLatestSnapshot(state: PipelineState): PipelineState {
     toolEvents: cloneToolEvents(latestSnapshot.toolEvents),
     metrics: latestSnapshot.metrics ? { ...latestSnapshot.metrics } : null,
     currentVersion: state.versions.length,
+  }
+}
+
+function hasLiveArtifacts(state: PipelineState): boolean {
+  return state.textContents.length > 0 || state.images.length > 0 || state.toolEvents.length > 0
+}
+
+function ensureDraftSnapshot(state: PipelineState): PipelineState {
+  if (state.versions.length > 0 || !hasLiveArtifacts(state)) {
+    return state
+  }
+
+  const snapshot = createArtifactSnapshot({
+    textContents: state.textContents,
+    images: state.images,
+    toolEvents: state.toolEvents,
+    metrics: state.metrics,
+    evaluations: [],
+  })
+
+  return {
+    ...state,
+    versions: [snapshot],
+    currentVersion: 1,
   }
 }
 
@@ -396,6 +430,7 @@ export function useSSE() {
         ...prev,
         error: data as ErrorData,
         status: 'error',
+        pendingVersion: null,
       }))
     },
     done: (data) => {
@@ -417,6 +452,7 @@ export function useSSE() {
           conversationId: doneData.conversation_id,
           versions: newVersions,
           currentVersion: newVersions.length,
+          pendingVersion: null,
         }
       })
     },
@@ -430,12 +466,25 @@ export function useSSE() {
     activeRequestIdRef.current = requestId
     const existingConversationId = conversationIdRef.current
     setState(prev => ({
-      ...syncToLatestSnapshot(prev),
-      status: 'running',
-      error: null,
-      approvalRequest: null,
-      agentProgress: null,
-      userMessages: [...syncToLatestSnapshot(prev).userMessages, message],
+      ...(() => {
+        const synced = ensureDraftSnapshot(syncToLatestSnapshot(prev))
+        return {
+          ...synced,
+          status: 'running' as const,
+          error: null,
+          approvalRequest: null,
+          agentProgress: null,
+          pendingVersion: synced.versions.length > 0
+            ? {
+                version: synced.versions.length + 1,
+                textOffset: synced.textContents.length,
+                imageOffset: synced.images.length,
+                toolEventOffset: synced.toolEvents.length,
+              }
+            : null,
+          userMessages: [...synced.userMessages, message],
+        }
+      })(),
     }))
     const handlers = createHandlers(requestId)
     const currentSettings = stateRef.current.settings
@@ -456,7 +505,25 @@ export function useSSE() {
     abortControllerRef.current = controller
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
-    setState(prev => ({ ...prev, status: 'running', approvalRequest: null, error: null }))
+    setState(prev => ({
+      ...(() => {
+        const seeded = ensureDraftSnapshot(prev)
+        return {
+          ...seeded,
+          status: 'running',
+          approvalRequest: null,
+          error: null,
+          pendingVersion: seeded.versions.length > 0
+            ? {
+                version: seeded.versions.length + 1,
+                textOffset: seeded.textContents.length,
+                imageOffset: seeded.images.length,
+                toolEventOffset: seeded.toolEvents.length,
+              }
+            : null,
+        }
+      })(),
+    }))
     const handlers = createHandlers(requestId)
     try {
       await sendApproval(threadId, response, handlers, controller.signal)
@@ -477,6 +544,7 @@ export function useSSE() {
 
   const restoreVersion = useCallback((version: number) => {
     setState(prev => {
+      if (prev.pendingVersion) return prev
       const snapshot = prev.versions[version - 1]
       if (!snapshot) return prev
       return {
@@ -488,6 +556,7 @@ export function useSSE() {
         approvalRequest: null,
         error: null,
         currentVersion: version,
+        pendingVersion: null,
       }
     })
   }, [])
@@ -498,13 +567,15 @@ export function useSSE() {
 
   const saveEvaluation = useCallback((record: EvaluationRecord) => {
     setState(prev => {
+      const seeded = ensureDraftSnapshot(prev)
       const targetIndex = record.version - 1
-      const targetSnapshot = prev.versions[targetIndex]
+      const targetSnapshot = seeded.versions[targetIndex]
       if (!targetSnapshot) return prev
 
       return {
-        ...prev,
-        versions: prev.versions.map((snapshot, index) => {
+        ...seeded,
+        currentVersion: Math.max(seeded.currentVersion, record.version),
+        versions: seeded.versions.map((snapshot, index) => {
           if (index !== targetIndex) return snapshot
           return {
             ...snapshot,
