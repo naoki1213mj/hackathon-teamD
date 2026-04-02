@@ -21,7 +21,8 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 ## Current Implementation Notes
 
 - The Azure-backed runtime calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`, relying on deployment-level model guardrails plus lightweight local injection checks for obvious prompt override attempts.
-- APIM AI Gateway is provisioned and configured via `scripts/postprovision.py`, which creates a Foundry AI Gateway connection (`travel-ai-gateway`) and applies token-limit policies to the auto-generated foundry APIs.
+- APIM AI Gateway is provisioned and configured via `scripts/postprovision.py`, which creates a Foundry AI Gateway connection (`travel-ai-gateway`) and applies `llm-token-limit` plus `llm-emit-token-metric` policies to the generated `foundry-*` APIs.
+- APIM-side content safety is not currently configured. Prompt Shields, document or indirect attack protection, tool-response intervention, and Spotlighting require explicit Azure or Foundry-side assignment and are not assumed by the current runtime.
 - `POST /api/chat` in Azure mode pauses for approval after Agent2 (marketing-plan-agent) and resumes Agent3a → Agent3b → Agent4 → Agent5 upon user approval.
 - The pipeline uses 5 user-facing steps powered by 7 internal agents (Agent3a+3b share step 4, Agent4+5 share step 5).
 - Agent1 first tries the Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) with AAD auth and the Assistants-compatible endpoint. If unavailable, it falls back to Fabric Lakehouse SQL via pyodbc (`SQL_COPT_SS_ACCESS_TOKEN`), then CSV data.
@@ -45,7 +46,7 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for the current Azu
 flowchart LR
     user[Marketing user] --> ui[React frontend]
     ui --> api[FastAPI SSE API]
-    api --> flow[SequentialBuilder workflow]
+    api --> flow[FastAPI orchestration]
     flow --> a1[data-search-agent]
     a1 --> fabric[Fabric Lakehouse SQL]
     a1 -.-> csv[CSV fallback]

@@ -3,8 +3,9 @@
 毎リクエストで Credential + Client を再生成するオーバーヘッドを削減する。
 deployment_name をキーにキャッシュし、異なるモデル設定でも既存クライアントを再利用する。
 
-APIM AI Gateway は Foundry ポータルで Gateway を有効化することで自動経由される。
-アプリコード側での endpoint 差し替えは不要。
+アプリコードは project endpoint を直接使用する。
+APIM AI Gateway の接続とポリシーは Azure 側で構成されるが、実際の経路は
+Foundry ポータル設定と実行環境に依存する。
 """
 
 import logging
@@ -37,8 +38,8 @@ def get_responses_client(deployment_name: str | None = None):
     AzureOpenAIResponsesClient の endpoint を差し替えると Foundry のツール連携
     （Web Search / Knowledge Base / Code Interpreter 等）が使えなくなるため、
     コード側では project_endpoint を直接使用する。
-    APIM のトークン監視・メトリクスは Foundry ポータルの AI Gateway 統合で
-    将来的に自動経由される（Hosted Agent 化時）。
+    APIM のトークン監視・メトリクスは Azure 側の AI Gateway 構成で扱う。
+    Prompt Shields や tool-response 介入などの追加 guardrail はこの関数では設定しない。
     """
     settings = get_settings()
     deployment = deployment_name or settings["model_name"]

@@ -17,7 +17,7 @@ def test_format_sse_data_is_valid_json():
     """format_sse の data フィールドが有効な JSON である"""
     result = format_sse(SSEEventType.AGENT_PROGRESS, {"agent": "test", "step": 1})
     data_line = [line for line in result.split("\n") if line.startswith("data: ")][0]
-    data_json = json.loads(data_line[len("data: "):])
+    data_json = json.loads(data_line[len("data: ") :])
     assert data_json["agent"] == "test"
     assert data_json["step"] == 1
 

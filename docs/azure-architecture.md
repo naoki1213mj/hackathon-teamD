@@ -10,7 +10,7 @@ flowchart LR
     ui --> api[FastAPI SSE API]
     ui -. evaluate / refine .-> eval[/POST /api/evaluate/]
     eval --> foundryEval[Foundry Evaluations]
-    api --> flow[SequentialBuilder workflow in FastAPI]
+    api --> flow[FastAPI orchestration pipeline]
 
     flow --> a1[data-search-agent]
     a1 --> dataAgent[Fabric Data Agent Published URL]
@@ -65,8 +65,8 @@ flowchart TB
     ca --> appi[Application Insights]
     ca --> logic[Logic Apps]
 
-    apim[API Management AI Gateway] -. travel-ai-gateway connection .-> aiServices
-    ca -. not in active runtime path yet .-> apim
+    foundryProject -. travel-ai-gateway connection .-> apim
+    apim -. backend auth .-> aiServices
 
     aiSearch[Azure AI Search] --> foundryProject
 
@@ -89,7 +89,7 @@ flowchart TB
 | AI Services | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、`gpt-5-4-mini` を既定で配備 |
 | Foundry project | `accounts/projects@2025-06-01` |
 | Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
-| APIM | BasicV2、Managed Identity、AI Gateway ポリシー、トークン制限とメトリクス発行 |
+| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーを適用 |
 | Logic Apps | Consumption、HTTP trigger ベース |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
 | Key Vault | Private Endpoint、RBAC |
@@ -127,12 +127,12 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 - Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で生成します。
 - Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
 - Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
-- APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。また Voice Agent の作成も行います。
+- APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。加えて Voice Live 用 Prompt Agent と Entra SPA アプリ登録も作成します。
 - `/api/evaluate` は Built-in 評価器（Relevance / Coherence / Fluency）に加え、旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーンを返し、成功時は Foundry にログします。
 - フロントエンドは各 `done` イベントごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
-- 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
+- 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 orchestration step ではありません。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
-- モデル配備側のガードレールを主軸にしつつ、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードでブロックします。
+- モデル配備側のガードレールを主軸にしつつ、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードでブロックします。Prompt Shields や tool-response 介入などの追加 guardrail は Azure / Foundry 側で明示設定した場合のみ有効です。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
 - Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
 - 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。

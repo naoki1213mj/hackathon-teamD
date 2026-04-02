@@ -21,7 +21,8 @@
 ## 実装上の現在地
 
 - Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。コンテンツフィルタはモデル配備側に寄せ、アプリ側では明らかな指示上書きだけを軽量ガードで弾きます。
-- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシーの適用を行います。
+- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成と、生成された `foundry-*` API への `llm-token-limit` / `llm-emit-token-metric` ポリシー適用を行います。
+- APIM 側の content safety は現行構成では有効化していません。Prompt Shields、document or indirect attack 対策、tool response 介入、Spotlighting は Azure / Foundry 側で明示割当した場合にのみ有効になる追加ガードレールとして扱います。
 - Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - Agent1 はまず Fabric Data Agent Published URL（`FABRIC_DATA_AGENT_URL`）を AAD 認証付きの Assistants 互換エンドポイントとして利用し、利用できない場合は Fabric Lakehouse SQL の pyodbc 接続（`SQL_COPT_SS_ACCESS_TOKEN`）、最後に CSV へフォールバックします。
@@ -45,7 +46,7 @@ Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azu
 flowchart LR
     user[マーケ担当者] --> ui[React フロントエンド]
     ui --> api[FastAPI SSE API]
-    api --> flow[SequentialBuilder workflow]
+    api --> flow[FastAPI オーケストレーション]
     flow --> a1[data-search-agent]
     a1 --> fabric[Fabric Lakehouse SQL]
     a1 -.-> csv[CSV フォールバック]

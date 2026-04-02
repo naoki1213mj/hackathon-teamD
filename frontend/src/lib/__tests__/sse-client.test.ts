@@ -1,7 +1,7 @@
 /**
  * SSE クライアントのテスト
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { connectSSE, type SSEHandlers } from '../sse-client'
 
 const originalFetch = global.fetch

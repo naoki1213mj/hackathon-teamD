@@ -11,7 +11,7 @@
 
 | モード | 条件 | 挙動 |
 |---|---|---|
-| Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | `SequentialBuilder` を使って主フローを最後まで実行 |
+| Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | FastAPI オーケストレーションで主フローを最後まで実行 |
 | モック / デモモード | `AZURE_AI_PROJECT_ENDPOINT` 未設定 | ハードコード済みの SSE イベントを返す |
 | 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 | 承認継続モード | `POST /api/chat/{thread_id}/approve` | 承認なら Agent3a→Agent3b→Agent4→Agent5、非承認なら企画書を再生成して再度 `approval_request` を返す |
