@@ -57,8 +57,13 @@ resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
   }
 }
 
+resource manualTrigger 'Microsoft.Logic/workflows/triggers@2019-05-01' existing = {
+  parent: logicApp
+  name: 'manual'
+}
+
 output id string = logicApp.id
 output name string = logicApp.name
 @secure()
-output callbackUrl string = logicApp.listCallbackUrl().value
+output callbackUrl string = manualTrigger.listCallbackUrl().value
 output principalId string = logicApp.identity.principalId

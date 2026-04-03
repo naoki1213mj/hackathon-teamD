@@ -247,6 +247,64 @@ def test_manager_approval_callback_reopens_conversation(monkeypatch):
     assert saved["metrics"] is None
 
 
+def test_manager_approval_callback_approved_marks_running_and_starts_background_task(monkeypatch):
+    """上司承認時は running に更新して継続処理を起動する"""
+    saved_calls: list[dict[str, object]] = []
+    captured: dict[str, object] = {}
+
+    context = {
+        "user_input": "沖縄プラン",
+        "analysis_markdown": "分析結果",
+        "plan_markdown": "修正版企画書",
+        "model_settings": {"temperature": 0.3},
+        "workflow_settings": {
+            "manager_approval_enabled": True,
+            "manager_email": "manager@example.com",
+        },
+        "approval_scope": "manager",
+        "manager_callback_token": "token-123",
+    }
+
+    async def fake_load_pending(_conversation_id: str):
+        return context
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "input": "沖縄プラン",
+            "messages": [{"event": "approval_request", "data": {"approval_scope": "manager"}}],
+            "metadata": {"manager_approval_callback_token": "token-123"},
+        }
+
+    async def fake_save_conversation(**kwargs):
+        saved_calls.append(kwargs)
+
+    async def fake_continue(conversation_id: str, approval_context=None):
+        captured["conversation_id"] = conversation_id
+        captured["approval_context"] = approval_context
+
+    monkeypatch.setattr("src.api.chat._load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+    monkeypatch.setattr("src.api.chat._continue_after_manager_approval_safe", fake_continue)
+
+    response = client.post(
+        "/api/chat/conv-manager/manager-approval-callback",
+        json={
+            "conversation_id": "conv-manager",
+            "approved": True,
+            "callback_token": "token-123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert saved_calls[0]["status"] == "running"
+    assert captured == {
+        "conversation_id": "conv-manager",
+        "approval_context": context,
+    }
+
+
 def test_manager_approval_callback_rejects_invalid_token(monkeypatch):
     """callback token が一致しない場合は拒否する"""
 

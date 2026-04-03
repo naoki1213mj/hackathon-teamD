@@ -105,6 +105,42 @@ describe('buildRestoredPipelineState', () => {
     })
   })
 
+  it('restores running manager approval continuations as running pipeline state', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'running',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: 'analysis', agent: 'data-search-agent' } },
+          { event: 'text', data: { content: '# Revised Plan', agent: 'plan-revision-agent' } },
+          {
+            event: 'approval_request',
+            data: {
+              prompt: '修正版企画書を上司へ承認依頼しました。Teams の応答を待っています。',
+              conversation_id: 'conv-running-manager',
+              plan_markdown: '# Revised Plan',
+              approval_scope: 'manager',
+              manager_email: 'manager@example.com',
+              manager_approval_url: 'https://app.example.com/?manager_conversation_id=conv-running-manager#manager_approval_token=token-123',
+              manager_delivery_mode: 'manual',
+            },
+          },
+        ],
+      },
+      'conv-running-manager',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('running')
+    expect(state.approvalRequest).toBeNull()
+    expect(state.agentProgress).toEqual({
+      agent: 'brochure-gen-agent',
+      status: 'running',
+      step: 5,
+      total_steps: 5,
+    })
+  })
+
   it('rebuilds version snapshots from completed multi-round conversations', () => {
     const state = buildRestoredPipelineState(
       {

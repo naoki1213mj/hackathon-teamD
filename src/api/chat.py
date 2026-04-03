@@ -16,7 +16,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import TypedDict
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
@@ -174,6 +174,25 @@ def _build_manager_approval_url(base_url: str, conversation_id: str, approval_to
     query = urllib.parse.urlencode({"manager_conversation_id": conversation_id})
     fragment = urllib.parse.urlencode({"manager_approval_token": approval_token})
     return f"{normalized_base_url}/?{query}#{fragment}"
+
+
+def _extract_forwarded_header_value(value: str | None) -> str:
+    """Forwarded header の先頭値を取り出す。"""
+    if not value:
+        return ""
+    return value.split(",", 1)[0].strip()
+
+
+def _build_public_base_url(request: Request) -> str:
+    """リバースプロキシ配下でも公開 URL を正しく組み立てる。"""
+    forwarded_proto = _sanitize_optional_text(_extract_forwarded_header_value(request.headers.get("x-forwarded-proto")))
+    forwarded_host = _sanitize_optional_text(
+        _extract_forwarded_header_value(request.headers.get("x-forwarded-host") or request.headers.get("host"))
+    )
+    if forwarded_host:
+        scheme = forwarded_proto or request.url.scheme or "https"
+        return f"{scheme}://{forwarded_host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
 
 
 def _get_conversation_metadata(conversation: dict | None) -> dict[str, object]:
@@ -1864,6 +1883,7 @@ async def _post_approval_events(
     user_response: str,
     conversation_id: str,
     base_url: str | None = None,
+    approval_context: PendingApprovalContext | None = None,
 ):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
     settings = get_settings()
@@ -1873,7 +1893,7 @@ async def _post_approval_events(
             yield event
         return
 
-    context = await _load_pending_approval_context(conversation_id)
+    context = approval_context or await _load_pending_approval_context(conversation_id)
     if context is None:
         yield format_sse(
             SSEEventType.ERROR,
@@ -2241,6 +2261,54 @@ async def _submit_manager_approval_request(
 
 async def _continue_after_manager_approval(conversation_id: str) -> None:
     """上司承認後にバックグラウンドで成果物生成を再開する。"""
+    await _continue_after_manager_approval_safe(conversation_id)
+
+
+async def _continue_after_manager_approval_safe(
+    conversation_id: str,
+    approval_context: PendingApprovalContext | None = None,
+) -> None:
+    """上司承認後の継続処理を例外ログ付きで実行する。"""
+    try:
+        await _run_manager_approval_continuation(conversation_id, approval_context)
+    except Exception:
+        logger.exception("上司承認後の継続処理に失敗: conversation_id=%s", conversation_id)
+        existing_conversation = await get_conversation(conversation_id)
+        if not existing_conversation:
+            return
+
+        error_events: list[dict] = []
+        _record_sse_event(
+            error_events,
+            format_sse(
+                SSEEventType.ERROR,
+                {
+                    "message": "上司承認後の継続処理に失敗しました。会話を再読み込みして再度お試しください。",
+                    "code": "MANAGER_APPROVAL_CONTINUATION_FAILED",
+                },
+            ),
+            time.monotonic(),
+        )
+        merged_messages = [*existing_conversation.get("messages", []), *error_events]
+        conversation_status = _conversation_status_from_events(merged_messages)
+        await save_conversation(
+            conversation_id=conversation_id,
+            user_input=existing_conversation.get("input", ""),
+            events=merged_messages,
+            metrics=_build_conversation_metadata_for_save(
+                conversation_id,
+                existing_conversation,
+                conversation_status,
+            ),
+            status=conversation_status,
+        )
+
+
+async def _run_manager_approval_continuation(
+    conversation_id: str,
+    approval_context: PendingApprovalContext | None = None,
+) -> None:
+    """上司承認後にバックグラウンドで成果物生成を再開する。"""
     existing_conversation = await get_conversation(conversation_id)
     if not existing_conversation:
         logger.warning("上司承認後の会話が見つかりません: %s", conversation_id)
@@ -2248,7 +2316,7 @@ async def _continue_after_manager_approval(conversation_id: str) -> None:
 
     collected_events: list[dict] = []
     start = time.monotonic()
-    async for event in _post_approval_events("承認", conversation_id):
+    async for event in _post_approval_events("承認", conversation_id, approval_context=approval_context):
         _record_sse_event(collected_events, event, start)
 
     merged_messages = [*existing_conversation.get("messages", []), *collected_events]
@@ -2475,7 +2543,7 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
                 yield event
 
         existing_conversation = await get_conversation(thread_id)
-        base_url = str(request.base_url).rstrip("/")
+        base_url = _build_public_base_url(request)
         if is_approved:
             async for event in _collect_and_yield(_post_approval_events(body.response, thread_id, base_url)):
                 yield event
@@ -2549,6 +2617,7 @@ async def get_manager_approval_request(thread_id: str, request: Request) -> JSON
 async def manager_approval_callback(
     thread_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     body: ManagerApprovalCallbackRequest,
 ) -> JSONResponse:
     """上司承認 workflow からの承認結果を受け取り、後続処理を再開する。"""
@@ -2565,7 +2634,21 @@ async def manager_approval_callback(
         return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
 
     if body.approved:
-        asyncio.create_task(_continue_after_manager_approval(thread_id))
+        existing_conversation = await get_conversation(thread_id)
+        if existing_conversation:
+            await save_conversation(
+                conversation_id=thread_id,
+                user_input=existing_conversation.get("input", context.get("user_input", "")),
+                events=existing_conversation.get("messages", []),
+                metrics=_build_conversation_metadata_for_save(
+                    thread_id,
+                    existing_conversation,
+                    "running",
+                ),
+                status="running",
+            )
+        _pending_approvals.pop(thread_id, None)
+        background_tasks.add_task(_continue_after_manager_approval_safe, thread_id, context)
         return JSONResponse(content={"status": "accepted", "conversation_id": thread_id})
 
     existing_conversation = await get_conversation(thread_id)

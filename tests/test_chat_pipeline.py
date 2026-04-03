@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from starlette.requests import Request
 
 from src.api import chat as chat_module
 
@@ -409,6 +410,31 @@ class TestConversationStatusFromEvents:
     def test_error_event(self):
         events = [{"event": "error"}]
         assert chat_module._conversation_status_from_events(events) == "error"
+
+
+def test_build_public_base_url_prefers_forwarded_headers():
+    """公開 URL は proxy の forwarded headers を優先する"""
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "method": "POST",
+            "path": "/api/chat/conv/approve",
+            "raw_path": b"/api/chat/conv/approve",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"internal.local"),
+                (b"x-forwarded-proto", b"https"),
+                (b"x-forwarded-host", b"app.example.com"),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("internal.local", 80),
+            "root_path": "",
+            "http_version": "1.1",
+        }
+    )
+
+    assert chat_module._build_public_base_url(request) == "https://app.example.com"
 
     def test_other_event_defaults_completed(self):
         events = [{"event": "text"}]

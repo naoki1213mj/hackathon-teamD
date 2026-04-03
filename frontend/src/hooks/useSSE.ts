@@ -281,9 +281,22 @@ export function buildRestoredPipelineState(
 
   const status = doc.status === 'awaiting_approval' || doc.status === 'awaiting_manager_approval'
     ? 'approval'
-    : doc.status === 'error'
-      ? 'error'
-      : 'completed'
+    : doc.status === 'running'
+      ? 'running'
+      : doc.status === 'error'
+        ? 'error'
+        : 'completed'
+
+  const restoredRunningAgentProgress = status === 'running' && approvalRequest?.approval_scope === 'manager'
+    ? latestAgentProgress && latestAgentProgress.agent !== 'approval'
+      ? latestAgentProgress
+      : {
+          agent: 'brochure-gen-agent',
+          status: 'running' as const,
+          step: PIPELINE_TOTAL_STEPS,
+          total_steps: PIPELINE_TOTAL_STEPS,
+        }
+    : latestAgentProgress
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
     versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
@@ -300,7 +313,7 @@ export function buildRestoredPipelineState(
           step: 3,
           total_steps: PIPELINE_TOTAL_STEPS,
         }
-      : latestAgentProgress,
+      : restoredRunningAgentProgress,
     toolEvents: cloneToolEvents(toolEvents),
     textContents: cloneTextContents(textContents),
     images: cloneImages(images),

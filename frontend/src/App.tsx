@@ -150,6 +150,18 @@ function App() {
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
   const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
+
+  useEffect(() => {
+    if (managerPortalRequest) return
+    if (state.status !== 'approval' || !isManagerApproval || !state.approvalRequest?.conversation_id) return
+
+    const intervalId = window.setInterval(() => {
+      void restoreConversation(state.approvalRequest?.conversation_id || '')
+    }, 5000)
+
+    return () => window.clearInterval(intervalId)
+  }, [isManagerApproval, managerPortalRequest, restoreConversation, state.approvalRequest?.conversation_id, state.status])
+
   const pendingVersionNotice = state.pendingVersion ? (
     <div className="mb-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--accent-strong)]">
       <div className="flex items-center gap-2 font-medium">
