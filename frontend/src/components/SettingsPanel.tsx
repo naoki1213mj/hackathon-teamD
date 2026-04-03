@@ -49,12 +49,6 @@ const IMAGE_QUALITY_OPTIONS = [
   { value: 'high', label: 'High' },
 ]
 
-const GPT_SIZE_OPTIONS = [
-  { value: '1024x1024', label: '1024×1024 (正方形)' },
-  { value: '1024x1536', label: '1024×1536 (縦長)' },
-  { value: '1536x1024', label: '1536×1024 (横長)' },
-]
-
 interface SettingsPanelProps {
   settings: ModelSettings
   onChange: (settings: ModelSettings) => void
