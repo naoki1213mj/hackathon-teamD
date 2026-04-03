@@ -98,6 +98,7 @@ export interface ConversationDocument {
 export interface PipelineState {
   status: PipelineStatus
   conversationId: string | null
+  managerApprovalPolling: boolean
   agentProgress: AgentProgress | null
   toolEvents: ToolEvent[]
   textContents: TextContent[]
@@ -115,6 +116,7 @@ export interface PipelineState {
 const initialState: PipelineState = {
   status: 'idle',
   conversationId: null,
+  managerApprovalPolling: false,
   agentProgress: null,
   toolEvents: [],
   textContents: [],
@@ -297,6 +299,8 @@ export function buildRestoredPipelineState(
           total_steps: PIPELINE_TOTAL_STEPS,
         }
     : latestAgentProgress
+  const managerApprovalPolling = approvalRequest?.approval_scope === 'manager'
+    && (doc.status === 'awaiting_manager_approval' || doc.status === 'running')
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
     versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
@@ -306,6 +310,7 @@ export function buildRestoredPipelineState(
     ...initialState,
     status,
     conversationId,
+    managerApprovalPolling,
     agentProgress: status === 'approval'
       ? latestAgentProgress ?? {
           agent: 'approval',
@@ -471,6 +476,7 @@ export function useSSE() {
       conversationIdRef.current = request.conversation_id
       setState(prev => ({
         ...prev,
+        managerApprovalPolling: request.approval_scope === 'manager',
         approvalRequest: {
           ...request,
           plan_markdown: request.plan_markdown || getLatestPlanMarkdown(prev.textContents),
@@ -491,6 +497,7 @@ export function useSSE() {
         ...prev,
         error: data as ErrorData,
         status: 'error',
+        managerApprovalPolling: false,
         pendingVersion: null,
       }))
     },
@@ -510,6 +517,7 @@ export function useSSE() {
           ...prev,
           metrics: doneData.metrics,
           status: 'completed',
+          managerApprovalPolling: false,
           conversationId: doneData.conversation_id,
           versions: newVersions,
           currentVersion: newVersions.length,
@@ -532,6 +540,7 @@ export function useSSE() {
         return {
           ...synced,
           status: 'running' as const,
+          managerApprovalPolling: false,
           error: null,
           approvalRequest: null,
           agentProgress: null,
@@ -569,6 +578,7 @@ export function useSSE() {
     setState(prev => ({
       ...prev,
       status: 'running',
+      managerApprovalPolling: false,
       approvalRequest: null,
       error: null,
       pendingVersion: inferPendingVersion(prev),

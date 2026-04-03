@@ -2,6 +2,7 @@
  * モデル設定パネル。Temperature / Max Tokens / Top P / Foundry IQ パラメータを調整する。
  */
 
+import { ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 
 export interface ModelSettings {
@@ -61,6 +62,8 @@ interface SettingsPanelProps {
   t: (key: string) => string
 }
 
+type SettingsSection = 'model' | 'image' | 'manager'
+
 interface SliderFieldProps {
   inputId: string
   label: string
@@ -103,112 +106,172 @@ function SliderField({ inputId, label, tooltip, value, min, max, step, onChange 
 }
 
 export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState<SettingsSection | null>(null)
   const trimmedManagerEmail = settings.managerEmail.trim()
   const isManagerEmailInvalid = settings.managerApprovalEnabled
     && trimmedManagerEmail.length > 0
     && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)
 
+  const sectionOptions: Array<{ key: SettingsSection; label: string; Icon: typeof SlidersHorizontal }> = [
+    { key: 'model', label: t('settings.title'), Icon: SlidersHorizontal },
+    { key: 'image', label: t('settings.image.title'), Icon: ImagePlus },
+    { key: 'manager', label: t('settings.manager.title'), Icon: ShieldCheck },
+  ]
+
   const update = (key: keyof ModelSettings, value: number | string | boolean) => {
     onChange({ ...settings, [key]: value })
   }
 
-  const resetToDefaults = () => {
-    onChange({ ...DEFAULT_SETTINGS })
+  const resetSectionDefaults = (section: SettingsSection) => {
+    if (section === 'model') {
+      onChange({
+        ...settings,
+        model: DEFAULT_SETTINGS.model,
+        temperature: DEFAULT_SETTINGS.temperature,
+        maxTokens: DEFAULT_SETTINGS.maxTokens,
+        topP: DEFAULT_SETTINGS.topP,
+        iqSearchResults: DEFAULT_SETTINGS.iqSearchResults,
+        iqScoreThreshold: DEFAULT_SETTINGS.iqScoreThreshold,
+      })
+      return
+    }
+
+    if (section === 'image') {
+      onChange({
+        ...settings,
+        imageModel: DEFAULT_SETTINGS.imageModel,
+        imageQuality: DEFAULT_SETTINGS.imageQuality,
+        imageWidth: DEFAULT_SETTINGS.imageWidth,
+        imageHeight: DEFAULT_SETTINGS.imageHeight,
+      })
+      return
+    }
+
+    onChange({
+      ...settings,
+      managerApprovalEnabled: DEFAULT_SETTINGS.managerApprovalEnabled,
+      managerEmail: DEFAULT_SETTINGS.managerEmail,
+    })
+  }
+
+  const toggleSection = (section: SettingsSection) => {
+    setActiveSection(current => current === section ? null : section)
   }
 
   return (
     <div className="mb-3">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
-      >
-        <span>⚙️</span>
-        <span>{t('settings.title')}</span>
-        <span className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}>▾</span>
-      </button>
+      <div className="flex flex-wrap gap-2">
+        {sectionOptions.map(({ key, label, Icon }) => {
+          const isOpen = activeSection === key
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => toggleSection(key)}
+              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${isOpen
+                ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                : 'border-[var(--panel-border)] text-[var(--text-secondary)] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]'}`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{label}</span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )
+        })}
+      </div>
 
-      {isOpen && (
+      {activeSection && (
         <div className="mt-2 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4 shadow-sm">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="settings-model" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.model.desc')}>
-                  {t('settings.model')}
-                  <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.model.desc')}>ⓘ</span>
-                </label>
-              </div>
-              <select
-                id="settings-model"
-                value={settings.model}
-                onChange={(e) => update('model', e.target.value)}
-                aria-label={t('settings.model')}
-                className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
-              >
-                {AVAILABLE_MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-            <SliderField
-              inputId="settings-temperature"
-              label={t('settings.temperature')}
-              tooltip={t('settings.temperature.desc')}
-              value={settings.temperature}
-              min={0}
-              max={2}
-              step={0.1}
-              onChange={(v) => update('temperature', v)}
-            />
-            <SliderField
-              inputId="settings-max-tokens"
-              label={t('settings.maxTokens')}
-              tooltip={t('settings.maxTokens')}
-              value={settings.maxTokens}
-              min={256}
-              max={16384}
-              step={256}
-              onChange={(v) => update('maxTokens', v)}
-            />
-            <SliderField
-              inputId="settings-top-p"
-              label={t('settings.topP')}
-              tooltip="Top P"
-              value={settings.topP}
-              min={0}
-              max={1}
-              step={0.05}
-              onChange={(v) => update('topP', v)}
-            />
-            <SliderField
-              inputId="settings-iq-results"
-              label={t('settings.iqResults')}
-              tooltip={t('settings.iqResults')}
-              value={settings.iqSearchResults}
-              min={1}
-              max={20}
-              step={1}
-              onChange={(v) => update('iqSearchResults', v)}
-            />
-            <SliderField
-              inputId="settings-iq-threshold"
-              label={t('settings.iqThreshold')}
-              tooltip={t('settings.iqThreshold')}
-              value={settings.iqScoreThreshold}
-              min={0}
-              max={1}
-              step={0.05}
-              onChange={(v) => update('iqScoreThreshold', v)}
-            />
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+              {sectionOptions.find(section => section.key === activeSection)?.label}
+            </p>
+            <button
+              type="button"
+              onClick={() => resetSectionDefaults(activeSection)}
+              className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+            >
+              {t('settings.reset')}
+            </button>
           </div>
 
-          {/* 画像生成設定セクション */}
-          <div className="mt-4 border-t border-[var(--panel-border)] pt-4">
-            <p className="mb-3 text-xs font-semibold text-[var(--text-secondary)]">
-              🎨 {t('settings.image.title')}
-            </p>
+          {activeSection === 'model' && (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="settings-model" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.model.desc')}>
+                    {t('settings.model')}
+                    <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.model.desc')}>ⓘ</span>
+                  </label>
+                </div>
+                <select
+                  id="settings-model"
+                  value={settings.model}
+                  onChange={(e) => update('model', e.target.value)}
+                  aria-label={t('settings.model')}
+                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+                >
+                  {AVAILABLE_MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <SliderField
+                inputId="settings-temperature"
+                label={t('settings.temperature')}
+                tooltip={t('settings.temperature.desc')}
+                value={settings.temperature}
+                min={0}
+                max={2}
+                step={0.1}
+                onChange={(v) => update('temperature', v)}
+              />
+              <SliderField
+                inputId="settings-max-tokens"
+                label={t('settings.maxTokens')}
+                tooltip={t('settings.maxTokens')}
+                value={settings.maxTokens}
+                min={256}
+                max={16384}
+                step={256}
+                onChange={(v) => update('maxTokens', v)}
+              />
+              <SliderField
+                inputId="settings-top-p"
+                label={t('settings.topP')}
+                tooltip="Top P"
+                value={settings.topP}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => update('topP', v)}
+              />
+              <SliderField
+                inputId="settings-iq-results"
+                label={t('settings.iqResults')}
+                tooltip={t('settings.iqResults')}
+                value={settings.iqSearchResults}
+                min={1}
+                max={20}
+                step={1}
+                onChange={(v) => update('iqSearchResults', v)}
+              />
+              <SliderField
+                inputId="settings-iq-threshold"
+                label={t('settings.iqThreshold')}
+                tooltip={t('settings.iqThreshold')}
+                value={settings.iqScoreThreshold}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => update('iqScoreThreshold', v)}
+              />
+            </div>
+          )}
+
+          {activeSection === 'image' && (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="settings-image-model" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.image.model.desc')}>
@@ -275,18 +338,16 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
                   />
                 </>
               )}
-            </div>
-            {settings.imageModel === 'MAI-Image-2' && (
-              <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                ⓘ {t('settings.image.mai.constraint')}
-              </p>
-            )}
-          </div>
+              </div>
+              {settings.imageModel === 'MAI-Image-2' && (
+                <p className="mt-2 text-[10px] text-[var(--text-muted)]">
+                  {t('settings.image.mai.constraint')}
+                </p>
+              )}
+            </>
+          )}
 
-          <div className="mt-4 border-t border-[var(--panel-border)] pt-4">
-            <p className="mb-3 text-xs font-semibold text-[var(--text-secondary)]">
-              👤 {t('settings.manager.title')}
-            </p>
+          {activeSection === 'manager' && (
             <div className="space-y-3">
               <label
                 htmlFor="settings-manager-approval"
@@ -329,17 +390,7 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
                 </div>
               )}
             </div>
-          </div>
-
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={resetToDefaults}
-              className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
-            >
-              {t('settings.reset')}
-            </button>
-          </div>
+          )}
         </div>
       )}
     </div>

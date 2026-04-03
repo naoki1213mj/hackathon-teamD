@@ -103,6 +103,7 @@ describe('buildRestoredPipelineState', () => {
       manager_approval_url: 'https://app.example.com/?manager_conversation_id=conv-manager-approval#manager_approval_token=token-123',
       manager_delivery_mode: 'manual',
     })
+    expect(state.managerApprovalPolling).toBe(true)
   })
 
   it('restores running manager approval continuations as running pipeline state', () => {
@@ -132,6 +133,7 @@ describe('buildRestoredPipelineState', () => {
     )
 
     expect(state.status).toBe('running')
+    expect(state.managerApprovalPolling).toBe(true)
     expect(state.approvalRequest).toBeNull()
     expect(state.agentProgress).toEqual({
       agent: 'brochure-gen-agent',
