@@ -74,15 +74,24 @@ _image_settings_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
     default={},
 )
 
+# モジュールレベルフォールバック（Agent Framework がコンテキスト変数をコピーしない場合の保険）
+_image_settings_fallback: dict = {}
+
 
 def set_current_image_settings(settings: dict) -> None:
     """現在の画像生成設定をコンテキスト変数にセットする。"""
+    global _image_settings_fallback
     _image_settings_var.set(settings)
+    _image_settings_fallback = settings
 
 
 def _get_current_image_settings() -> dict:
     """現在の非同期コンテキストに紐づく画像設定を返す。"""
-    return _image_settings_var.get()
+    settings = _image_settings_var.get()
+    if not settings and _image_settings_fallback:
+        logger.info("コンテキスト変数が空。モジュールレベルフォールバックを使用: %s", _image_settings_fallback)
+        return _image_settings_fallback
+    return settings
 
 
 def _get_image_openai_client(deployment: str = _DEFAULT_IMAGE_MODEL):
@@ -134,12 +143,16 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
     img_settings = _get_current_image_settings()
     image_model = img_settings.get("image_model", _DEFAULT_IMAGE_MODEL)
 
+    logger.info("画像生成ディスパッチ: model=%s, settings=%s", image_model, img_settings)
+
     model_info = AVAILABLE_IMAGE_MODELS.get(image_model)
     if model_info and model_info["format"] == "mai":
         width, height = _parse_size_for_mai(size, img_settings)
+        logger.info("MAI-Image-2 パス: width=%d, height=%d", width, height)
         return await _generate_image_mai(prompt, width, height)
 
     quality = img_settings.get("image_quality", "medium")
+    logger.info("GPT パス: size=%s, quality=%s", size, quality)
     return await _generate_image_gpt(prompt, size, quality)
 
 
@@ -244,16 +257,19 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
 
         def _sync_request():
             with urllib.request.urlopen(request, timeout=60) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                resp_body = resp.read().decode("utf-8")
+                logger.info("MAI-Image-2 API レスポンス: status=%d, body_len=%d", resp.status, len(resp_body))
+                return json.loads(resp_body)
 
         result = await asyncio.wait_for(asyncio.to_thread(_sync_request), timeout=90)
 
         data_list = result.get("data", [])
         if not data_list or not data_list[0].get("b64_json"):
-            logger.warning("MAI-Image-2: 画像データなし。レスポンス: %s", list(result.keys()))
+            logger.warning("MAI-Image-2: 画像データなし。レスポンスキー: %s", list(result.keys()))
             return _FALLBACK_IMAGE
 
         b64_data = data_list[0]["b64_json"]
+        logger.info("MAI-Image-2 画像生成成功: b64_len=%d", len(b64_data))
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
         logger.warning("MAI-Image-2 画像生成タイムアウト（90秒）。フォールバック画像を返します")
