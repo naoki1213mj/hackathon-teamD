@@ -12,7 +12,8 @@
 | AI Services account | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、SKU `S0` |
 | Microsoft Foundry project | `accounts/projects@2025-06-01` |
 | 既定テキストモデル | `gpt-5-4-mini` を `gpt-5.4-mini` から配備 |
-| 画像生成モデル | `gpt-image-1-5` を `gpt-image-1.5` から配備 |
+| 画像生成モデル | `gpt-image-1-5` を `gpt-image-1.5` から配備（メインプロジェクト） |
+| 画像生成モデル (MAI) | `MAI-Image-2` を別リソース（East US）に配備。`IMAGE_PROJECT_ENDPOINT_MAI` で接続 |
 | Container Apps Environment | Log Analytics 接続済み |
 | Container App | System-assigned MI、`/api/health` と `/api/ready` probe、0-3 replicas |
 | Azure Container Registry | Basic SKU |
@@ -121,7 +122,31 @@ az cognitiveservices account deployment create \
   --sku-name GlobalStandard
 ```
 
-アプリの `brochure_gen.py` はモデル名 `gpt-image-1.5` を参照します。未配備時は透明 PNG フォールバックです。
+アプリの `brochure_gen.py` はデフォルトで `gpt-image-1.5` を使用します。未配備時は透明 PNG フォールバックです。
+
+#### MAI-Image-2（オプション — 別リソース）
+
+MAI-Image-2 は別の Foundry リソース（East US）にデプロイします。UI から画像モデルとして選択可能です。
+
+```bash
+# 別リソースに MAI-Image-2 を配備
+az cognitiveservices account deployment create \
+  --name <mai-resource-account> \
+  --resource-group <resource-group> \
+  --deployment-name MAI-Image-2 \
+  --model-name MAI-Image-2 \
+  --model-format Microsoft \
+  --sku-capacity 1 \
+  --sku-name GlobalStandard
+```
+
+`.env` に以下を追加:
+
+```bash
+IMAGE_PROJECT_ENDPOINT_MAI=https://<mai-resource-account>.services.ai.azure.com
+```
+
+MAI-Image-2 は GPT Image 1.5 とは異なる API（`/mai/v1/images/generations`）を使用します。パラメータも `width`/`height`（整数、最小 768px、w×h ≤ 1,048,576）で指定します。
 
 ### 4.5 Azure AI Search を作成し、規制文書を投入
 
@@ -252,6 +277,7 @@ curl https://<container-app-fqdn>/api/ready
 ### 画像生成疎通
 
 - `gpt-image-1.5` が配備済み
+- MAI-Image-2 利用時: `IMAGE_PROJECT_ENDPOINT_MAI` が設定済み、別リソースに `MAI-Image-2` が配備済み
 - 画像生成が透明 PNG に落ちていない
 
 ### 音声 / 動画疎通
@@ -300,3 +326,4 @@ curl https://<container-app-fqdn>/api/ready
 ## 7. 補足
 
 - `gpt-image-1.5` は IaC で自動配備される。古いテンプレートで作成済みの環境のみ手動追加が必要
+- `MAI-Image-2` は別リソース（East US）に手動配備し、`IMAGE_PROJECT_ENDPOINT_MAI` で接続する

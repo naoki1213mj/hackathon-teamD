@@ -34,7 +34,7 @@
 - FastAPI バックエンドによるオーケストレーション（Agent Framework SequentialBuilder は直接使用せず、FastAPI 内で独自に承認フロー・修正ルーティング・画像 side-channel を制御）
 - 業務 DB（Fabric Lakehouse + デモデータ）
 - レギュレーション文書リポジトリ（Foundry IQ Knowledge Base）
-- 画像生成（GPT Image 1.5）
+- 画像生成（GPT Image 1.5 / MAI-Image-2 — UI から選択可能）
 - Azure API Management AI Gateway（トークン管理・監視・負荷分散）
 - APIM AI Gateway の接続・ポリシー構成（`travel-ai-gateway` 接続、トークン制限、メトリクス、監視）
 - モデル配備側ガードレール + 軽量入力 / ツール応答ガードによるプロンプトインジェクション対策
@@ -168,7 +168,7 @@
 | フロントエンド | React + TypeScript | チャット UI・成果物プレビュー・修正対話 | Vite でビルド。Tailwind CSS |
 | バックエンド | FastAPI + uvicorn | SSE ストリーミング API・静的ファイル配信 | Python 3.14。エージェントオーケストレーション |
 | 推論モデル | gpt-5.4-mini | 7 エージェントの推論・テキスト生成 | GA（2026年3月〜）。低レイテンシ・高スループット |
-| 画像生成モデル | GPT Image 1.5 | バナー画像・ブローシャ用画像 | Microsoft Foundry 上で GA |
+| 画像生成モデル | GPT Image 1.5 / MAI-Image-2 | バナー画像・ブローシャ用画像 | UI から選択可能。GPT はメインプロジェクト、MAI は別リソース |
 | AI Gateway | Azure API Management (AI Gateway) | Foundry 接続・トークン制限・メトリクス・監視 | `scripts/postprovision.py` で接続とポリシーを構成 |
 | オーケストレーション | FastAPI バックエンド（独自オーケストレーション） | エージェント実行順序・承認フロー・修正ルーティング・画像 side-channel・動画ポーリング | `src/api/chat.py` で制御 |
 | エージェント実装 | Microsoft Agent Framework (Python) | 7 つのエージェントのコア実装 | 1.0.0 GA。現在は FastAPI から直接実行し、Hosted Agent 化は将来課題 |

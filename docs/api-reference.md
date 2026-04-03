@@ -79,7 +79,13 @@
     "max_tokens": 1200,
     "top_p": 1.0,
     "iq_search_results": 5,
-    "iq_score_threshold": 0.0
+    "iq_score_threshold": 0.0,
+    "image_settings": {
+      "image_model": "gpt-image-1.5",
+      "image_quality": "medium",
+      "image_width": 1024,
+      "image_height": 1024
+    }
   }
 }
 ```
@@ -88,7 +94,8 @@
 |---|---|---|---|
 | `message` | `string` | 必須 | 1 文字以上 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold` を送信できる。現行バックエンドで明示利用しているのは主に `model`、`temperature`、`max_tokens`、`top_p` |
+| `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
+| `settings.image_settings` | `object \| null` | 任意 | 画像生成設定。`image_model`（`gpt-image-1.5` / `MAI-Image-2`）、`image_quality`（`low`/`medium`/`high`、GPT のみ）、`image_width`/`image_height`（MAI のみ、最小 768、w×h ≤ 1,048,576） |
 
 ### 現行挙動
 

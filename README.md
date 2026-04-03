@@ -61,7 +61,7 @@ flowchart LR
     a3a --> safeweb[Web Search for safety info]
     a3a --> a3b[plan-revision-agent]
     flow --> a4[brochure-gen-agent]
-    a4 --> image[gpt-image-1.5]
+    a4 --> image[gpt-image-1.5 / MAI-Image-2]
     a4 --> cu[Content Understanding]
     flow --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar]
@@ -135,6 +135,7 @@ After provisioning, `scripts/postprovision.py` automatically configures the AI G
 | `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent Published URL ending with `/aiassistant/openai`; Agent1 tries this first for natural-language data analysis |
 | `FABRIC_SQL_ENDPOINT` | Optional fallback | Fabric Lakehouse SQL endpoint used when the Data Agent is unavailable or additional structured lookup is needed |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | Optional | PDF analysis for brochure reference material |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | Optional | MAI-Image-2 resource endpoint (separate Foundry account); when set, MAI-Image-2 becomes selectable in the UI |
 | `SPEECH_SERVICE_ENDPOINT` | Optional | Speech / Photo Avatar endpoint for video generation |
 | `SPEECH_SERVICE_REGION` | Optional | Speech region used by promo-video generation |
 | `VOICE_AGENT_NAME` | Optional | Voice Live agent name returned by `/api/voice-config` |

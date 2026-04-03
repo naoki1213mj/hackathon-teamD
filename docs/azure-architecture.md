@@ -29,7 +29,7 @@ flowchart LR
     a3a --> a3b[plan-revision-agent]
 
     flow --> a4[brochure-gen-agent]
-    a4 --> image[gpt-image-1.5]
+    a4 --> image[gpt-image-1.5 / MAI-Image-2]
     a4 --> cu[Content Understanding]
 
     flow --> a5[video-gen-agent]

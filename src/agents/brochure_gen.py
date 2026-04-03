@@ -210,7 +210,7 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
     """MAI Image API で画像を生成し、data URI を返す。
 
     API: POST /mai/v1/images/generations
-    認証: Azure AD トークン（https://ai.azure.com/.default）
+    認証: Azure AD トークン（https://cognitiveservices.azure.com/.default）
     """
     try:
         settings = get_settings()
@@ -221,8 +221,9 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
 
         api_url = f"{endpoint.rstrip('/')}/mai/v1/images/generations"
 
+        # MAI-Image-2 はリソース直接アクセスのため cognitiveservices スコープを使用
         credential = DefaultAzureCredential()
-        token = credential.get_token(_AZURE_AI_SCOPE)
+        token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
         body = json.dumps({
             "model": "MAI-Image-2",
