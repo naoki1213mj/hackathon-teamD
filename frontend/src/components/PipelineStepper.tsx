@@ -1,4 +1,4 @@
-import { BarChart3, Check, FileText, Palette, Pencil, Scale, ShieldCheck, Video } from 'lucide-react'
+import { BarChart3, Check, FileText, Palette, Pencil, Scale, ShieldCheck, UserCheck, Video } from 'lucide-react'
 import type { AgentProgress } from '../hooks/useSSE'
 
 const PHASE_ICONS: Record<string, React.ReactNode> = {
@@ -7,33 +7,48 @@ const PHASE_ICONS: Record<string, React.ReactNode> = {
   'approval': <ShieldCheck className="h-4 w-4" />,
   'regulation-check-agent': <Scale className="h-4 w-4" />,
   'plan-revision-agent': <Pencil className="h-4 w-4" />,
+  'manager-approval': <UserCheck className="h-4 w-4" />,
   'brochure-gen-agent': <Palette className="h-4 w-4" />,
   'video-gen-agent': <Video className="h-4 w-4" />,
 }
 
-const PHASES = [
+const BASE_PHASES = [
   { key: 'data-search-agent', label: 'step.data_search' },
   { key: 'marketing-plan-agent', label: 'step.marketing_plan' },
   { key: 'approval', label: 'step.approval' },
   { key: 'regulation-check-agent', label: 'step.regulation' },
   { key: 'plan-revision-agent', label: 'step.plan_revision' },
-  { key: 'brochure-gen-agent', label: 'step.brochure' },
-  { key: 'video-gen-agent', label: 'step.video' },
 ]
+
+const MANAGER_APPROVAL_PHASE = { key: 'manager-approval', label: 'step.manager_approval' }
+
+function buildPhases(showManagerApprovalPhase: boolean) {
+  return showManagerApprovalPhase
+    ? [...BASE_PHASES, MANAGER_APPROVAL_PHASE, { key: 'brochure-gen-agent', label: 'step.brochure' }, { key: 'video-gen-agent', label: 'step.video' }]
+    : [...BASE_PHASES, { key: 'brochure-gen-agent', label: 'step.brochure' }, { key: 'video-gen-agent', label: 'step.video' }]
+}
 
 interface PipelineStepperProps {
   progress: AgentProgress | null
   t: (key: string) => string
+  showManagerApprovalPhase?: boolean
+  managerApprovalActive?: boolean
 }
 
-export function PipelineStepper({ progress, t }: PipelineStepperProps) {
-  const currentAgent = progress?.agent || ''
-  const currentPhaseIndex = progress ? PHASES.findIndex(phase => phase.key === currentAgent) : -1
+export function PipelineStepper({
+  progress,
+  t,
+  showManagerApprovalPhase = false,
+  managerApprovalActive = false,
+}: PipelineStepperProps) {
+  const phases = buildPhases(showManagerApprovalPhase)
+  const currentAgent = managerApprovalActive ? 'manager-approval' : progress?.agent || ''
+  const currentPhaseIndex = progress ? phases.findIndex(phase => phase.key === currentAgent) : -1
 
   return (
     <div className="overflow-x-auto pb-1">
       <div className="flex min-w-max items-center gap-1 py-3">
-      {PHASES.map((step, i) => {
+      {phases.map((step, i) => {
         const isActive = i === currentPhaseIndex && progress?.status === 'running'
         const isCompleted = currentPhaseIndex > i ||
           (currentPhaseIndex === i && progress?.status === 'completed')

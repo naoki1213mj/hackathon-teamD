@@ -150,6 +150,8 @@ function App() {
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
   const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
+  const showManagerApprovalPhase = state.hasManagerApprovalPhase
+  const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
   const shouldPollManagerApprovalFlow = state.managerApprovalPolling && Boolean(state.conversationId)
 
   useEffect(() => {
@@ -292,7 +294,12 @@ function App() {
 
             {state.status !== 'idle' && (
               <>
-                <PipelineStepper progress={state.agentProgress} t={t} />
+                <PipelineStepper
+                  progress={state.agentProgress}
+                  t={t}
+                  showManagerApprovalPhase={showManagerApprovalPhase}
+                  managerApprovalActive={isManagerApprovalStepActive}
+                />
                 {isRunning && (
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
                     {elapsed}s

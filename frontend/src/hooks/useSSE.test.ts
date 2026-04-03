@@ -104,6 +104,7 @@ describe('buildRestoredPipelineState', () => {
       manager_delivery_mode: 'manual',
     })
     expect(state.managerApprovalPolling).toBe(true)
+    expect(state.hasManagerApprovalPhase).toBe(true)
   })
 
   it('restores running manager approval continuations as running pipeline state', () => {
@@ -134,6 +135,7 @@ describe('buildRestoredPipelineState', () => {
 
     expect(state.status).toBe('running')
     expect(state.managerApprovalPolling).toBe(true)
+    expect(state.hasManagerApprovalPhase).toBe(true)
     expect(state.approvalRequest).toBeNull()
     expect(state.agentProgress).toEqual({
       agent: 'brochure-gen-agent',

@@ -99,6 +99,7 @@ export interface PipelineState {
   status: PipelineStatus
   conversationId: string | null
   managerApprovalPolling: boolean
+  hasManagerApprovalPhase: boolean
   agentProgress: AgentProgress | null
   toolEvents: ToolEvent[]
   textContents: TextContent[]
@@ -117,6 +118,7 @@ const initialState: PipelineState = {
   status: 'idle',
   conversationId: null,
   managerApprovalPolling: false,
+  hasManagerApprovalPhase: false,
   agentProgress: null,
   toolEvents: [],
   textContents: [],
@@ -197,6 +199,7 @@ export function buildRestoredPipelineState(
   let error: ErrorData | null = null
   let approvalRequest: ApprovalRequest | null = null
   let latestAgentProgress: AgentProgress | null = null
+  let hasManagerApprovalPhase = false
   const versions: ArtifactSnapshot[] = []
 
   for (const event of doc.messages ?? []) {
@@ -236,6 +239,7 @@ export function buildRestoredPipelineState(
         ].slice(-MAX_TOOL_EVENTS)
         break
       case 'approval_request':
+        hasManagerApprovalPhase = hasManagerApprovalPhase || data.approval_scope === 'manager'
         approvalRequest = {
           prompt: String(data.prompt || ''),
           conversation_id: String(data.conversation_id || conversationId),
@@ -311,6 +315,7 @@ export function buildRestoredPipelineState(
     status,
     conversationId,
     managerApprovalPolling,
+    hasManagerApprovalPhase: hasManagerApprovalPhase || doc.status === 'awaiting_manager_approval',
     agentProgress: status === 'approval'
       ? latestAgentProgress ?? {
           agent: 'approval',
@@ -477,6 +482,7 @@ export function useSSE() {
       setState(prev => ({
         ...prev,
         managerApprovalPolling: request.approval_scope === 'manager',
+        hasManagerApprovalPhase: prev.hasManagerApprovalPhase || request.approval_scope === 'manager',
         approvalRequest: {
           ...request,
           plan_markdown: request.plan_markdown || getLatestPlanMarkdown(prev.textContents),
@@ -541,6 +547,7 @@ export function useSSE() {
           ...synced,
           status: 'running' as const,
           managerApprovalPolling: false,
+          hasManagerApprovalPhase: currentSettings.managerApprovalEnabled,
           error: null,
           approvalRequest: null,
           agentProgress: null,
