@@ -27,7 +27,13 @@ def _sanitize_conversation_document(doc: dict) -> dict:
 async def conversations_list(limit: int = 20) -> JSONResponse:
     """会話一覧を取得する。"""
     items = await list_conversations(limit=limit)
-    return JSONResponse(content={"conversations": items})
+    return JSONResponse(
+        content={"conversations": items},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @router.get("/conversations/{conversation_id}")
@@ -36,7 +42,13 @@ async def conversation_detail(conversation_id: str) -> JSONResponse:
     doc = await get_conversation(conversation_id)
     if not doc:
         return JSONResponse(status_code=404, content={"error": "conversation not found"})
-    return JSONResponse(content=_sanitize_conversation_document(doc))
+    return JSONResponse(
+        content=_sanitize_conversation_document(doc),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @router.get("/replay/{conversation_id}")

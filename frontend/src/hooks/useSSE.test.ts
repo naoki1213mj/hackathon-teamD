@@ -360,4 +360,29 @@ describe('buildRestoredPipelineState', () => {
 
     expect(sendApproval).toHaveBeenCalledTimes(1)
   })
+
+  it('restores conversations with cache-busting fetch options', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'running',
+      input: '沖縄の家族旅行を企画して',
+      messages: [],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-cache-test')
+    })
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0]
+    expect(String(url)).toContain('/api/conversations/conv-cache-test')
+    expect(String(url)).toContain('ts=')
+    expect(options).toMatchObject({
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    })
+  })
 })

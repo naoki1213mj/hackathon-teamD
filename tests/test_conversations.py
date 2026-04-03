@@ -11,6 +11,7 @@ def test_conversations_list_returns_200():
     """GET /api/conversations が 200 を返す"""
     response = client.get("/api/conversations")
     assert response.status_code == 200
+    assert response.headers["Cache-Control"].startswith("no-store")
     data = response.json()
     assert "conversations" in data
     assert isinstance(data["conversations"], list)
@@ -40,6 +41,7 @@ def test_conversation_detail_hides_sensitive_metadata(monkeypatch):
 
     response = client.get("/api/conversations/conv-1")
     assert response.status_code == 200
+    assert response.headers["Cache-Control"].startswith("no-store")
     data = response.json()
     assert data["metadata"] == {"latency": 1.2}
 

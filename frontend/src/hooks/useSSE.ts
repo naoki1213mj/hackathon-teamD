@@ -653,7 +653,14 @@ export function useSSE() {
     activeRequestIdRef.current = requestId
 
     try {
-      const resp = await fetch(`/api/conversations/${conversationId}`)
+      const restoreUrl = new URL(`/api/conversations/${conversationId}`, window.location.origin)
+      restoreUrl.searchParams.set('ts', String(Date.now()))
+      const resp = await fetch(restoreUrl.toString(), {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      })
       if (!resp.ok) return
       const doc = await resp.json() as ConversationDocument
       if (requestId !== activeRequestIdRef.current) return
