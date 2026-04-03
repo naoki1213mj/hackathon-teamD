@@ -493,7 +493,7 @@ class TestBrochureGenTools:
 
         monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agent_client.AzureOpenAIResponsesClient",
+            "src.agent_client.FoundryChatClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
@@ -519,7 +519,7 @@ class TestBrochureGenTools:
 
         monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agent_client.AzureOpenAIResponsesClient",
+            "src.agent_client.FoundryChatClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
@@ -552,7 +552,7 @@ class TestMarketingPlanAgent:
 
         monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agent_client.AzureOpenAIResponsesClient",
+            "src.agent_client.FoundryChatClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
@@ -580,7 +580,7 @@ class TestMarketingPlanAgent:
 
         monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agent_client.AzureOpenAIResponsesClient",
+            "src.agent_client.FoundryChatClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(

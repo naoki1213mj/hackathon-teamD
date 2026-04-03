@@ -1,23 +1,24 @@
 ---
 name: agent-framework-patterns
 description: >-
-  Microsoft Agent Framework (Python) rc5 (1.0.0rc5) のコードパターン集。
+    Microsoft Agent Framework (Python) GA 1.0.0 のコードパターン集。
   エージェント作成、ツール定義、Workflow 構築、middleware、Hosted Agent デプロイの正しい書き方を提供する。
   Triggers: "agent-framework", "Agent Framework", "エージェント作成", "ツール定義", "@tool",
-  "Workflow", "SequentialBuilder", "middleware", "AzureOpenAIResponsesClient"
+    "Workflow", "SequentialBuilder", "middleware", "FoundryChatClient"
 ---
 
-# Microsoft Agent Framework パターン集（rc5 準拠）
+# Microsoft Agent Framework パターン集（GA 1.0.0 準拠）
 
 ## エージェント作成
 
 ```python
 from azure.identity import DefaultAzureCredential
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.foundry import FoundryChatClient
 
 # クライアント作成
-client = AzureOpenAIResponsesClient(
+client = FoundryChatClient(
     project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+    model=os.environ["MODEL_NAME"],
     credential=DefaultAzureCredential(),
 )
 
@@ -26,7 +27,6 @@ agent = client.as_agent(
     name="data-search-agent",
     instructions="あなたは旅行データの分析エージェントです。",
     tools=[search_sales_history, analyze_trends],
-    model="gpt-5.4-mini",
 )
 
 # 実行
@@ -86,7 +86,7 @@ class ContentSafetyMiddleware(Middleware):
         if not is_safe:
             raise ValueError("入力が Content Safety チェックに失敗しました")
         # 次の middleware / エージェントに渡す
-        return await call_next()  # 引数なし（rc5）
+        return await call_next()  # 引数なし
 ```
 
 ## 設定
@@ -107,14 +107,14 @@ settings = load_settings(AppSettings)
 
 | ✅ 正しい | ❌ 間違い |
 |----------|---------|
-| `AzureOpenAIResponsesClient` | `AzureOpenAIChatClient` |
+| `FoundryChatClient` | `AzureOpenAIResponsesClient` |
 | `client.as_agent(...)` | `Agent(chat_client=...)` |
 | `@tool` | `@ai_function` |
 | `await agent.run("文字列")` | `agent.run(Message(...))` |
 | `SequentialBuilder(participants=[...]).build()` | `.participants()` fluent |
 | `await call_next()` | `call_next(context)` |
 | `TypedDict + load_settings()` | Pydantic Settings |
-| `AZURE_AI_PROJECT_ENDPOINT` | `AZURE_OPENAI_ENDPOINT` |
+| `AZURE_AI_PROJECT_ENDPOINT` / `FOUNDRY_PROJECT_ENDPOINT` | `AZURE_OPENAI_ENDPOINT` |
 
 ## 参照
 

@@ -6,7 +6,7 @@ from typing import TypedDict
 from dotenv import load_dotenv
 
 # ローカル開発用に .env を読み込む
-load_dotenv()
+load_dotenv(override=False)
 
 
 class AppSettings(TypedDict):
@@ -26,20 +26,20 @@ class AppSettings(TypedDict):
     fabric_data_agent_url: str
 
 
-# 環境変数名 → AppSettings キーのマッピング
-_ENV_MAP: dict[str, str] = {
-    "AZURE_AI_PROJECT_ENDPOINT": "project_endpoint",
-    "MODEL_NAME": "model_name",
-    "APPLICATIONINSIGHTS_CONNECTION_STRING": "applicationinsights_connection_string",
-    "ENVIRONMENT": "environment",
-    "COSMOS_DB_ENDPOINT": "cosmos_db_endpoint",
-    "FABRIC_SQL_ENDPOINT": "fabric_sql_endpoint",
-    "ALLOWED_ORIGINS": "allowed_origins",
-    "CONTENT_UNDERSTANDING_ENDPOINT": "content_understanding_endpoint",
-    "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
-    "SPEECH_SERVICE_REGION": "speech_service_region",
-    "LOGIC_APP_CALLBACK_URL": "logic_app_callback_url",
-    "FABRIC_DATA_AGENT_URL": "fabric_data_agent_url",
+# 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
+_ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "project_endpoint": ("AZURE_AI_PROJECT_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINT"),
+    "model_name": ("MODEL_NAME", "FOUNDRY_MODEL"),
+    "applicationinsights_connection_string": ("APPLICATIONINSIGHTS_CONNECTION_STRING",),
+    "environment": ("ENVIRONMENT",),
+    "cosmos_db_endpoint": ("COSMOS_DB_ENDPOINT",),
+    "fabric_sql_endpoint": ("FABRIC_SQL_ENDPOINT",),
+    "allowed_origins": ("ALLOWED_ORIGINS",),
+    "content_understanding_endpoint": ("CONTENT_UNDERSTANDING_ENDPOINT",),
+    "speech_service_endpoint": ("SPEECH_SERVICE_ENDPOINT",),
+    "speech_service_region": ("SPEECH_SERVICE_REGION",),
+    "logic_app_callback_url": ("LOGIC_APP_CALLBACK_URL",),
+    "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -55,8 +55,8 @@ _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}
 def get_settings() -> AppSettings:
     """環境変数から AppSettings をロードする。未設定の必須項目は空文字列になる。"""
     settings: dict[str, str] = {}
-    for env_key, setting_key in _ENV_MAP.items():
-        value = os.environ.get(env_key, _DEFAULTS.get(setting_key, ""))
+    for setting_key, env_keys in _ENV_CANDIDATES.items():
+        value = next((os.environ[name] for name in env_keys if os.environ.get(name)), _DEFAULTS.get(setting_key, ""))
         settings[setting_key] = value
     return AppSettings(**settings)  # type: ignore[typeddict-item]
 

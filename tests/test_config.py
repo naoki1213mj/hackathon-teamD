@@ -53,3 +53,16 @@ def test_default_values(monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     settings = get_settings()
     assert settings["model_name"] == "gpt-5-4-mini"
+
+
+def test_foundry_env_aliases(monkeypatch):
+    """FOUNDRY_* エイリアス環境変数も解決できる"""
+    monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    monkeypatch.delenv("MODEL_NAME", raising=False)
+    monkeypatch.setenv("FOUNDRY_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+    monkeypatch.setenv("FOUNDRY_MODEL", "gpt-5-4-mini")
+
+    settings = get_settings()
+
+    assert settings["project_endpoint"] == "https://example.services.ai.azure.com/api/projects/demo"
+    assert settings["model_name"] == "gpt-5-4-mini"

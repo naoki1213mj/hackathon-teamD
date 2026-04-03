@@ -2,7 +2,7 @@
 
 Agent4 の成果物生成後に実行し、品質チェックを行う。
 GitHubCopilotAgent が利用可能な場合はそちらを使用し、
-未設定時は AzureOpenAIResponsesClient ベースのエージェントにフォールバックする。
+未設定時は FoundryChatClient ベースのエージェントにフォールバックする。
 """
 
 import logging
@@ -112,7 +112,7 @@ def create_review_agent():
     """品質レビューエージェントを作成する。
 
     GitHubCopilotAgent が利用可能な場合はそちらを使用し、
-    未設定時は従来の AzureOpenAIResponsesClient ベースのエージェントにフォールバックする。
+    未設定時は従来の FoundryChatClient ベースのエージェントにフォールバックする。
     """
     # GitHubCopilotAgent を優先的に試行
     try:
@@ -131,20 +131,20 @@ def create_review_agent():
     except Exception as exc:
         logger.warning("GitHubCopilotAgent の初期化で予期しないエラー: %s", exc)
 
-    # フォールバック: AzureOpenAIResponsesClient ベースのエージェント
+    # フォールバック: FoundryChatClient ベースのエージェント
     settings = get_settings()
     if not settings["project_endpoint"]:
         logger.info("Project endpoint 未設定のためレビューエージェントはスキップ")
         return None
 
     try:
-        from agent_framework.azure import AzureOpenAIResponsesClient
+        from agent_framework.foundry import FoundryChatClient
         from azure.identity import DefaultAzureCredential
 
-        client = AzureOpenAIResponsesClient(
+        client = FoundryChatClient(
             project_endpoint=settings["project_endpoint"],
             credential=DefaultAzureCredential(),
-            deployment_name=settings["model_name"],
+            model=settings["model_name"],
         )
         return client.as_agent(
             name="quality-review-agent",
@@ -152,5 +152,5 @@ def create_review_agent():
             tools=_REVIEW_TOOLS,
         )
     except (ImportError, ValueError, OSError) as exc:
-        logger.warning("AzureOpenAIResponsesClient の初期化に失敗: %s", exc)
+        logger.warning("FoundryChatClient の初期化に失敗: %s", exc)
         return None

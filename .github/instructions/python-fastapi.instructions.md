@@ -6,17 +6,19 @@ applyTo: 'src/**/*.py, tests/**/*.py'
 
 ## Python / FastAPI 規約
 
-### Agent Framework（rc5 (1.0.0rc5) 準拠）
+### Agent Framework（GA 1.0.0 準拠）
 
-- クライアント: `AzureOpenAIResponsesClient(project_endpoint=..., credential=DefaultAzureCredential())`
+- クライアント: `FoundryChatClient(project_endpoint=..., model=..., credential=DefaultAzureCredential())`
 - エージェント作成: `client.as_agent(name=..., tools=..., middleware=...)`
 - ツール定義: `@tool` デコレータ（`@ai_function` は削除済み）
 - 実行: `await agent.run("文字列")`（Message オブジェクト不要）
 - Workflow: `SequentialBuilder(participants=[...]).build()` は存在するが、HITL（承認中断）はサポートしない
 - 承認フローが必要な場合は FastAPI 側で Agent1→Agent2→承認→Agent3→Agent4 を明示実行する
-- エンドポイント環境変数: `AZURE_AI_PROJECT_ENDPOINT`
+- エンドポイント環境変数: `AZURE_AI_PROJECT_ENDPOINT`（公式の `FOUNDRY_PROJECT_ENDPOINT` も許容）
+- モデル環境変数: `MODEL_NAME`（公式の `FOUNDRY_MODEL` も許容）
 - middleware の `call_next` は引数なし: `await call_next()`
 - 設定は `TypedDict + load_settings()`（Pydantic Settings は廃止）
+- `agent_framework.azure` の `AzureOpenAI*` 互換 surface は削除済み。Foundry は `agent_framework.foundry` を使う
 
 ### Foundry SDK 注意点
 
@@ -40,7 +42,8 @@ applyTo: 'src/**/*.py, tests/**/*.py'
 ### パッケージ管理
 
 - `uv add <package>` で追加。pip install は使わない
-- プレリリース: `uv add agent-framework --prerelease=allow`
+- Agent Framework 本体: `uv add agent-framework-core==1.0.0 agent-framework-foundry==1.0.0`
+- ベータ connector: `uv add <package> --prerelease=allow`
 - テスト実行: `uv run pytest`
 - リント: `uv run ruff check .`
 

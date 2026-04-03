@@ -99,7 +99,7 @@
 │ (オーケストレーション)         │
 │                              │
 │ エージェント実装:              │
-│ Microsoft Agent Framework     │  ← Python (1.0.0rc5)
+│ Microsoft Agent Framework     │  ← Python (1.0.0)
 └──┬────┬────┬────┬───────────┘
    │    │    │    │
    ▼    │    │    │     ┌───────────────────────┐
@@ -150,7 +150,7 @@
 | 画像生成モデル | GPT Image 1.5 | バナー画像・ブローシャ用画像 | Microsoft Foundry 上で GA |
 | AI Gateway | Azure API Management (AI Gateway) | トークン管理・負荷分散・セマンティックキャッシュ・監視 | Foundry ポータルから有効化可能 |
 | オーケストレーション | Foundry Agent Service Workflows | Sequential + Human-in-the-Loop Workflow 制御 | Portal ビジュアルビルダーまたは YAML。Preview |
-| エージェント実装 | Microsoft Agent Framework (Python) | 4 つのエージェントのコア実装 | 1.0.0rc5。Hosted Agent として Foundry にデプロイ |
+| エージェント実装 | Microsoft Agent Framework (Python) | 4 つのエージェントのコア実装 | 1.0.0 GA。Hosted Agent として Foundry にデプロイ |
 | データ基盤 | Fabric Data Factory + Lakehouse | デモデータの取り込み・格納・クエリ | Delta Parquet 格納。SQL エンドポイント経由 |
 | ナレッジ検索 | Foundry IQ Knowledge Base | レギュレーション文書の agentic retrieval | Azure AI Search が基盤。Preview |
 | 外部情報検索 | Web Search ツール (Preview) | 外務省安全情報・気象情報・市場トレンド | 追加 Azure リソース不要 |
@@ -675,7 +675,7 @@ Social AI Studio のパターンを参考に、以下のコンポーネント構
 | Azure サブスクリプション | チームメンバー全員が同一サブスクリプションにアクセスできること |
 | デプロイリージョン | Code Interpreter のツール可用性がリージョン依存のため、**East US 2 または Sweden Central** を推奨。Japan East は Code Interpreter が利用できない可能性があるため、事前にツール可用性テーブルを確認すること |
 | Microsoft Foundry プロジェクト | New Foundry ポータルでプロジェクト作成済み |
-| Microsoft Agent Framework | Python 1.0.0rc5。`uv add agent-framework --prerelease=allow` でインストール（pip の場合は `pip install agent-framework --pre`）。Python 3.14 以上 |
+| Microsoft Agent Framework | Python 1.0.0。`uv add agent-framework-core==1.0.0 agent-framework-foundry==1.0.0` で導入し、beta connector だけ `--prerelease=allow` を使う。Python 3.14 以上 |
 | FastAPI + uvicorn | バックエンド Web フレームワーク。`uv add fastapi uvicorn` でインストール |
 | Foundry Agent Service | Prompt Agent は GA。Hosted Agent は Preview（private networking 未対応）。Agent Framework 実装を Hosted Agent としてデプロイ。Foundry 層の VNet 分離は Hosted Agent 対応後に適用。**Hosted Agent の課金は 2026年4月1日以降に開始予定**（Preview 期間中はホスティングランタイム無料） |
 | gpt-5.4-mini | Microsoft Foundry 上で GA（2026年3月17日〜）。デプロイ済みであること。低レイテンシ・高スループットのエージェント向けモデル |

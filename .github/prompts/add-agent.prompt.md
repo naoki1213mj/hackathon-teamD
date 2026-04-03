@@ -1,5 +1,5 @@
 ---
-description: '新しいエージェントを追加する。Agent Framework rc5 パターンに従い、ツール定義・テスト・SSE イベント対応を含む。'
+description: '新しいエージェントを追加する。Agent Framework GA 1.0.0 パターンに従い、ツール定義・テスト・SSE イベント対応を含む。'
 mode: agent
 tools: ['filesystem', 'terminal']
 ---
@@ -11,10 +11,10 @@ tools: ['filesystem', 'terminal']
 ## 手順
 
 1. `src/agents/{{agent_name}}.py` を作成する
-   - `AzureOpenAIResponsesClient` でクライアントを作成
+   - `FoundryChatClient` でクライアントを作成
    - `@tool` デコレータでツールを定義
    - `client.as_agent()` でエージェントを作成
-   - `docs/requirements_v3.md` の該当セクションを参照して要件を満たすこと
+   - `docs/requirements_v4.0.md` の該当セクションを参照して要件を満たすこと
 
 2. `src/tools/{{agent_name}}_tools.py` を作成する（ツールが多い場合）
 
@@ -24,10 +24,10 @@ tools: ['filesystem', 'terminal']
 
 4. `src/api/chat.py` の SSE ストリーミングに新エージェントの進捗イベントを追加する
 
-5. `src/workflows/pipeline.py` の Sequential Workflow に参加者を追加する
+5. `src/api/chat.py` の FastAPI オーケストレーションに新エージェントの実行経路を追加する
 
 ## 確認事項
 
-- Agent Framework rc5 の API パターンに従っているか（`.github/skills/agent-framework-patterns/SKILL.md` 参照）
+- Agent Framework GA 1.0.0 の API パターンに従っているか（`.github/skills/agent-framework-patterns/SKILL.md` 参照）
 - Structured Output（JSON Schema）を使っているか
 - 軽量入力 / ツール応答ガードが必要な場所に適用されているか

@@ -5,7 +5,8 @@ description = "旅行マーケティング AI マルチエージェントパイ�
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "agent-framework==1.0.0rc5",
+    "agent-framework-core==1.0.0",
+    "agent-framework-foundry==1.0.0",
     "azure-ai-evaluation>=1.16.2",
     "azure-ai-projects>=2.0.1",
     "azure-cosmos>=4.9.0",
@@ -16,7 +17,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "uvicorn>=0.42.0",
     "pyodbc>=5.2.0",
-    "agent-framework-github-copilot==1.0.0b260319",
+    "agent-framework-github-copilot==1.0.0b260402",
     "python-multipart>=0.0.20",
     "httpx>=0.28.1",
 ]

@@ -11,7 +11,7 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 
 ## あなたの専門領域
 
-1. **Microsoft Agent Framework (Python)**: rc5 準拠の API パターンでエージェントを実装する
+1. **Microsoft Agent Framework (Python)**: GA 1.0.0 準拠の API パターンでエージェントを実装する
 2. **Foundry Agent Service Workflows**: Sequential + Human-in-the-Loop のワークフロー設計
 3. **FastAPI + SSE**: リアルタイムストリーミング API の実装
 4. **ガードレール**: モデル配備側の Content Filter と軽量な入力 / ツール応答ガード
@@ -22,8 +22,8 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 
 ## Always do
 
-- `docs/requirements_v3.md` を参照して要件に沿った実装をする
-- Agent Framework は rc5 の API パターンを使う（AGENTS.md の「間違えやすい API」を確認）
+- `docs/requirements_v4.0.md` を参照して要件に沿った実装をする
+- Agent Framework は GA 1.0.0 の API パターンを使う（AGENTS.md の「間違えやすい API」を確認）
 - `@tool` デコレータでツールを定義する
 - DefaultAzureCredential で認証する
 - SSE イベントは 7 種類（agent_progress, tool_event, text, image, approval_request, error, done）に分類する
@@ -39,7 +39,7 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 ## Never do
 
 - `@ai_function` を使う（削除済み）
-- `AzureOpenAIChatClient` を使う（廃止）
+- `AzureOpenAIResponsesClient` を新規実装で使う（GA では非対応）
 - `AZURE_OPENAI_ENDPOINT` を使う（レガシー）
 - API キーをコードにハードコードする
 - 旧 Consumption プランを前提にする（Flex Consumption を使う）

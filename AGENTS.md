@@ -43,7 +43,7 @@
 | パッケージ管理 | uv | 最新 |
 | 推論モデル | gpt-5.4-mini | GA (2026-03-17~) |
 | 画像生成 | GPT Image 1.5 | GA（アクセス承認必要） |
-| エージェント実装 | Microsoft Agent Framework | 1.0.0rc5 (RC) |
+| エージェント実装 | Microsoft Agent Framework | 1.0.0 (GA) |
 | オーケストレーション | FastAPI 直接オーケストレーション | `src/api/chat.py` で実装 |
 | データ | Fabric Lakehouse | Delta Parquet + SQL EP |
 | ナレッジ | Foundry IQ Knowledge Base | Preview |
@@ -60,15 +60,15 @@
 
 | ✅ 正しい | ❌ 間違い | 理由 |
 |----------|---------|------|
-| `AzureOpenAIResponsesClient(project_endpoint=..., credential=DefaultAzureCredential())` | `AzureOpenAIChatClient(endpoint=...)` | rc5 で ChatClient は廃止 |
-| `client.as_agent(name=..., tools=..., middleware=...)` | `Agent(chat_client=...)` | rc5 でコンストラクタ変更 |
+| `FoundryChatClient(project_endpoint=..., model=..., credential=DefaultAzureCredential())` | `AzureOpenAIResponsesClient(...)` | GA で Foundry クライアントへ移行 |
+| `client.as_agent(name=..., tools=..., middleware=...)` | `Agent(chat_client=...)` | `chat_client` コンストラクタは旧パターン |
 | `@tool` デコレータ | `@ai_function` | `@ai_function` は削除済み |
-| `await agent.run("文字列")` | `agent.run(Message(role=..., contents=[...]))` | rc5 で簡素化 |
+| `await agent.run("文字列")` | `agent.run(Message(role=..., contents=[...]))` | `run()` が入力を正規化する |
 | `SequentialBuilder(participants=[...]).build()` | `.participants()` fluent builder | fluent builder は削除済み |
 | `AZURE_AI_PROJECT_ENDPOINT` | `AZURE_OPENAI_ENDPOINT` | Foundry Project EP を使う |
-| `await call_next()` | `call_next(context)` | middleware の引数なし（rc5） |
-| `TypedDict + load_settings()` | Pydantic Settings | rc5 で廃止 |
-| `uv add agent-framework --prerelease=allow` | `pip install agent-framework` | uv でプレリリース指定が必要 |
+| `await call_next()` | `call_next(context)` | middleware continuation に引数は渡さない |
+| `TypedDict + load_settings()` | Pydantic Settings | 軽量 settings パターンを使う |
+| `uv add agent-framework-core==1.0.0 agent-framework-foundry==1.0.0` | `uv add agent-framework --prerelease=allow` | GA 版は通常インストール。beta connector だけ `--prerelease=allow` |
 | `Flex Consumption` プラン | `Consumption` プラン | 旧 Consumption はレガシー |
 | `Microsoft Foundry` | `Azure AI Foundry` | 2025-11 にリネーム済み |
 
@@ -177,7 +177,7 @@
 **ファイル**: `src/agents/quality_review.py`
 **役割**: 生成された成果物の品質を 4 観点でレビュー（企画書構造 / ブローシャアクセシビリティ / テキストトーン一貫性 / 旅行業法適合）。バックグラウンドで実行され、`AZURE_AI_PROJECT_ENDPOINT` 未設定時はスキップされる。
 
-**実装**: `GitHubCopilotAgent` を優先使用し、`PermissionHandler.approve_all` で自動権限承認を設定。利用不可時は `AzureOpenAIResponsesClient` にフォールバック。
+**実装**: `GitHubCopilotAgent` を優先使用し、`PermissionHandler.approve_all` で自動権限承認を設定。利用不可時は `FoundryChatClient` にフォールバック。
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|

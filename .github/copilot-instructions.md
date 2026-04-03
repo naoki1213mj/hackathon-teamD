@@ -10,7 +10,7 @@
 - **フロントエンド**: React 18 / TypeScript / Vite / Tailwind CSS / i18n (日英中)
 - **推論モデル**: gpt-5.4-mini (GA)
 - **画像生成**: GPT Image 1.5 (GA, 要アクセス承認)
-- **エージェント**: Microsoft Agent Framework 1.0.0rc5 (RC, Breaking Changes あり)
+- **エージェント**: Microsoft Agent Framework 1.0.0 (GA)
 - **オーケストレーション**: Foundry Agent Service Workflows (Preview)
 - **データ**: Fabric Lakehouse (Delta Parquet + SQL エンドポイント)
 - **ナレッジ**: Foundry IQ Knowledge Base (Preview)
