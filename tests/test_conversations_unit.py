@@ -179,6 +179,27 @@ class TestSaveConversationDetails:
         )
         assert _memory_store["test-uid"]["user_id"] == "demo-user"
 
+    async def test_save_conversation_merges_existing_metadata(self):
+        """metadata は更新時にマージされる"""
+        await save_conversation(
+            conversation_id="test-metadata-merge",
+            user_input="初回",
+            events=[],
+            metrics={"manager_approval_callback_token": "secret-token"},
+        )
+
+        await save_conversation(
+            conversation_id="test-metadata-merge",
+            user_input="更新",
+            events=[],
+            metrics={"latency": 1.23},
+        )
+
+        assert _memory_store["test-metadata-merge"]["metadata"] == {
+            "manager_approval_callback_token": "secret-token",
+            "latency": 1.23,
+        }
+
 
 class TestGetConversationEdgeCases:
     """会話取得のエッジケーステスト"""

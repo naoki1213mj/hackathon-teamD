@@ -2,7 +2,12 @@ import { Check, MessageSquareWarning, Pencil } from 'lucide-react';
 import { useState } from 'react';
 
 interface ApprovalBannerProps {
-  request: { prompt: string; plan_markdown?: string; conversation_id: string }
+  request: {
+    prompt: string
+    plan_markdown?: string
+    conversation_id: string
+    manager_comment?: string
+  }
   onApprove: (response: string) => void
   t: (key: string) => string
 }
@@ -23,6 +28,13 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
           </span>
           <MessageSquareWarning className="h-4 w-4" /> {t('approval.title')}
         </h3>
+
+      {request.manager_comment && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
+          <p className="font-medium">{t('approval.manager.comment')}</p>
+          <p className="mt-1 whitespace-pre-wrap text-xs leading-5">{request.manager_comment}</p>
+        </div>
+      )}
 
       {mode === 'action' ? (
         <div className="flex items-center gap-3">

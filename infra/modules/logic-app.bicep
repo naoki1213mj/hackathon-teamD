@@ -1,5 +1,6 @@
-// Azure Logic Apps (Consumption) - 承認後自動アクション
-// Teams 通知 + SharePoint 保存 + メール送信
+// Azure Logic Apps (Consumption)
+// post_approval_actions 用の HTTP workflow。
+// Teams を使う manager approval workflow は別途用意し、MANAGER_APPROVAL_TRIGGER_URL で FastAPI に渡す。
 
 param name string
 param location string
@@ -25,11 +26,16 @@ resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
             schema: {
               type: 'object'
               properties: {
+                request_type: { type: 'string' }
                 plan_title: { type: 'string' }
                 plan_markdown: { type: 'string' }
                 brochure_html: { type: 'string' }
                 conversation_id: { type: 'string' }
               }
+              required: [
+                'request_type'
+                'conversation_id'
+              ]
             }
           }
         }
@@ -39,10 +45,10 @@ resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
           type: 'Response'
           kind: 'Http'
           inputs: {
-            statusCode: 200
+            statusCode: 202
             body: {
               status: 'accepted'
-              message: '承認後アクションを開始しました'
+              message: 'Logic Apps workflow accepted the request'
             }
           }
         }

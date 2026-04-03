@@ -6,6 +6,7 @@ import type { ModelSettings } from '../components/SettingsPanel'
 
 /** SSE タイムアウト（10 分 — Agent3+Agent4 の画像生成を考慮） */
 const SSE_TIMEOUT_MS = 600_000
+const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export type SSEEventType =
   | 'agent_progress'
@@ -82,6 +83,12 @@ export async function connectSSE(
 
   const body: Record<string, unknown> = { message, conversation_id: conversationId }
   if (settings) {
+    const trimmedManagerEmail = settings.managerEmail.trim()
+    if (settings.managerApprovalEnabled && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)) {
+      handlers.error?.({ message: '有効な上司メールアドレスを入力してください', code: 'INVALID_MANAGER_EMAIL' })
+      return
+    }
+
     body.settings = {
       model: settings.model,
       temperature: settings.temperature,
@@ -95,6 +102,10 @@ export async function connectSSE(
         image_width: settings.imageWidth,
         image_height: settings.imageHeight,
       },
+    }
+    body.workflow_settings = {
+      manager_approval_enabled: settings.managerApprovalEnabled,
+      manager_email: trimmedManagerEmail,
     }
   }
 

@@ -1,0 +1,7 @@
+{
+  "conversation_id": "<<CONVERSATION_ID>>",
+  "approved": false,
+  "comment": "<<MANAGER_COMMENT>>",
+  "approver_email": "<<RESPONDER_EMAIL>>",
+  "callback_token": "<<MANAGER_CALLBACK_TOKEN>>"
+}

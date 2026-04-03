@@ -90,6 +90,11 @@ async def save_conversation(
     else:
         artifact_versions = existing_artifacts
 
+    existing_metadata = existing.get("metadata", {}) if existing else {}
+    if not isinstance(existing_metadata, dict):
+        existing_metadata = {}
+    merged_metadata = {**existing_metadata, **(metrics or {})}
+
     doc = {
         "id": conversation_id,
         "user_id": "demo-user",
@@ -99,7 +104,7 @@ async def save_conversation(
         "input": user_input,
         "messages": events,
         "artifacts": artifact_versions,
-        "metadata": metrics or {},
+        "metadata": merged_metadata,
     }
 
     container = _get_container()

@@ -1,0 +1,71 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Manager approval required",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "Travel campaign plan",
+      "isSubtle": true,
+      "spacing": "Small",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "<<PLAN_TITLE>>",
+      "weight": "Bolder",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "Recipient: <<MANAGER_EMAIL>>",
+      "isSubtle": true,
+      "spacing": "Small",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "<<PLAN_EXCERPT>>",
+      "wrap": true,
+      "spacing": "Medium"
+    },
+    {
+      "type": "Input.Text",
+      "id": "managerComment",
+      "label": "Comment",
+      "placeholder": "Optional for approval, required for rejection",
+      "isMultiline": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "Open approval page",
+      "url": "<<MANAGER_APPROVAL_URL>>"
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Approve",
+      "data": {
+        "decision": "approve",
+        "approved": true
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Request changes",
+      "style": "destructive",
+      "data": {
+        "decision": "reject",
+        "approved": false
+      }
+    }
+  ]
+}

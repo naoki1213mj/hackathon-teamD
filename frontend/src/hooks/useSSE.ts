@@ -40,6 +40,11 @@ export interface ApprovalRequest {
   prompt: string
   conversation_id: string
   plan_markdown?: string
+  approval_scope?: 'user' | 'manager'
+  manager_email?: string
+  manager_comment?: string
+  manager_approval_url?: string
+  manager_delivery_mode?: 'manual' | 'workflow'
 }
 
 export interface PipelineMetrics {
@@ -233,6 +238,11 @@ export function buildRestoredPipelineState(
           prompt: String(data.prompt || ''),
           conversation_id: String(data.conversation_id || conversationId),
           plan_markdown: data.plan_markdown ? String(data.plan_markdown) : undefined,
+          approval_scope: data.approval_scope === 'manager' ? 'manager' : 'user',
+          manager_email: data.manager_email ? String(data.manager_email) : undefined,
+          manager_comment: data.manager_comment ? String(data.manager_comment) : undefined,
+          manager_approval_url: data.manager_approval_url ? String(data.manager_approval_url) : undefined,
+          manager_delivery_mode: data.manager_delivery_mode === 'workflow' ? 'workflow' : data.manager_delivery_mode === 'manual' ? 'manual' : undefined,
         }
         latestAgentProgress = {
           agent: 'approval',
@@ -269,7 +279,7 @@ export function buildRestoredPipelineState(
     }
   }
 
-  const status = doc.status === 'awaiting_approval'
+  const status = doc.status === 'awaiting_approval' || doc.status === 'awaiting_manager_approval'
     ? 'approval'
     : doc.status === 'error'
       ? 'error'
@@ -299,6 +309,7 @@ export function buildRestoredPipelineState(
           prompt: '',
           conversation_id: conversationId,
           plan_markdown: getLatestPlanMarkdown(textContents),
+          approval_scope: doc.status === 'awaiting_manager_approval' ? 'manager' : 'user',
         }
       : null,
     metrics,

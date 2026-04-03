@@ -23,6 +23,7 @@ class AppSettings(TypedDict):
     speech_service_endpoint: str
     speech_service_region: str
     logic_app_callback_url: str
+    manager_approval_trigger_url: str
     fabric_data_agent_url: str
     image_project_endpoint_mai: str
 
@@ -40,6 +41,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "speech_service_endpoint": ("SPEECH_SERVICE_ENDPOINT",),
     "speech_service_region": ("SPEECH_SERVICE_REGION",),
     "logic_app_callback_url": ("LOGIC_APP_CALLBACK_URL",),
+    "manager_approval_trigger_url": ("MANAGER_APPROVAL_TRIGGER_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
 }

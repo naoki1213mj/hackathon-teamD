@@ -58,9 +58,51 @@ describe('buildRestoredPipelineState', () => {
       prompt: '確認してください',
       conversation_id: 'conv-approval',
       plan_markdown: '# Plan',
+      approval_scope: 'user',
+      manager_email: undefined,
+      manager_comment: undefined,
     })
     expect(state.currentVersion).toBe(0)
     expect(state.textContents).toHaveLength(2)
+  })
+
+  it('restores manager approval conversations with manager scope', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_manager_approval',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: 'analysis', agent: 'data-search-agent' } },
+          { event: 'text', data: { content: '# Revised Plan', agent: 'plan-revision-agent' } },
+          {
+            event: 'approval_request',
+            data: {
+              prompt: '修正版企画書を上司へ承認依頼しました。Teams の応答を待っています。',
+              conversation_id: 'conv-manager-approval',
+              plan_markdown: '# Revised Plan',
+              approval_scope: 'manager',
+              manager_email: 'manager@example.com',
+              manager_approval_url: 'https://app.example.com/?manager_conversation_id=conv-manager-approval#manager_approval_token=token-123',
+              manager_delivery_mode: 'manual',
+            },
+          },
+        ],
+      },
+      'conv-manager-approval',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('approval')
+    expect(state.approvalRequest).toEqual({
+      prompt: '修正版企画書を上司へ承認依頼しました。Teams の応答を待っています。',
+      conversation_id: 'conv-manager-approval',
+      plan_markdown: '# Revised Plan',
+      approval_scope: 'manager',
+      manager_email: 'manager@example.com',
+      manager_comment: undefined,
+      manager_approval_url: 'https://app.example.com/?manager_conversation_id=conv-manager-approval#manager_approval_token=token-123',
+      manager_delivery_mode: 'manual',
+    })
   })
 
   it('rebuilds version snapshots from completed multi-round conversations', () => {

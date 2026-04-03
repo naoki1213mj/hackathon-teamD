@@ -10,7 +10,7 @@
 ## 実行モード
 
 | モード | 条件 | 挙動 |
-|---|---|---|
+| --- | --- | --- |
 | Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | FastAPI オーケストレーションで主フローを最後まで実行 |
 | モック / デモモード | `AZURE_AI_PROJECT_ENDPOINT` 未設定 | ハードコード済みの SSE イベントを返す |
 | 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
@@ -19,11 +19,13 @@
 ## エンドポイント一覧
 
 | メソッド | パス | 説明 |
-|---|---|---|
+| --- | --- | --- |
 | `GET` | `/api/health` | ライブネスプローブ |
 | `GET` | `/api/ready` | 本番必須設定の readiness チェック |
 | `POST` | `/api/chat` | メインチャット SSE |
 | `POST` | `/api/chat/{thread_id}/approve` | 承認継続または修正継続 |
+| `GET` | `/api/chat/{thread_id}/manager-approval-request` | 上司承認ページ用の企画書取得 |
+| `POST` | `/api/chat/{thread_id}/manager-approval-callback` | 上司承認 workflow からの承認結果コールバック |
 | `GET` | `/api/conversations` | 会話一覧取得 |
 | `GET` | `/api/conversations/{conversation_id}` | 会話詳細取得（履歴復元用） |
 | `GET` | `/api/replay/{conversation_id}` | 保存済み SSE リプレイ |
@@ -67,7 +69,7 @@
 - レート制限: 10 リクエスト / 分
 - 入力は制御文字除去と軽量な注入ガードを通過したものだけが実行されます
 
-### リクエストボディ
+### `/api/chat` リクエストボディ
 
 ```json
 {
@@ -86,30 +88,37 @@
       "image_width": 1024,
       "image_height": 1024
     }
+  },
+  "workflow_settings": {
+    "manager_approval_enabled": true,
+    "manager_email": "manager@example.com"
   }
 }
 ```
 
 | フィールド | 型 | 必須 | 説明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `message` | `string` | 必須 | 1 文字以上 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
 | `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
 | `settings.image_settings` | `object \| null` | 任意 | 画像生成設定。`image_model`（`gpt-image-1.5` / `MAI-Image-2`）、`image_quality`（`low`/`medium`/`high`、GPT のみ）、`image_width`/`image_height`（MAI のみ、最小 768、w×h ≤ 1,048,576） |
+| `workflow_settings` | `object \| null` | 任意 | 承認フロー設定。`manager_approval_enabled=true` の場合は `manager_email` が必須。`MANAGER_APPROVAL_TRIGGER_URL` は通知 workflow を使う場合だけ設定します |
 
-### 現行挙動
+### `/api/chat` 現行挙動
 
 | 条件 | SSE の主な流れ |
-|---|---|
+| --- | --- |
 | 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
 | `conversation_id` + 承認待ち中 | `marketing-plan-agent` で企画書を再生成し、新しい `approval_request` を返す |
 | `conversation_id` + 完了済み + 評価フィードバック | `marketing-plan-agent` で企画書を改善し、新しい `approval_request` を返す |
 | `conversation_id` + 完了済み + 通常の修正指示 | キーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 
-### 注意
+### `/api/chat` 注意
 
-- Azure モードの主フローは Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
+- Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
+- 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。
+- manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
 - フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
 
@@ -129,7 +138,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 - `response` も軽量な注入ガード対象です
 - パスの `thread_id` が実際に使われる会話 ID です
 
-### リクエストボディ
+### `/api/chat/{thread_id}/approve` リクエストボディ
 
 ```json
 {
@@ -139,7 +148,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 ```
 
 | フィールド | 型 | 必須 | 説明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `conversation_id` | `string` | 必須 | バリデーション用に受け取る互換フィールド。現状は処理で未使用 |
 | `response` | `string` | 必須 | 承認キーワードまたは修正指示 |
 
@@ -158,13 +167,58 @@ curl -N -X POST http://localhost:8000/api/chat \
 - `批准`
 - `同意`
 
-### 現行挙動
+### `/api/chat/{thread_id}/approve` 現行挙動
 
 | 条件 | 挙動 |
-|---|---|
-| 承認 + Azure 接続あり | `regulation-check-agent` → `plan-revision-agent` → `brochure-gen-agent` → `video-gen-agent` を順に実行し、最後に Logic Apps callback を試行 |
+| --- | --- |
+| 承認 + Azure 接続あり | `regulation-check-agent` → `plan-revision-agent` を実行し、上司承認オフなら `brochure-gen-agent` → `video-gen-agent` を続行。上司承認オンなら manager approval の `approval_request` で待機し、通知 workflow があれば併せて呼び出す |
 | 承認 + Azure 接続なし | モックの Agent3a → Agent3b → Agent4 → Agent5 イベントを返す |
 | 非承認 | 修正テキストとして扱い、再調整経路に入る |
+
+## `GET /api/chat/{thread_id}/manager-approval-request`
+
+上司承認ページが企画書本文を取得するための JSON API です。`X-Manager-Approval-Token` ヘッダ、または `token` クエリで token を渡します。
+
+レスポンス例:
+
+```json
+{
+  "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "plan_title": "春の沖縄ファミリーキャンペーン",
+  "plan_markdown": "# 春の沖縄ファミリーキャンペーン\n...",
+  "manager_email": "manager@example.com"
+}
+```
+
+## `POST /api/chat/{thread_id}/manager-approval-callback`
+
+Teams 対応の上司承認 workflow から承認結果を受け取る JSON API です。
+
+### `manager-approval-callback` リクエストボディ
+
+```json
+{
+  "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "approved": false,
+  "comment": "価格表現をもう少し抑えてください",
+  "approver_email": "manager@example.com",
+  "callback_token": "<manager-callback-token>"
+}
+```
+
+### `manager-approval-callback` 現行挙動
+
+| 条件 | 挙動 |
+| --- | --- |
+| `approved=true` | バックグラウンドで Agent4 → Agent5 と post approval actions を再開 |
+| `approved=false` | 担当者向け `approval_request` を会話履歴へ追記し、差し戻しコメントを UI に戻す |
+
+### `manager-approval-callback` 注意
+
+- `callback_token` は manager approval workflow へ最初に渡した `manager_callback_token` をそのまま返してください。
+- 代わりに `X-Manager-Approval-Token` ヘッダで送っても受け付けます。
+- 組み込みの上司承認ページもこの endpoint をそのまま利用します。
+- token がない、または一致しない callback は `403 invalid manager approval token` で拒否されます。
 
 ## 会話 API
 
@@ -175,7 +229,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 クエリ:
 
 | パラメータ | 型 | デフォルト | 説明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `limit` | `int` | `20` | 最大件数 |
 
 レスポンス例:
@@ -224,7 +278,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 保存済み SSE を `speed` 倍速でリプレイします。
 
 | パラメータ | 型 | デフォルト | 説明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `speed` | `float` | `5.0` | リプレイ倍率 |
 
 データがない場合は `error` イベントで以下を返します。
@@ -251,7 +305,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 - 比較 UI は「現在の版」と「比較対象版」を上部の要約カードで並べて表示し、その下に改善 / 悪化 / 変化なしの集計と指標差分を出します。
 - `builtin` に `task_adherence` が返ってくる場合でも、現行フロントエンドでは比較・総合スコア・改善フィードバック生成には使いません。
 
-### リクエストボディ
+### `/api/evaluate` リクエストボディ
 
 ```json
 {
@@ -262,7 +316,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 ```
 
 | フィールド | 型 | 必須 | 説明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `query` | `string` | 必須 | 元のユーザー依頼 |
 | `response` | `string` | 必須 | 企画書 Markdown |
 | `html` | `string` | 任意 | ブローシャ HTML。空文字可。未指定時のコンバージョン期待度判定は `response` を代用 |
@@ -313,7 +367,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 ```
 
 | フィールド | 型 | 説明 |
-|---|---|---|
+| --- | --- | --- |
 | `custom` | `object` | code-based カスタム評価。現在は `travel_law_compliance` と `conversion_potential` |
 | `builtin` | `object` | `azure-ai-evaluation` による Built-in 指標。現行フロントエンドの主要表示対象は `relevance` / `coherence` / `fluency` で、`task_adherence` が含まれていても UI 比較と総合集計からは除外される |
 | `marketing_quality` | `object` | prompt-based LLM ジャッジ。`appeal` / `differentiation` / `kpi_validity` / `brand_tone` / `overall` |
@@ -343,7 +397,7 @@ data: <json>
 ```
 
 | フィールド | 型 | 説明 |
-|---|---|---|
+| --- | --- | --- |
 | `agent` | `string` | `pipeline`、`data-search-agent`、`marketing-plan-agent`、`regulation-check-agent`、`plan-revision-agent`、`brochure-gen-agent`、`video-gen-agent` のいずれか |
 | `status` | `string` | `running` または `completed` |
 | `step` | `int` | 現在の段階 |
@@ -388,7 +442,7 @@ data: <json>
 ```
 
 | フィールド | 型 | 説明 |
-|---|---|---|
+| --- | --- | --- |
 | `content` | `string` | Markdown または HTML |
 | `agent` | `string` | 出力元エージェント |
 | `content_type` | `string?` | HTML の場合は `html`、動画の場合は `video` |
@@ -406,7 +460,7 @@ data: <json>
 ```
 
 | フィールド | 型 | 説明 |
-|---|---|---|
+| --- | --- | --- |
 | `url` | `string` | `data:image/png;base64,...` または `data:image/svg+xml,...` |
 | `alt` | `string` | 代替テキスト |
 | `agent` | `string` | 出力元エージェント |
@@ -539,7 +593,7 @@ data: <json>
 ## レート制限
 
 | エンドポイント | 制限 |
-|---|---|
+| --- | --- |
 | `POST /api/chat` | 10 リクエスト / 分 |
 | `POST /api/chat/{thread_id}/approve` | 10 リクエスト / 分 |
 | `POST /api/evaluate` | 5 リクエスト / 分 |
@@ -592,6 +646,7 @@ Voice Live の MSAL.js クライアント設定を返します。フロントエ
 `VOICE_SPA_CLIENT_ID` や `AZURE_TENANT_ID` が未設定でもこのエンドポイント自体は `200 OK` を返し、未設定項目は空文字列になります。
 
 フロントエンドの `VoiceInput` コンポーネントは以下のフローで動作します:
+
 1. `/api/voice-config` を呼び出して MSAL 設定を取得
 2. MSAL.js で `https://cognitiveservices.azure.com/user_impersonation` スコープのトークンを取得
 3. Voice Live WebSocket に接続

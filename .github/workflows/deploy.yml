@@ -21,6 +21,10 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     environment: production
     timeout-minutes: 30
+    env:
+      IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars['IMAGE_PROJECT_ENDPOINT_MAI'] || '' }}
+      MAI_RESOURCE_NAME: ${{ vars['MAI_RESOURCE_NAME'] || '' }}
+      MANAGER_APPROVAL_TRIGGER_URL: ${{ secrets['MANAGER_APPROVAL_TRIGGER_URL'] || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,22 +61,35 @@ jobs:
             --image ${{ vars.ACR_NAME }}.azurecr.io/travel-agents:${{ github.sha }}
 
       - name: Configure optional MAI endpoint
-        if: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI != '' }}
+        if: ${{ env.IMAGE_PROJECT_ENDPOINT_MAI != '' }}
         run: |
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI='${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}'
+            --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
+
+      - name: Configure optional manager approval trigger
+        if: ${{ env.MANAGER_APPROVAL_TRIGGER_URL != '' }}
+        run: |
+          az containerapp secret set \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --secrets manager-approval-trigger-url="${MANAGER_APPROVAL_TRIGGER_URL}"
+
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=secretref:manager-approval-trigger-url
 
       - name: Bootstrap optional MAI RBAC
-        if: ${{ vars.MAI_RESOURCE_NAME != '' }}
+        if: ${{ env.MAI_RESOURCE_NAME != '' }}
         run: |
           PRINCIPAL_ID=$(az containerapp show \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --query 'identity.principalId' -o tsv)
           MAI_SCOPE=$(az cognitiveservices account show \
-            --name ${{ vars.MAI_RESOURCE_NAME }} \
+            --name "${MAI_RESOURCE_NAME}" \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --query 'id' -o tsv)
 

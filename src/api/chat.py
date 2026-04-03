@@ -5,7 +5,9 @@ import json
 import logging
 import random
 import re
+import secrets
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from enum import StrEnum
@@ -71,7 +73,16 @@ def _is_approval_response(response_text: str) -> bool:
 # 制御文字除去パターン（改行は許可）
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
 _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
 _PIPELINE_TOTAL_STEPS = 5
+
+
+class WorkflowSettings(TypedDict):
+    """承認フローの設定。"""
+
+    manager_approval_enabled: bool
+    manager_email: str
 
 
 class PendingApprovalContext(TypedDict):
@@ -81,6 +92,9 @@ class PendingApprovalContext(TypedDict):
     analysis_markdown: str
     plan_markdown: str
     model_settings: dict | None
+    workflow_settings: WorkflowSettings | None
+    approval_scope: str
+    manager_callback_token: str | None
 
 
 class AgentExecutionOutcome(TypedDict):
@@ -133,6 +147,203 @@ def _sanitize_text(value: str) -> str:
     if not value:
         raise ValueError("メッセージが空です")
     return value
+
+
+def _sanitize_optional_text(value: str | None) -> str:
+    """空文字を許可する軽量サニタイズ。"""
+    if value is None:
+        return ""
+    return _CONTROL_CHAR_RE.sub("", value).strip()
+
+
+def _create_manager_callback_token() -> str:
+    """外部 workflow callback 用の共有トークンを生成する。"""
+    return secrets.token_urlsafe(32)
+
+
+def _build_manager_callback_url(base_url: str, conversation_id: str) -> str:
+    """manager approval callback URL を構築する。"""
+    normalized_base_url = base_url.rstrip("/")
+    encoded_conversation_id = urllib.parse.quote(conversation_id, safe="")
+    return f"{normalized_base_url}/api/chat/{encoded_conversation_id}/manager-approval-callback"
+
+
+def _build_manager_approval_url(base_url: str, conversation_id: str, approval_token: str) -> str:
+    """上司向け承認ページ URL を構築する。"""
+    normalized_base_url = base_url.rstrip("/")
+    query = urllib.parse.urlencode({"manager_conversation_id": conversation_id})
+    fragment = urllib.parse.urlencode({"manager_approval_token": approval_token})
+    return f"{normalized_base_url}/?{query}#{fragment}"
+
+
+def _get_conversation_metadata(conversation: dict | None) -> dict[str, object]:
+    """会話ドキュメントの metadata を安全に取り出す。"""
+    if not isinstance(conversation, dict):
+        return {}
+    metadata = conversation.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    return dict(metadata)
+
+
+def _get_manager_callback_token_from_conversation(conversation: dict | None) -> str:
+    """保存済み会話 metadata から callback token を取得する。"""
+    metadata = _get_conversation_metadata(conversation)
+    value = metadata.get(_MANAGER_APPROVAL_TOKEN_METADATA_KEY)
+    return _sanitize_optional_text(str(value) if value is not None else "")
+
+
+def _build_conversation_metadata_for_save(
+    conversation_id: str,
+    existing_conversation: dict | None,
+    conversation_status: str,
+) -> dict | None:
+    """会話保存時の metadata を構築する。"""
+    metadata = _get_conversation_metadata(existing_conversation)
+    pending_context = _pending_approvals.get(conversation_id)
+    pending_token = ""
+    if pending_context is not None:
+        pending_token = _sanitize_optional_text(pending_context.get("manager_callback_token"))
+
+    if conversation_status == "awaiting_manager_approval":
+        callback_token = pending_token or _get_manager_callback_token_from_conversation(existing_conversation)
+        if callback_token:
+            metadata[_MANAGER_APPROVAL_TOKEN_METADATA_KEY] = callback_token
+    else:
+        metadata.pop(_MANAGER_APPROVAL_TOKEN_METADATA_KEY, None)
+
+    return metadata or None
+
+
+def _to_bool(value: object) -> bool:
+    """入力値を bool に正規化する。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def _sanitize_email_value(value: object) -> str:
+    """メールアドレスを正規化し、形式が不正なら例外を送出する。"""
+    email = _sanitize_optional_text(str(value) if value is not None else "")
+    if not email:
+        return ""
+    if not _EMAIL_ADDRESS_RE.fullmatch(email):
+        raise ValueError("上司メールアドレスの形式が不正です")
+    return email
+
+
+def _normalize_model_settings(raw_settings: dict | None) -> dict | None:
+    """モデル設定だけを抽出して正規化する。"""
+    if not isinstance(raw_settings, dict):
+        return None
+
+    normalized: dict[str, object] = {}
+    for key in ("model", "temperature", "max_tokens", "top_p", "iq_search_results", "iq_score_threshold"):
+        if key in raw_settings:
+            normalized[key] = raw_settings[key]
+
+    image_settings = raw_settings.get("image_settings")
+    if isinstance(image_settings, dict):
+        normalized["image_settings"] = {
+            key: image_settings[key]
+            for key in ("image_model", "image_quality", "image_width", "image_height")
+            if key in image_settings
+        }
+
+    return normalized or None
+
+
+def _normalize_workflow_settings(
+    raw_settings: dict | None, raw_workflow_settings: dict | None
+) -> WorkflowSettings | None:
+    """ワークフロー設定を抽出して正規化する。"""
+    source = (
+        raw_workflow_settings
+        if isinstance(raw_workflow_settings, dict)
+        else raw_settings
+        if isinstance(raw_settings, dict)
+        else {}
+    )
+    enabled = _to_bool(source.get("manager_approval_enabled")) if isinstance(source, dict) else False
+    if not enabled and isinstance(source, dict):
+        enabled = _to_bool(source.get("managerApprovalEnabled"))
+
+    email = ""
+    if isinstance(source, dict):
+        email = _sanitize_email_value(source.get("manager_email") or source.get("managerEmail"))
+
+    if enabled and not email:
+        raise ValueError("上司承認を有効化する場合は上司メールアドレスが必要です")
+    if not enabled and not email:
+        return None
+
+    return {
+        "manager_approval_enabled": enabled,
+        "manager_email": email,
+    }
+
+
+def _validate_manager_approval_configuration(workflow_settings: WorkflowSettings | None) -> None:
+    """上司承認の追加設定を検証する。"""
+    if not workflow_settings or not workflow_settings.get("manager_approval_enabled"):
+        return
+
+
+def _build_approval_request_data(
+    *,
+    prompt: str,
+    conversation_id: str,
+    plan_markdown: str,
+    model_settings: dict | None,
+    workflow_settings: WorkflowSettings | None,
+    approval_scope: str,
+    manager_comment: str | None = None,
+    manager_approval_url: str | None = None,
+    manager_delivery_mode: str | None = None,
+) -> dict:
+    """approval_request の payload を共通生成する。"""
+    data = {
+        "prompt": prompt,
+        "conversation_id": conversation_id,
+        "plan_markdown": plan_markdown,
+        "model_settings": model_settings,
+        "approval_scope": approval_scope,
+    }
+    if workflow_settings:
+        data["workflow_settings"] = workflow_settings
+        if workflow_settings.get("manager_email"):
+            data["manager_email"] = workflow_settings["manager_email"]
+    if manager_comment:
+        data["manager_comment"] = manager_comment
+    if manager_approval_url:
+        data["manager_approval_url"] = manager_approval_url
+    if manager_delivery_mode:
+        data["manager_delivery_mode"] = manager_delivery_mode
+    return data
+
+
+def _extract_manager_approval_token(request: Request, body_token: str | None = None) -> str:
+    """body / header / query から manager approval token を抽出する。"""
+    return (
+        _sanitize_optional_text(body_token)
+        or _sanitize_optional_text(request.headers.get("x-manager-approval-token"))
+        or _sanitize_optional_text(request.query_params.get("token"))
+    )
+
+
+def _record_sse_event(collected_events: list[dict], event: str, start: float) -> None:
+    """SSE 文字列を保存用イベント dict に変換して追加する。"""
+    try:
+        lines = event.strip().split("\n")
+        ev_type = lines[0].replace("event: ", "") if lines else ""
+        ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+        collected_events.append({"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data})
+    except Exception as exc:
+        logger.warning("SSE イベント収集のパースに失敗: %s", exc)
 
 
 def _extract_message_text(message: object) -> str:
@@ -500,6 +711,9 @@ def _conversation_status_from_events(events: list[dict]) -> str:
     if last_event in {SSEEventType.DONE, SSEEventType.DONE.value}:
         return "completed"
     if last_event in {SSEEventType.APPROVAL_REQUEST, SSEEventType.APPROVAL_REQUEST.value}:
+        last_data = events[-1].get("data", {})
+        if isinstance(last_data, dict) and last_data.get("approval_scope") == "manager":
+            return "awaiting_manager_approval"
         return "awaiting_approval"
     if last_event in {SSEEventType.ERROR, SSEEventType.ERROR.value}:
         return "error"
@@ -598,12 +812,15 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
     conversation = await get_conversation(conversation_id)
     if not conversation:
         return None
-    if conversation.get("status") != "awaiting_approval":
+    if conversation.get("status") not in {"awaiting_approval", "awaiting_manager_approval"}:
         return None
 
     analysis_markdown = ""
     plan_markdown = ""
     model_settings: dict | None = None
+    workflow_settings: WorkflowSettings | None = None
+    approval_scope = "manager" if conversation.get("status") == "awaiting_manager_approval" else "user"
+    manager_callback_token = _get_manager_callback_token_from_conversation(conversation)
     for message in conversation.get("messages", []):
         event_name = message.get("event")
         data = message.get("data", {})
@@ -612,6 +829,14 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
             event_model_settings = data.get("model_settings")
             if isinstance(event_model_settings, dict):
                 model_settings = event_model_settings
+            event_workflow_settings = data.get("workflow_settings")
+            if isinstance(event_workflow_settings, dict):
+                workflow_settings = {
+                    "manager_approval_enabled": _to_bool(event_workflow_settings.get("manager_approval_enabled")),
+                    "manager_email": _sanitize_optional_text(event_workflow_settings.get("manager_email")),
+                }
+            if data.get("approval_scope") == "manager":
+                approval_scope = "manager"
         if event_name != SSEEventType.TEXT.value:
             continue
         agent_name = data.get("agent")
@@ -628,6 +853,9 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
         "analysis_markdown": analysis_markdown,
         "plan_markdown": plan_markdown,
         "model_settings": model_settings,
+        "workflow_settings": workflow_settings,
+        "approval_scope": approval_scope,
+        "manager_callback_token": manager_callback_token or None,
     }
     _pending_approvals[conversation_id] = context
     return context
@@ -961,6 +1189,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: str | None = Field(None, max_length=100)
     settings: dict | None = Field(None, description="モデルパラメータ設定")
+    workflow_settings: dict | None = Field(None, description="承認フロー設定")
 
     @field_validator("message")
     @classmethod
@@ -980,6 +1209,37 @@ class ApproveRequest(BaseModel):
     def sanitize_response(cls, v: str) -> str:
         """前後空白除去・制御文字除去・空文字拒否"""
         return _sanitize_text(v)
+
+
+class ManagerApprovalCallbackRequest(BaseModel):
+    """Logic Apps からの上司承認コールバック。"""
+
+    conversation_id: str | None = Field(None, max_length=100)
+    approved: bool
+    comment: str | None = Field(None, max_length=2000)
+    approver_email: str | None = Field(None, max_length=320)
+    callback_token: str | None = Field(None, max_length=255)
+
+    @field_validator("comment")
+    @classmethod
+    def sanitize_comment(cls, v: str | None) -> str | None:
+        """コメントは空を許容しつつ制御文字だけ除去する。"""
+        cleaned = _sanitize_optional_text(v)
+        return cleaned or None
+
+    @field_validator("approver_email")
+    @classmethod
+    def sanitize_approver_email(cls, v: str | None) -> str | None:
+        """承認者メールアドレスを正規化する。"""
+        email = _sanitize_email_value(v)
+        return email or None
+
+    @field_validator("callback_token")
+    @classmethod
+    def sanitize_callback_token(cls, v: str | None) -> str | None:
+        """callback token を正規化する。"""
+        token = _sanitize_optional_text(v)
+        return token or None
 
 
 # --- モック SSE ジェネレーター（Phase 1: Azure 未接続のデモ用） ---
@@ -1440,6 +1700,8 @@ async def _refine_events(refine_text: str, conversation_id: str):
         _pending_approvals[conversation_id] = {
             **pending_context,
             "plan_markdown": outcome["text"],
+            "approval_scope": "user",
+            "manager_callback_token": None,
         }
         yield format_sse(
             SSEEventType.AGENT_PROGRESS,
@@ -1447,12 +1709,14 @@ async def _refine_events(refine_text: str, conversation_id: str):
         )
         yield format_sse(
             SSEEventType.APPROVAL_REQUEST,
-            {
-                "prompt": "修正した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
-                "conversation_id": conversation_id,
-                "plan_markdown": outcome["text"],
-                "model_settings": pending_context.get("model_settings"),
-            },
+            _build_approval_request_data(
+                prompt="修正した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
+                conversation_id=conversation_id,
+                plan_markdown=outcome["text"],
+                model_settings=pending_context.get("model_settings"),
+                workflow_settings=pending_context.get("workflow_settings"),
+                approval_scope="user",
+            ),
         )
         return
 
@@ -1465,6 +1729,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
         original_plan = ""
         analysis_markdown = ""
         model_settings: dict | None = None
+        workflow_settings: WorkflowSettings | None = None
         user_input = ""
         if conversation:
             user_input = conversation.get("input", "")
@@ -1474,6 +1739,13 @@ async def _refine_events(refine_text: str, conversation_id: str):
                     data.get("model_settings"), dict
                 ):
                     model_settings = data["model_settings"]
+                if msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
+                    data.get("workflow_settings"), dict
+                ):
+                    workflow_settings = {
+                        "manager_approval_enabled": _to_bool(data["workflow_settings"].get("manager_approval_enabled")),
+                        "manager_email": _sanitize_optional_text(data["workflow_settings"].get("manager_email")),
+                    }
                 if msg.get("event") == "text" and data.get("agent") == "data-search-agent" and not analysis_markdown:
                     analysis_markdown = data.get("content", "")
                 if msg.get("event") == "text" and data.get("agent") == "marketing-plan-agent":
@@ -1504,6 +1776,9 @@ async def _refine_events(refine_text: str, conversation_id: str):
             "analysis_markdown": analysis_markdown,
             "plan_markdown": outcome["text"],
             "model_settings": model_settings,
+            "workflow_settings": workflow_settings,
+            "approval_scope": "user",
+            "manager_callback_token": None,
         }
         yield format_sse(
             SSEEventType.AGENT_PROGRESS,
@@ -1511,12 +1786,14 @@ async def _refine_events(refine_text: str, conversation_id: str):
         )
         yield format_sse(
             SSEEventType.APPROVAL_REQUEST,
-            {
-                "prompt": "改善した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
-                "conversation_id": conversation_id,
-                "plan_markdown": outcome["text"],
-                "model_settings": model_settings,
-            },
+            _build_approval_request_data(
+                prompt="改善した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
+                conversation_id=conversation_id,
+                plan_markdown=outcome["text"],
+                model_settings=model_settings,
+                workflow_settings=workflow_settings,
+                approval_scope="user",
+            ),
         )
         return
 
@@ -1583,7 +1860,11 @@ def _extract_plan_summary(plan_text: str) -> str:
     return "。".join(summary_parts)[:240]
 
 
-async def _post_approval_events(user_response: str, conversation_id: str):
+async def _post_approval_events(
+    user_response: str,
+    conversation_id: str,
+    base_url: str | None = None,
+):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
     settings = get_settings()
 
@@ -1606,88 +1887,154 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     total_tool_calls = 0
     total_tokens_sum = 0
     approval_start = time.monotonic()
+    workflow_settings = context.get("workflow_settings")
+    approval_scope = context.get("approval_scope", "user")
+    manager_callback_token = context.get("manager_callback_token")
+    regulation_text = ""
+    revised_plan_markdown = context["plan_markdown"]
+    hero_image_task = None
+    destination_text = None
 
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
         {"agent": "approval", "status": "completed", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
     )
 
-    # 承認完了後、すぐに規制チェックの開始を通知（タイマーリセット用）
-    yield format_sse(
-        SSEEventType.AGENT_PROGRESS,
-        {"agent": "regulation-check-agent", "status": "running", "step": 4, "total_steps": _PIPELINE_TOTAL_STEPS},
-    )
+    if approval_scope != "manager":
+        yield format_sse(
+            SSEEventType.AGENT_PROGRESS,
+            {"agent": "regulation-check-agent", "status": "running", "step": 4, "total_steps": _PIPELINE_TOTAL_STEPS},
+        )
 
-    regulation_input = context["plan_markdown"]
+        regulation_input = context["plan_markdown"]
+        dest_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", regulation_input)
+        if dest_match:
+            destination_text = dest_match.group(1).strip()
+        else:
+            for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
+                if place in regulation_input:
+                    destination_text = place
+                    break
 
-    # 🚀 並列化: 規制チェック中にヒーロー画像を先行生成（Agent4 の画像生成を高速化）
-    hero_image_task = None
-    destination_text = None
-    # 旅行先を事前抽出（画像の先行生成 + Agent4 入力に使用）
-    dest_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", regulation_input)
-    if dest_match:
-        destination_text = dest_match.group(1).strip()
-    else:
-        for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
-            if place in regulation_input:
-                destination_text = place
-                break
+        if destination_text and settings["project_endpoint"]:
+            from src.agents.brochure_gen import set_current_conversation_id, set_current_image_settings
 
-    if destination_text and settings["project_endpoint"]:
-        from src.agents.brochure_gen import set_current_conversation_id, set_current_image_settings
+            set_current_conversation_id(conversation_id)
+            ctx_model_settings = context.get("model_settings")
+            if ctx_model_settings and ctx_model_settings.get("image_settings"):
+                set_current_image_settings(ctx_model_settings["image_settings"])
 
-        set_current_conversation_id(conversation_id)
-        ctx_model_settings = context.get("model_settings")
-        if ctx_model_settings and ctx_model_settings.get("image_settings"):
-            set_current_image_settings(ctx_model_settings["image_settings"])
+            async def _pregenerate_hero():
+                from src.agents.brochure_gen import generate_hero_image
 
-        async def _pregenerate_hero():
-            from src.agents.brochure_gen import generate_hero_image
+                try:
+                    await generate_hero_image(
+                        prompt=f"Beautiful travel destination scenery of {destination_text}",
+                        destination=destination_text,
+                        style="photorealistic",
+                    )
+                    logger.info("ヒーロー画像の先行生成完了: %s", destination_text)
+                except (ValueError, OSError, RuntimeError) as exc:
+                    logger.warning("ヒーロー画像の先行生成に失敗（Agent4 で再生成）: %s", exc)
 
-            try:
-                await generate_hero_image(
-                    prompt=f"Beautiful travel destination scenery of {destination_text}",
-                    destination=destination_text,
-                    style="photorealistic",
+            hero_image_task = asyncio.create_task(_pregenerate_hero())
+
+        regulation_outcome = await _execute_agent(
+            agent_name="regulation-check-agent",
+            agent_step=4,
+            user_input=regulation_input,
+            conversation_id=conversation_id,
+            model_settings=context.get("model_settings"),
+        )
+        for event in regulation_outcome["events"]:
+            yield event
+        if not regulation_outcome["success"]:
+            return
+        total_tool_calls += regulation_outcome["tool_calls"]
+        total_tokens_sum += regulation_outcome.get("total_tokens", 0)
+        regulation_text = regulation_outcome["text"]
+
+        revision_input = f"## 元の企画書\n\n{context['plan_markdown']}\n\n## 規制チェック結果\n\n{regulation_text}"
+        revision_outcome = await _execute_agent(
+            agent_name="plan-revision-agent",
+            agent_step=4,
+            user_input=revision_input,
+            conversation_id=conversation_id,
+            model_settings=context.get("model_settings"),
+        )
+        for event in revision_outcome["events"]:
+            yield event
+        if not revision_outcome["success"]:
+            return
+        total_tool_calls += revision_outcome["tool_calls"]
+        total_tokens_sum += revision_outcome.get("total_tokens", 0)
+        revised_plan_markdown = revision_outcome["text"] or context["plan_markdown"]
+
+        if workflow_settings and workflow_settings.get("manager_approval_enabled"):
+            manager_callback_token = manager_callback_token or _create_manager_callback_token()
+            if not base_url:
+                yield format_sse(
+                    SSEEventType.ERROR,
+                    {
+                        "message": "上司承認ページの URL を生成できませんでした。アプリの公開 URL を確認してください。",
+                        "code": "MANAGER_APPROVAL_URL_BUILD_FAILED",
+                    },
                 )
-                logger.info("ヒーロー画像の先行生成完了: %s", destination_text)
-            except (ValueError, OSError, RuntimeError) as exc:
-                logger.warning("ヒーロー画像の先行生成に失敗（Agent4 で再生成）: %s", exc)
+                return
 
-        hero_image_task = asyncio.create_task(_pregenerate_hero())
+            manager_callback_url = _build_manager_callback_url(base_url, conversation_id)
+            manager_approval_url = _build_manager_approval_url(base_url, conversation_id, manager_callback_token)
+            manager_delivery_mode = "manual"
+            manager_prompt = "修正版企画書の上司承認リンクを発行しました。リンクを上司へ共有してください。"
 
-    regulation_outcome = await _execute_agent(
-        agent_name="regulation-check-agent",
-        agent_step=4,
-        user_input=regulation_input,
-        conversation_id=conversation_id,
-        model_settings=context.get("model_settings"),
-    )
-    for event in regulation_outcome["events"]:
-        yield event
-    if not regulation_outcome["success"]:
-        return
-    total_tool_calls += regulation_outcome["tool_calls"]
-    total_tokens_sum += regulation_outcome.get("total_tokens", 0)
+            if settings["manager_approval_trigger_url"]:
+                try:
+                    await _submit_manager_approval_request(
+                        conversation_id=conversation_id,
+                        plan_markdown=revised_plan_markdown,
+                        workflow_settings=workflow_settings,
+                        manager_callback_url=manager_callback_url,
+                        manager_callback_token=manager_callback_token,
+                        manager_approval_url=manager_approval_url,
+                    )
+                    manager_delivery_mode = "workflow"
+                    manager_prompt = "修正版企画書を上司へ通知しました。承認ページまたは通知内リンクから承認できます。"
+                except (ValueError, OSError) as exc:
+                    logger.warning(
+                        "上司承認 notification workflow の送信に失敗。共有リンクへフォールバックします: %s", exc
+                    )
+                    manager_prompt = "通知 workflow の送信に失敗しました。承認ページのリンクを上司へ共有してください。"
 
-    # Agent3b: 規制チェック結果を反映した修正版企画書を生成
-    revision_input = (
-        f"## 元の企画書\n\n{context['plan_markdown']}\n\n## 規制チェック結果\n\n{regulation_outcome['text']}"
-    )
-    revision_outcome = await _execute_agent(
-        agent_name="plan-revision-agent",
-        agent_step=4,
-        user_input=revision_input,
-        conversation_id=conversation_id,
-        model_settings=context.get("model_settings"),
-    )
-    for event in revision_outcome["events"]:
-        yield event
-    if not revision_outcome["success"]:
-        return
-    total_tool_calls += revision_outcome["tool_calls"]
-    total_tokens_sum += revision_outcome.get("total_tokens", 0)
-    revised_plan_markdown = revision_outcome["text"] or context["plan_markdown"]
+            _pending_approvals[conversation_id] = {
+                **context,
+                "plan_markdown": revised_plan_markdown,
+                "approval_scope": "manager",
+                "manager_callback_token": manager_callback_token,
+            }
+            yield format_sse(
+                SSEEventType.APPROVAL_REQUEST,
+                _build_approval_request_data(
+                    prompt=manager_prompt,
+                    conversation_id=conversation_id,
+                    plan_markdown=revised_plan_markdown,
+                    model_settings=context.get("model_settings"),
+                    workflow_settings=workflow_settings,
+                    approval_scope="manager",
+                    manager_approval_url=manager_approval_url,
+                    manager_delivery_mode=manager_delivery_mode,
+                ),
+            )
+            return
+
+    if destination_text is None:
+        dest_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", revised_plan_markdown)
+        if dest_match:
+            destination_text = dest_match.group(1).strip()
+        else:
+            for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
+                if place in revised_plan_markdown:
+                    destination_text = place
+                    break
 
     # 規制チェック+修正完了 → 販促物生成フェーズへ即座に遷移（UI の待ち時間解消）
     yield format_sse(
@@ -1783,7 +2130,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         for part in [
             context["analysis_markdown"],
             revised_plan_markdown,
-            regulation_outcome["text"],
+            regulation_text,
             brochure_outcome["text"],
         ]
         if part
@@ -1824,6 +2171,7 @@ async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_
 
     payload = json.dumps(
         {
+            "request_type": "post_approval_actions",
             "plan_title": _extract_plan_title(plan_markdown),
             "plan_markdown": plan_markdown,
             "brochure_html": brochure_html,
@@ -1847,10 +2195,86 @@ async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）", exc_info=True)
 
 
+async def _submit_manager_approval_request(
+    conversation_id: str,
+    plan_markdown: str,
+    workflow_settings: WorkflowSettings,
+    manager_callback_url: str | None = None,
+    manager_callback_token: str = "",
+    manager_approval_url: str = "",
+) -> None:
+    """上司承認 workflow に上司承認依頼を送信する。"""
+    settings = get_settings()
+    callback_url = settings["manager_approval_trigger_url"]
+    if not callback_url:
+        raise ValueError("MANAGER_APPROVAL_TRIGGER_URL が未設定です")
+
+    manager_email = workflow_settings.get("manager_email", "")
+    if not manager_email:
+        raise ValueError("上司メールアドレスが未設定です")
+    if not manager_callback_token:
+        raise ValueError("callback token が未設定です")
+
+    payload = json.dumps(
+        {
+            "request_type": "manager_approval",
+            "plan_title": _extract_plan_title(plan_markdown),
+            "plan_markdown": plan_markdown,
+            "conversation_id": conversation_id,
+            "manager_email": manager_email,
+            "manager_callback_url": manager_callback_url or "",
+            "manager_callback_token": manager_callback_token,
+            "manager_approval_url": manager_approval_url,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        callback_url,
+        data=payload,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)
+    logger.info("上司承認依頼を送信: conversation_id=%s manager=%s", conversation_id, manager_email)
+
+
+async def _continue_after_manager_approval(conversation_id: str) -> None:
+    """上司承認後にバックグラウンドで成果物生成を再開する。"""
+    existing_conversation = await get_conversation(conversation_id)
+    if not existing_conversation:
+        logger.warning("上司承認後の会話が見つかりません: %s", conversation_id)
+        return
+
+    collected_events: list[dict] = []
+    start = time.monotonic()
+    async for event in _post_approval_events("承認", conversation_id):
+        _record_sse_event(collected_events, event, start)
+
+    merged_messages = [*existing_conversation.get("messages", []), *collected_events]
+    conversation_status = _conversation_status_from_events(merged_messages)
+    await save_conversation(
+        conversation_id=conversation_id,
+        user_input=existing_conversation.get("input", ""),
+        events=merged_messages,
+        metrics=_build_conversation_metadata_for_save(
+            conversation_id,
+            existing_conversation,
+            conversation_status,
+        ),
+        status=conversation_status,
+    )
+
+
 # --- エンドポイント ---
 
 
-async def workflow_event_generator(user_input: str, conversation_id: str, model_settings: dict | None = None):
+async def workflow_event_generator(
+    user_input: str,
+    conversation_id: str,
+    model_settings: dict | None = None,
+    workflow_settings: WorkflowSettings | None = None,
+):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
     analysis_outcome = await _execute_agent(
         agent_name="data-search-agent",
@@ -1881,6 +2305,9 @@ async def workflow_event_generator(user_input: str, conversation_id: str, model_
         "analysis_markdown": analysis_outcome["text"],
         "plan_markdown": plan_outcome["text"],
         "model_settings": model_settings,
+        "workflow_settings": workflow_settings,
+        "approval_scope": "user",
+        "manager_callback_token": None,
     }
 
     yield format_sse(
@@ -1889,12 +2316,14 @@ async def workflow_event_generator(user_input: str, conversation_id: str, model_
     )
     yield format_sse(
         SSEEventType.APPROVAL_REQUEST,
-        {
-            "prompt": "上記の企画書を確認してください。承認する場合は「承認」、修正したい場合は修正内容を入力してください。",
-            "conversation_id": conversation_id,
-            "plan_markdown": plan_outcome["text"],
-            "model_settings": model_settings,
-        },
+        _build_approval_request_data(
+            prompt="上記の企画書を確認してください。承認する場合は「承認」、修正したい場合は修正内容を入力してください。",
+            conversation_id=conversation_id,
+            plan_markdown=plan_outcome["text"],
+            model_settings=model_settings,
+            workflow_settings=workflow_settings,
+            approval_scope="user",
+        ),
     )
 
 
@@ -1903,6 +2332,23 @@ async def workflow_event_generator(user_input: str, conversation_id: str, model_
 async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     """チャットメッセージを受け取り、SSE ストリームでパイプライン結果を返す"""
     conversation_id = body.conversation_id or str(uuid.uuid4())
+    try:
+        normalized_model_settings = _normalize_model_settings(body.settings)
+        normalized_workflow_settings = _normalize_workflow_settings(body.settings, body.workflow_settings)
+        _validate_manager_approval_configuration(normalized_workflow_settings)
+    except ValueError as exc:
+        return StreamingResponse(
+            iter(
+                [
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {"message": str(exc), "code": "INVALID_SETTINGS"},
+                    )
+                ]
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # 入力ガード
     shield_result = await check_prompt_shield(body.message)
@@ -1923,16 +2369,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
         async def _collect_and_yield(gen):
             async for event in gen:
-                # イベントを収集（リプレイ用タイムスタンプ付き）
-                try:
-                    lines = event.strip().split("\n")
-                    ev_type = lines[0].replace("event: ", "") if lines else ""
-                    ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
-                    collected_events.append(
-                        {"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data}
-                    )
-                except Exception as exc:
-                    logger.warning("SSE イベント収集のパースに失敗: %s", exc)
+                _record_sse_event(collected_events, event, start)
                 yield event
 
         # conversation_id が既存 = マルチターン修正
@@ -1944,7 +2381,12 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             settings = get_settings()
             if settings["project_endpoint"]:
                 async for event in _collect_and_yield(
-                    workflow_event_generator(body.message, conversation_id, body.settings)
+                    workflow_event_generator(
+                        body.message,
+                        conversation_id,
+                        normalized_model_settings,
+                        normalized_workflow_settings,
+                    )
                 ):
                     yield event
             else:
@@ -1954,10 +2396,16 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
         # 会話を非同期で保存（レスポンスには影響しない）
         try:
             conversation_status = _conversation_status_from_events(collected_events)
+            existing_conversation = await get_conversation(conversation_id)
             await save_conversation(
                 conversation_id,
                 body.message,
                 collected_events,
+                metrics=_build_conversation_metadata_for_save(
+                    conversation_id,
+                    existing_conversation,
+                    conversation_status,
+                ),
                 status=conversation_status,
             )
         except (ValueError, OSError) as exc:
@@ -2023,20 +2471,13 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
 
         async def _collect_and_yield(gen):
             async for event in gen:
-                try:
-                    lines = event.strip().split("\n")
-                    ev_type = lines[0].replace("event: ", "") if lines else ""
-                    ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
-                    collected_events.append(
-                        {"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data}
-                    )
-                except Exception as exc:
-                    logger.warning("SSE イベント収集のパースに失敗: %s", exc)
+                _record_sse_event(collected_events, event, start)
                 yield event
 
         existing_conversation = await get_conversation(thread_id)
+        base_url = str(request.base_url).rstrip("/")
         if is_approved:
-            async for event in _collect_and_yield(_post_approval_events(body.response, thread_id)):
+            async for event in _collect_and_yield(_post_approval_events(body.response, thread_id, base_url)):
                 yield event
         else:
             async for event in _collect_and_yield(_refine_events(body.response, thread_id)):
@@ -2045,13 +2486,19 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
         try:
             previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
             merged_messages = [*previous_messages, *collected_events]
+            conversation_status = _conversation_status_from_events(merged_messages)
             await save_conversation(
                 conversation_id=thread_id,
                 user_input=existing_conversation.get("input", body.response)
                 if existing_conversation
                 else body.response,
                 events=merged_messages,
-                status=_conversation_status_from_events(merged_messages),
+                metrics=_build_conversation_metadata_for_save(
+                    thread_id,
+                    existing_conversation,
+                    conversation_status,
+                ),
+                status=conversation_status,
             )
         except (ValueError, OSError) as exc:
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
@@ -2066,6 +2513,102 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/chat/{thread_id}/manager-approval-request")
+@limiter.limit("30/minute")
+async def get_manager_approval_request(thread_id: str, request: Request) -> JSONResponse:
+    """上司向け承認ページで表示する承認対象データを返す。"""
+    context = await _load_pending_approval_context(thread_id)
+    if context is None or context.get("approval_scope") != "manager":
+        return JSONResponse(status_code=404, content={"error": "manager approval context not found"})
+
+    callback_token = _extract_manager_approval_token(request)
+    expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
+    if not expected_token or callback_token != expected_token:
+        return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
+
+    workflow_settings = context.get("workflow_settings") or {}
+    plan_markdown = context["plan_markdown"]
+    return JSONResponse(
+        content={
+            "conversation_id": thread_id,
+            "plan_title": _extract_plan_title(plan_markdown),
+            "plan_markdown": plan_markdown,
+            "manager_email": workflow_settings.get("manager_email"),
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@router.post("/chat/{thread_id}/manager-approval-callback")
+@limiter.limit("20/minute")
+async def manager_approval_callback(
+    thread_id: str,
+    request: Request,
+    body: ManagerApprovalCallbackRequest,
+) -> JSONResponse:
+    """上司承認 workflow からの承認結果を受け取り、後続処理を再開する。"""
+    if body.conversation_id and body.conversation_id != thread_id:
+        return JSONResponse(status_code=400, content={"error": "conversation_id mismatch"})
+
+    context = await _load_pending_approval_context(thread_id)
+    if context is None or context.get("approval_scope") != "manager":
+        return JSONResponse(status_code=404, content={"error": "manager approval context not found"})
+
+    callback_token = _extract_manager_approval_token(request, body.callback_token)
+    expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
+    if not expected_token or callback_token != expected_token:
+        return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
+
+    if body.approved:
+        asyncio.create_task(_continue_after_manager_approval(thread_id))
+        return JSONResponse(content={"status": "accepted", "conversation_id": thread_id})
+
+    existing_conversation = await get_conversation(thread_id)
+    manager_comment = body.comment or "上司から差し戻しされました。内容を確認して修正してください。"
+    workflow_settings = context.get("workflow_settings")
+    _pending_approvals[thread_id] = {
+        **context,
+        "approval_scope": "user",
+        "manager_callback_token": None,
+    }
+
+    reopened_events: list[dict] = []
+    reopened_event = format_sse(
+        SSEEventType.APPROVAL_REQUEST,
+        _build_approval_request_data(
+            prompt="上司から差し戻しがありました。コメントを確認し、修正するか承認してください。",
+            conversation_id=thread_id,
+            plan_markdown=context["plan_markdown"],
+            model_settings=context.get("model_settings"),
+            workflow_settings=workflow_settings,
+            approval_scope="user",
+            manager_comment=manager_comment,
+        ),
+    )
+    _record_sse_event(reopened_events, reopened_event, time.monotonic())
+
+    previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
+    merged_messages = [*previous_messages, *reopened_events]
+    conversation_status = _conversation_status_from_events(merged_messages)
+    await save_conversation(
+        conversation_id=thread_id,
+        user_input=existing_conversation.get("input", context["user_input"])
+        if existing_conversation
+        else context["user_input"],
+        events=merged_messages,
+        metrics=_build_conversation_metadata_for_save(
+            thread_id,
+            existing_conversation,
+            conversation_status,
+        ),
+        status=conversation_status,
+    )
+    return JSONResponse(content={"status": "reopened", "conversation_id": thread_id})
 
 
 _UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB

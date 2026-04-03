@@ -118,8 +118,11 @@ azd deploy
 
 - IaC は既定のテキストモデル (`gpt-5-4-mini`) と画像モデル (`gpt-image-1.5`) を自動配備します
 - MAI-Image-2 を使う場合は別リソースにデプロイし、`IMAGE_PROJECT_ENDPOINT_MAI` に加えて `MAI_RESOURCE_NAME` も設定してください（Container App の Managed Identity に別リソース RBAC を付与するため）
-- Container App には Content Understanding / Speech / Logic Apps callback の基本設定も自動注入されます
+- Container App には Content Understanding / Speech / post approval Logic Apps callback の基本設定も自動注入されます
 - post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、必要に応じた `FABRIC_DATA_AGENT_URL` または `FABRIC_SQL_ENDPOINT` の設定、評価専用モデルを分ける場合の `EVAL_MODEL_DEPLOYMENT` 設定です
+- 上司承認を使う場合、アプリ自体が上司承認ページ URL を発行するので、workflow がなくても本番運用できます
+- Teams やメールで自動通知したい場合だけ、通知用 workflow を別途作成して `MANAGER_APPROVAL_TRIGGER_URL` を設定してください
+- workflow 実装時は [manager-approval-workflow.md](manager-approval-workflow.md) の `manager_approval_url` と callback token 契約に従ってください
 - 詳細は [azure-setup.md](azure-setup.md) を参照してください
 
 ## 6. 本番相当の環境変数
@@ -127,13 +130,13 @@ azd deploy
 ### 必須
 
 | 変数名 | 用途 |
-|---|---|
+| --- | --- |
 | `AZURE_AI_PROJECT_ENDPOINT` | Microsoft Foundry project endpoint |
 
 ### よく使う任意変数
 
 | 変数名 | 用途 |
-|---|---|
+| --- | --- |
 | `MODEL_NAME` | テキストモデル deployment 名 |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用の評価モデル deployment 名 |
 | `SERVE_STATIC` | FastAPI からビルド済みフロントエンドを返す場合に `true` |
@@ -149,6 +152,7 @@ azd deploy
 | `VOICE_SPA_CLIENT_ID` | Voice Live MSAL.js 認証 |
 | `AZURE_TENANT_ID` | Voice Live 認証 |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の通知 / 保存 |
+| `MANAGER_APPROVAL_TRIGGER_URL` | 任意。Teams / メール通知用 workflow の HTTP trigger。未設定でも共有リンク方式で上司承認を運用可能 |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | テレメトリ |
 
 ## 7. デプロイ後の確認
@@ -192,9 +196,10 @@ curl -X POST https://<your-app>/api/evaluate \
 2. `az acr build`
 3. `az containerapp update`
 4. 任意で `IMAGE_PROJECT_ENDPOINT_MAI` を Container App に反映
-5. 任意で `MAI_RESOURCE_NAME` を使って別 MAI アカウントへの RBAC を bootstrap
-6. `/api/health` チェック
-7. `/api/ready` チェック
+5. 任意で `MANAGER_APPROVAL_TRIGGER_URL` を Container App secret と env に反映
+6. 任意で `MAI_RESOURCE_NAME` を使って別 MAI アカウントへの RBAC を bootstrap
+7. `/api/health` チェック
+8. `/api/ready` チェック
 
 ### Security Scan
 
@@ -223,6 +228,7 @@ curl -X POST https://<your-app>/api/evaluate \
 ### 画像が透明 PNG で返る
 
 選択中の画像モデルの配備を確認してください:
+
 - **GPT Image 1.5**: `gpt-image-1.5` がメインプロジェクトに配備されていること
 - **MAI-Image-2**: `IMAGE_PROJECT_ENDPOINT_MAI` が設定され、別リソースに `MAI-Image-2` が配備され、Container App の Managed Identity にそのリソースへの RBAC が付与されていること
 
@@ -233,6 +239,10 @@ curl -X POST https://<your-app>/api/evaluate \
 ### Logic Apps が呼ばれない
 
 IaC で callback URL を注入する構成です。既存環境で未反映の場合は再プロビジョニングまたは Container App 再デプロイを確認してください。
+
+### 上司承認通知が飛ばない
+
+`MANAGER_APPROVAL_TRIGGER_URL` が未設定、または通知 workflow への送信に失敗しています。この場合でもアプリは manager approval URL を発行するため、待機 UI からリンクを共有すれば承認を継続できます。
 
 ### Knowledge Base が静的レスポンスに落ちる
 

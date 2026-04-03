@@ -11,6 +11,16 @@ from src.conversations import get_conversation, get_replay_data, list_conversati
 
 router = APIRouter(prefix="/api", tags=["conversations"])
 logger = logging.getLogger(__name__)
+_SENSITIVE_METADATA_KEYS = {"manager_approval_callback_token"}
+
+
+def _sanitize_conversation_document(doc: dict) -> dict:
+    """フロントエンドへ返す会話ドキュメントから機密 metadata を除去する。"""
+    sanitized = dict(doc)
+    metadata = sanitized.get("metadata")
+    if isinstance(metadata, dict):
+        sanitized["metadata"] = {key: value for key, value in metadata.items() if key not in _SENSITIVE_METADATA_KEYS}
+    return sanitized
 
 
 @router.get("/conversations")
@@ -26,7 +36,7 @@ async def conversation_detail(conversation_id: str) -> JSONResponse:
     doc = await get_conversation(conversation_id)
     if not doc:
         return JSONResponse(status_code=404, content={"error": "conversation not found"})
-    return JSONResponse(content=doc)
+    return JSONResponse(content=_sanitize_conversation_document(doc))
 
 
 @router.get("/replay/{conversation_id}")

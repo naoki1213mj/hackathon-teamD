@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "7479762358216534567"
+      "templateHash": "14076838660466462758"
     }
   },
   "parameters": {
@@ -37,6 +37,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "Voice Live SPA アプリの Client ID（postprovision で設定）"
+      }
+    },
+    "managerApprovalTriggerUrl": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "上司承認 workflow の HTTP trigger URL（Teams 対応 workflow を手動構成して設定）"
       }
     },
     "imageProjectEndpointMai": {
@@ -969,6 +976,9 @@
           "logicAppCallbackUrl": {
             "value": "[listOutputsWithSecureValues('logicApp', '2025-04-01').callbackUrl]"
           },
+          "managerApprovalTriggerUrl": {
+            "value": "[parameters('managerApprovalTriggerUrl')]"
+          },
           "voiceSpaClientId": {
             "value": "[parameters('voiceSpaClientId')]"
           },
@@ -983,7 +993,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "11554787753241360118"
+              "templateHash": "10317887474396286623"
             }
           },
           "parameters": {
@@ -1051,11 +1061,16 @@
             "logicAppCallbackUrl": {
               "type": "securestring",
               "defaultValue": ""
+            },
+            "managerApprovalTriggerUrl": {
+              "type": "securestring",
+              "defaultValue": ""
             }
           },
           "variables": {
+            "containerSecrets": "[concat(if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'logic-app-callback-url', 'value', parameters('logicAppCallbackUrl'))), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'manager-approval-trigger-url', 'value', parameters('managerApprovalTriggerUrl'))), createArray()))]",
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'MANAGER_APPROVAL_TRIGGER_URL', 'secretRef', 'manager-approval-trigger-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
           },
           "resources": [
             {
@@ -1070,7 +1085,7 @@
               "properties": {
                 "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
                 "configuration": {
-                  "secrets": "[if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'logic-app-callback-url', 'value', parameters('logicAppCallbackUrl'))), createArray())]",
+                  "secrets": "[variables('containerSecrets')]",
                   "ingress": {
                     "external": true,
                     "targetPort": 8000,
@@ -1661,7 +1676,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "10402476633102678141"
+              "templateHash": "9881996559036502560"
             }
           },
           "parameters": {
@@ -1699,6 +1714,9 @@
                         "schema": {
                           "type": "object",
                           "properties": {
+                            "request_type": {
+                              "type": "string"
+                            },
                             "plan_title": {
                               "type": "string"
                             },
@@ -1711,7 +1729,11 @@
                             "conversation_id": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "request_type",
+                            "conversation_id"
+                          ]
                         }
                       }
                     }
@@ -1721,10 +1743,10 @@
                       "type": "Response",
                       "kind": "Http",
                       "inputs": {
-                        "statusCode": 200,
+                        "statusCode": 202,
                         "body": {
                           "status": "accepted",
-                          "message": "承認後アクションを開始しました"
+                          "message": "Logic Apps workflow accepted the request"
                         }
                       }
                     }

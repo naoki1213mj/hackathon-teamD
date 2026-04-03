@@ -21,18 +21,25 @@ flowchart LR
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
 
-    flow --> approval{approval_request}
+    flow --> approval{担当者 approval_request}
     approval --> a3a[regulation-check-agent]
     a3a --> search[Azure AI Search / Foundry IQ]
     a3a --> safetyweb[Web Search for safety info]
 
     a3a --> a3b[plan-revision-agent]
+    a3b --> managerApproval{上司承認オプション}
+    managerApproval -->|off| a4[brochure-gen-agent]
+    managerApproval -->|on| portal[Built-in manager approval page]
+    managerApproval -. optional notify .-> managerWorkflow[Optional Teams or email notification workflow]
+    managerWorkflow --> manager[Manager receives approval URL]
+    manager --> portal
+    portal --> apiCallback[/POST manager-approval-callback/]
+    apiCallback --> a4[brochure-gen-agent]
 
-    flow --> a4[brochure-gen-agent]
     a4 --> image[gpt-image-1.5 / MAI-Image-2]
     a4 --> cu[Content Understanding]
 
-    flow --> a5[video-gen-agent]
+    a4 --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar video]
 
     subgraph fabricLayer[Fabric Data]
@@ -46,9 +53,8 @@ flowchart LR
     flow --> ui
 
     api -. optional .-> review[quality-review-agent]
-    api -. approval continuation .-> logic[Logic Apps callback]
-    logic --> teams[Teams]
-    logic --> sharepoint[SharePoint]
+    api -. post approval actions .-> logicPost[Logic Apps post actions]
+    logicPost --> sharepoint[SharePoint]
 ```
 
 ## 2. Azure リソース構成
@@ -85,12 +91,13 @@ flowchart TB
 ## 3. IaC で作られるもの
 
 | リソース | 構成 |
-|---|---|
+| --- | --- |
 | AI Services | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、`gpt-5-4-mini` を既定で配備 |
 | Foundry project | `accounts/projects@2025-06-01` |
 | Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
 | APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーを適用 |
-| Logic Apps | Consumption、HTTP trigger ベース |
+| Logic Apps | Consumption、HTTP trigger ベース。`post_approval_actions` の payload を受け付ける |
+| Manager approval notification workflow | 現行 IaC では未作成。組み込み上司承認ページはアプリに含まれ、Teams やメールで自動通知したい場合だけ別 workflow を用意して `MANAGER_APPROVAL_TRIGGER_URL` を FastAPI に渡す |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
 | Key Vault | Private Endpoint、RBAC |
 | Observability | Log Analytics + Application Insights |
@@ -98,7 +105,7 @@ flowchart TB
 ## 4. IaC の後に手動で補う項目
 
 | 項目 | 理由 |
-|---|---|
+| --- | --- |
 | Azure AI Search の作成と `regulations-index` の投入 | Foundry IQ の実データ検索に必要 |
 | Foundry project と Azure AI Search の接続 | `search_knowledge_base()` の既定接続に必要 |
 | `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent Published URL を優先利用するため |
@@ -107,12 +114,14 @@ flowchart TB
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
-| `LOGIC_APP_CALLBACK_URL` | 承認継続後の HTTP callback に必要 |
+| `LOGIC_APP_CALLBACK_URL` | 承認継続後アクションに必要 |
+| `MANAGER_APPROVAL_TRIGGER_URL` | 任意。上司承認 URL を送る通知 workflow の HTTP trigger URL |
+| Microsoft Teams connector の認可 | Teams で通知する場合に外部 notification workflow 側で必要 |
 
 ## 5. 認証モデル
 
 | 実行主体 | 認証方式 | 主な用途 |
-|---|---|---|
+| --- | --- | --- |
 | FastAPI / Container App | `DefaultAzureCredential` | Foundry、Fabric Data Agent / Fabric SQL、Cosmos DB、Azure AI Search |
 | APIM | Managed Identity | Foundry バックエンドへの認証 |
 | AI Search bootstrap script | Foundry 接続または API key | 初期インデックス投入 |
@@ -121,7 +130,12 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 
 ## 6. 現在の実装メモ
 
-- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
+- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に担当者向け `approval_request` を返します。
+- 担当者承認後は Agent3a → Agent3b を実行し、`manager_approval_enabled=true` の場合は組み込み上司承認ページ URL を生成して待機します。上司承認オフならそのまま Agent4 → Agent5 に進みます。
+- `MANAGER_APPROVAL_TRIGGER_URL` が設定されている場合だけ、その approval URL を上司へ届ける外部 notification workflow も併せて呼び出します。未設定または送信失敗時は共有リンク運用へフォールバックします。
+- 上司承認待ちは会話 status と `approval_request.approval_scope=manager` で復元され、差し戻し時は担当者承認 UI へ戻ります。
+- 組み込み上司承認ページは URL fragment に token を載せ、`GET /api/chat/{thread_id}/manager-approval-request` と `POST /api/chat/{thread_id}/manager-approval-callback` を使って承認状態を更新します。
+- Microsoft Learn の Teams connector 情報では Teams 操作は Logic Apps Standard 側の可用性が前提なので、現行の Consumption workflow は post approval actions 専用に維持し、通知 workflow は別リソース扱いにしています。
 - Agent1 は `FABRIC_DATA_AGENT_URL` がある場合、Fabric Data Agent Published URL を最優先で使用します。利用不可時のみ Fabric Lakehouse SQL endpoint の pyodbc 接続、その後 CSV → ハードコードデータへフォールバックします。
 - Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
 - Agent5（動画生成）は Photo Avatar で SSML ナレーションを生成し、`ja-JP-Nanami:DragonHDLatestNeural` 音声、冒頭ジェスチャー、`casual-sitting` スタイルの販促動画を MP4/H.264 で生成します。
@@ -139,3 +153,10 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
 - Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
 - 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。
+
+## 7. Phase2 拡張候補
+
+- Azure Functions MCP は現行 IaC とランタイムには含めません。現在のツール呼び出しはエージェント内 `@tool` 実装が前提です。
+- MCP 化を検討するのは、AI Gateway で統制したい新規リモートツールや、別コネクタ境界に分離したい外部連携を追加するときだけです。
+- 将来実装する場合は Azure Functions MCP extension を優先し、Flex Consumption、stateless、streamable HTTP の制約を前提に設計します。
+- Teams / メール通知 workflow は MCP 対象ではなく、必要になった場合だけ `MANAGER_APPROVAL_TRIGGER_URL` で呼ぶ外部 workflow として追加します。

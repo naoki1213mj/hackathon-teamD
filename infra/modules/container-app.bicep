@@ -20,6 +20,20 @@ param voiceSpaClientId string = ''
 param tenantId string = ''
 @secure()
 param logicAppCallbackUrl string = ''
+@secure()
+param managerApprovalTriggerUrl string = ''
+
+var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
+  {
+    name: 'logic-app-callback-url'
+    value: logicAppCallbackUrl
+  }
+] : [], !empty(managerApprovalTriggerUrl) ? [
+  {
+    name: 'manager-approval-trigger-url'
+    value: managerApprovalTriggerUrl
+  }
+] : [])
 
 // ACR イメージを使う場合のみ registry 参照が必要
 var isAcrImage = contains(imageName, '.azurecr.io')
@@ -75,6 +89,11 @@ var containerEnv = concat([
     name: 'LOGIC_APP_CALLBACK_URL'
     secretRef: 'logic-app-callback-url'
   }
+] : [], !empty(managerApprovalTriggerUrl) ? [
+  {
+    name: 'MANAGER_APPROVAL_TRIGGER_URL'
+    secretRef: 'manager-approval-trigger-url'
+  }
 ] : [], !empty(voiceSpaClientId) ? [
   {
     name: 'VOICE_SPA_CLIENT_ID'
@@ -103,12 +122,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {
-      secrets: !empty(logicAppCallbackUrl) ? [
-        {
-          name: 'logic-app-callback-url'
-          value: logicAppCallbackUrl
-        }
-      ] : []
+      secrets: containerSecrets
       ingress: {
         external: true
         targetPort: 8000

@@ -402,6 +402,10 @@ class TestConversationStatusFromEvents:
         events = [{"event": "approval_request"}]
         assert chat_module._conversation_status_from_events(events) == "awaiting_approval"
 
+    def test_manager_approval_request_event(self):
+        events = [{"event": "approval_request", "data": {"approval_scope": "manager"}}]
+        assert chat_module._conversation_status_from_events(events) == "awaiting_manager_approval"
+
     def test_error_event(self):
         events = [{"event": "error"}]
         assert chat_module._conversation_status_from_events(events) == "error"
@@ -505,6 +509,118 @@ class TestLoadPendingApprovalContext:
         result = await chat_module._load_pending_approval_context("saved-approval")
         assert result is not None
         assert result["model_settings"] == {"temperature": 0.4}
+
+    @pytest.mark.asyncio
+    async def test_restores_manager_workflow_settings_from_saved_approval_request(self, monkeypatch):
+        """保存済み manager approval_request から workflow_settings を復元できる"""
+        chat_module._pending_approvals.clear()
+
+        async def mock_get_conv(_cid):
+            return {
+                "status": "awaiting_manager_approval",
+                "input": "沖縄プラン",
+                "metadata": {"manager_approval_callback_token": "token-123"},
+                "messages": [
+                    {
+                        "event": "text",
+                        "data": {"agent": "data-search-agent", "content": "分析結果"},
+                    },
+                    {
+                        "event": "text",
+                        "data": {"agent": "plan-revision-agent", "content": "修正版企画書"},
+                    },
+                    {
+                        "event": "approval_request",
+                        "data": {
+                            "conversation_id": "saved-manager-approval",
+                            "plan_markdown": "修正版企画書",
+                            "approval_scope": "manager",
+                            "workflow_settings": {
+                                "manager_approval_enabled": True,
+                                "manager_email": "manager@example.com",
+                            },
+                        },
+                    },
+                ],
+            }
+
+        monkeypatch.setattr("src.api.chat.get_conversation", mock_get_conv)
+        result = await chat_module._load_pending_approval_context("saved-manager-approval")
+        assert result is not None
+        assert result["approval_scope"] == "manager"
+        assert result["manager_callback_token"] == "token-123"
+        assert result["workflow_settings"] == {
+            "manager_approval_enabled": True,
+            "manager_email": "manager@example.com",
+        }
+
+
+@pytest.mark.asyncio
+async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypatch):
+    """notification workflow 未設定でも manager approval URL を返して待機する"""
+
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test/project",
+            "content_understanding_endpoint": "",
+            "manager_approval_trigger_url": "",
+            "logic_app_callback_url": "",
+        },
+    )
+
+    async def fake_load_pending(_conversation_id: str):
+        return {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "旧企画書",
+            "model_settings": {"temperature": 0.3},
+            "workflow_settings": {
+                "manager_approval_enabled": True,
+                "manager_email": "manager@example.com",
+            },
+            "approval_scope": "user",
+            "manager_callback_token": None,
+        }
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        text = "規制チェック結果" if agent_name == "regulation-check-agent" else "修正版企画書"
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": text, "agent": agent_name},
+                )
+            ],
+            "text": text,
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 10,
+        }
+
+    monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    events = [
+        event async for event in chat_module._post_approval_events("承認", "conv-manual", "https://app.example.com")
+    ]
+
+    assert any("event: approval_request" in event for event in events)
+    approval_event = next(event for event in events if "event: approval_request" in event)
+    assert '"approval_scope": "manager"' in approval_event
+    assert '"manager_delivery_mode": "manual"' in approval_event
+    assert "manager_conversation_id=conv-manual" in approval_event
+    assert "manager_approval_token=" in approval_event
 
 
 # --- _extract_message_text テスト ---

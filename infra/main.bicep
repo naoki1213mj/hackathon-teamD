@@ -18,6 +18,10 @@ param imageName string = ''
 @description('Voice Live SPA アプリの Client ID（postprovision で設定）')
 param voiceSpaClientId string = ''
 
+@secure()
+@description('上司承認 workflow の HTTP trigger URL（Teams 対応 workflow を手動構成して設定）')
+param managerApprovalTriggerUrl string = ''
+
 @description('MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint（任意）')
 param imageProjectEndpointMai string = ''
 
@@ -162,6 +166,7 @@ module containerApp 'modules/container-app.bicep' = {
     speechServiceEndpoint: aiFoundry.outputs.endpoint
     speechServiceRegion: location
     logicAppCallbackUrl: logicApp.outputs.callbackUrl
+    managerApprovalTriggerUrl: managerApprovalTriggerUrl
     voiceSpaClientId: voiceSpaClientId
     tenantId: tenant().tenantId
   }

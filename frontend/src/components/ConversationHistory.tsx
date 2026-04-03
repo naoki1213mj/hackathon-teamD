@@ -55,6 +55,7 @@ export function ConversationHistory({ onSelect, t, locale }: ConversationHistory
     switch (status) {
       case 'completed': return 'bg-green-500'
       case 'awaiting_approval': return 'bg-amber-500'
+      case 'awaiting_manager_approval': return 'bg-indigo-500'
       case 'error': return 'bg-red-500'
       default: return 'bg-blue-500'
     }

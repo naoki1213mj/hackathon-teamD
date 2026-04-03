@@ -1,0 +1,10 @@
+{
+  "request_type": "manager_approval",
+  "plan_title": "<<PLAN_TITLE>>",
+  "plan_markdown": "<<PLAN_MARKDOWN>>",
+  "conversation_id": "<<CONVERSATION_ID>>",
+  "manager_email": "<<MANAGER_EMAIL>>",
+  "manager_approval_url": "<<MANAGER_APPROVAL_URL>>",
+  "manager_callback_url": "<<MANAGER_CALLBACK_URL>>",
+  "manager_callback_token": "<<MANAGER_CALLBACK_TOKEN>>"
+}

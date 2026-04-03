@@ -7,7 +7,7 @@
 ## 1. `azd up` で自動作成されるリソース
 
 | リソース | 現行構成 |
-|---|---|
+| --- | --- |
 | Resource Group | サブスクリプション配下に環境別で作成 |
 | AI Services account | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、SKU `S0` |
 | Microsoft Foundry project | `accounts/projects@2025-06-01` |
@@ -18,7 +18,7 @@
 | Container App | System-assigned MI、`/api/health` と `/api/ready` probe、0-3 replicas |
 | Azure Container Registry | Basic SKU |
 | API Management | BasicV2、Managed Identity、AI Gateway policy |
-| Logic Apps | Consumption、HTTP trigger ベース |
+| Logic Apps | Consumption、HTTP trigger ベース。post approval actions 用 |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、RBAC、Private Endpoint |
 | Key Vault | Private Endpoint、RBAC |
 | Log Analytics / Application Insights | 観測基盤 |
@@ -27,7 +27,7 @@
 ## 2. `azd up` 後に必要な追加作業
 
 | 項目 | 必要理由 |
-|---|---|
+| --- | --- |
 | Azure AI Search の作成 | Foundry IQ / `search_knowledge_base()` の実データ検索 |
 | `regulations-index` の投入 | 規制ドキュメント検索 |
 | Foundry project への Azure AI Search 接続追加 | `connections.get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
@@ -38,6 +38,7 @@
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
+| `MANAGER_APPROVAL_TRIGGER_URL` | 任意。上司承認 URL を Teams / メールで送る通知 workflow を呼ぶために使用 |
 
 ## 3. 認証と権限
 
@@ -78,6 +79,12 @@ APIM の Managed Identity には Foundry バックエンド接続用の Cognitiv
 ```bash
 azd auth login
 azd up
+```
+
+Teams やメールで上司承認の自動通知を行う場合は、次を設定してから `azd provision` もしくは `azd up` を再実行します。未設定でも、アプリ組み込みの上司承認ページ URL を共有すれば運用できます。
+
+```bash
+azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval-workflow-url>
 ```
 
 ### 4.2 配備結果の確認
@@ -178,7 +185,7 @@ Foundry ポータルで Azure AI Search connection を追加し、既定 connect
 
 ### 4.7 Container App に追加環境変数を入れる
 
-最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` を入れておけば `IMAGE_PROJECT_ENDPOINT_MAI` も自動注入されます。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
+最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` や `MANAGER_APPROVAL_TRIGGER_URL` を入れておけば同じく Container App に注入されます。`MANAGER_APPROVAL_TRIGGER_URL` は自動通知が必要な場合だけ設定してください。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
 
 ```bash
 az containerapp update \
@@ -190,9 +197,22 @@ az containerapp update \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_REGION=eastus2 \
     LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
+    MANAGER_APPROVAL_TRIGGER_URL=https://<teams-enabled-manager-approval-workflow-url> \
     FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai \
     FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
 ```
+
+### 4.7.1 上司承認の通知 workflow 追加
+
+上司承認そのものはアプリ組み込みの承認ページで実行できます。Teams やメールでその承認 URL を自動通知したい場合だけ、`azd up` で作成される Consumption Logic App とは別に通知 workflow を用意してください。現行の公式コネクタ情報では Teams connector は Logic Apps Standard 側の可用性を前提にしているため、現在の Bicep が作る Consumption workflow には含めていません。
+
+詳細な request / callback 契約は [manager-approval-workflow.md](manager-approval-workflow.md) を参照してください。
+
+最低限必要なこと:
+
+- `manager_approval_url` を Teams またはメールで上司へ送る workflow を作る
+- その HTTP trigger URL を `MANAGER_APPROVAL_TRIGGER_URL` として Container App に設定する
+- workflow 側で承認 / 差し戻しまで完結させたい場合だけ、結果を `POST /api/chat/{thread_id}/manager-approval-callback` へ返す
 
 評価専用 deployment を使う場合は、同じコマンドに `EVAL_MODEL_DEPLOYMENT=<deployment-name>` も追加してください。
 

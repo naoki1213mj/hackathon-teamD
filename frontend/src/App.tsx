@@ -8,6 +8,8 @@ import { EvaluationPanel } from './components/EvaluationPanel'
 import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
+import { ManagerApprovalPage } from './components/ManagerApprovalPage'
+import { ManagerApprovalStatus } from './components/ManagerApprovalStatus'
 import { MarkdownView } from './components/MarkdownView'
 import { PdfUpload } from './components/PdfUpload'
 import { PipelineStepper } from './components/PipelineStepper'
@@ -42,6 +44,15 @@ function App() {
   const { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
+  const [managerPortalRequest] = useState(() => {
+    const searchParams = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash)
+    const conversationId = searchParams.get('manager_conversation_id')?.trim() || ''
+    const approvalToken = hashParams.get('manager_approval_token')?.trim() || ''
+    return conversationId && approvalToken
+      ? { conversationId, approvalToken }
+      : null
+  })
 
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
@@ -138,6 +149,7 @@ function App() {
   const showRevisionNotice = revisionInProgress && state.status === 'running'
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
   const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
+  const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
   const pendingVersionNotice = state.pendingVersion ? (
     <div className="mb-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--accent-strong)]">
       <div className="flex items-center gap-2 font-medium">
@@ -192,6 +204,33 @@ function App() {
   }
   const handleSelectPendingVersion = () => {
     setSelectedCommittedPreviewVersion(null)
+  }
+
+  if (managerPortalRequest) {
+    return (
+      <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
+        <div className="mx-auto flex min-h-screen max-w-[1120px] flex-col px-4 py-4 sm:px-6 lg:px-8">
+          <header className="relative z-20 rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-6 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)] backdrop-blur">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <h1 className="text-lg font-semibold tracking-tight">{t('approval.manager.portal.title')}</h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
+                <ThemeToggle theme={theme} onChange={setTheme} t={t} />
+              </div>
+            </div>
+          </header>
+          <main className="mt-4 flex-1">
+            <ManagerApprovalPage
+              conversationId={managerPortalRequest.conversationId}
+              approvalToken={managerPortalRequest.approvalToken}
+              t={t}
+            />
+          </main>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -274,7 +313,9 @@ function App() {
           {/* 承認バナー（スクロール領域内、スティッキー） */}
           {state.status === 'approval' && state.approvalRequest && (
             <div className="px-5 pb-3">
-              <ApprovalBanner request={state.approvalRequest} onApprove={handleApproval} t={t} />
+              {isManagerApproval
+                ? <ManagerApprovalStatus request={state.approvalRequest} t={t} />
+                : <ApprovalBanner request={state.approvalRequest} onApprove={handleApproval} t={t} />}
             </div>
           )}
 
@@ -288,7 +329,9 @@ function App() {
             <SettingsPanel settings={state.settings} onChange={updateSettings} t={t} />
             {state.status === 'approval' ? (
               <div className="rounded-[20px] border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--warning-text)]">
-                {t('approval.awaiting_action')}
+                {isManagerApproval
+                  ? t('approval.manager.awaiting_action').replace('{email}', state.approvalRequest?.manager_email || 'manager')
+                  : t('approval.awaiting_action')}
               </div>
             ) : (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">

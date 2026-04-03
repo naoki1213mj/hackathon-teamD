@@ -22,6 +22,28 @@ def test_conversation_detail_returns_404_for_unknown():
     assert response.status_code == 404
 
 
+def test_conversation_detail_hides_sensitive_metadata(monkeypatch):
+    """会話詳細は callback token を返さない"""
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "id": "conv-1",
+            "input": "沖縄プラン",
+            "messages": [],
+            "metadata": {
+                "manager_approval_callback_token": "secret-token",
+                "latency": 1.2,
+            },
+        }
+
+    monkeypatch.setattr("src.api.conversations.get_conversation", fake_get_conversation)
+
+    response = client.get("/api/conversations/conv-1")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"] == {"latency": 1.2}
+
+
 def test_replay_returns_error_for_unknown():
     """存在しないリプレイデータは demo にフォールバックせずエラーイベントを返す"""
     response = client.get("/api/replay/nonexistent-id")

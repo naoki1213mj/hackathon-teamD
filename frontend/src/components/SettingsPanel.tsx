@@ -15,6 +15,8 @@ export interface ModelSettings {
   imageQuality: string
   imageWidth: number
   imageHeight: number
+  managerApprovalEnabled: boolean
+  managerEmail: string
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -29,7 +31,11 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   imageQuality: 'medium',
   imageWidth: 1024,
   imageHeight: 1024,
+  managerApprovalEnabled: false,
+  managerEmail: '',
 }
+
+const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const AVAILABLE_MODELS = [
   { value: 'gpt-5-4-mini', label: 'GPT-5.4 mini (default)' },
@@ -98,8 +104,12 @@ function SliderField({ inputId, label, tooltip, value, min, max, step, onChange 
 
 export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const trimmedManagerEmail = settings.managerEmail.trim()
+  const isManagerEmailInvalid = settings.managerApprovalEnabled
+    && trimmedManagerEmail.length > 0
+    && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)
 
-  const update = (key: keyof ModelSettings, value: number | string) => {
+  const update = (key: keyof ModelSettings, value: number | string | boolean) => {
     onChange({ ...settings, [key]: value })
   }
 
@@ -271,6 +281,54 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
                 ⓘ {t('settings.image.mai.constraint')}
               </p>
             )}
+          </div>
+
+          <div className="mt-4 border-t border-[var(--panel-border)] pt-4">
+            <p className="mb-3 text-xs font-semibold text-[var(--text-secondary)]">
+              👤 {t('settings.manager.title')}
+            </p>
+            <div className="space-y-3">
+              <label
+                htmlFor="settings-manager-approval"
+                className="flex items-center justify-between rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2.5"
+              >
+                <div className="pr-4">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{t('settings.manager.enabled')}</p>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">{t('settings.manager.enabled.desc')}</p>
+                </div>
+                <input
+                  id="settings-manager-approval"
+                  type="checkbox"
+                  checked={settings.managerApprovalEnabled}
+                  onChange={(e) => update('managerApprovalEnabled', e.target.checked)}
+                  className="h-4 w-4 rounded border-[var(--panel-border)] text-[var(--accent-strong)] focus:ring-[var(--accent-strong)]"
+                />
+              </label>
+
+              {settings.managerApprovalEnabled && (
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="settings-manager-email"
+                    className="text-xs font-medium text-[var(--text-secondary)]"
+                    title={t('settings.manager.email.desc')}
+                  >
+                    {t('settings.manager.email')}
+                    <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.manager.email.desc')}>ⓘ</span>
+                  </label>
+                  <input
+                    id="settings-manager-email"
+                    type="email"
+                    value={settings.managerEmail}
+                    onChange={(e) => update('managerEmail', e.target.value)}
+                    placeholder={t('settings.manager.email.placeholder')}
+                    className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+                  />
+                  {isManagerEmailInvalid && (
+                    <p className="text-[11px] text-rose-500">{t('settings.manager.email.invalid')}</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="mt-4 flex justify-end">

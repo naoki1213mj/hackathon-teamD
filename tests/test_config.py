@@ -18,6 +18,7 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "SPEECH_SERVICE_ENDPOINT",
         "SPEECH_SERVICE_REGION",
         "LOGIC_APP_CALLBACK_URL",
+        "MANAGER_APPROVAL_TRIGGER_URL",
     ]:
         monkeypatch.delenv(key, raising=False)
 

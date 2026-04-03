@@ -10,6 +10,9 @@
     },
     "imageName": {
       "value": "${SERVICE_WEB_IMAGE_NAME=}"
+    },
+    "managerApprovalTriggerUrl": {
+      "value": "${MANAGER_APPROVAL_TRIGGER_URL=}"
     }
   }
 }
