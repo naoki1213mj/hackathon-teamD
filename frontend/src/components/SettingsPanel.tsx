@@ -11,6 +11,10 @@ export interface ModelSettings {
   topP: number
   iqSearchResults: number
   iqScoreThreshold: number
+  imageModel: string
+  imageQuality: string
+  imageWidth: number
+  imageHeight: number
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -21,6 +25,10 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   topP: 1.0,
   iqSearchResults: 5,
   iqScoreThreshold: 0.0,
+  imageModel: 'gpt-image-1.5',
+  imageQuality: 'medium',
+  imageWidth: 1024,
+  imageHeight: 1024,
 }
 
 const AVAILABLE_MODELS = [
@@ -28,6 +36,23 @@ const AVAILABLE_MODELS = [
   { value: 'gpt-5.4', label: 'GPT-5.4' },
   { value: 'gpt-4-1-mini', label: 'GPT-4.1 mini' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
+]
+
+const AVAILABLE_IMAGE_MODELS = [
+  { value: 'gpt-image-1.5', label: 'GPT Image 1.5 (default)' },
+  { value: 'MAI-Image-2', label: 'MAI-Image-2' },
+]
+
+const IMAGE_QUALITY_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
+const GPT_SIZE_OPTIONS = [
+  { value: '1024x1024', label: '1024×1024 (正方形)' },
+  { value: '1024x1536', label: '1024×1536 (縦長)' },
+  { value: '1536x1024', label: '1536×1024 (横長)' },
 ]
 
 interface SettingsPanelProps {
@@ -173,6 +198,87 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
               onChange={(v) => update('iqScoreThreshold', v)}
             />
           </div>
+
+          {/* 画像生成設定セクション */}
+          <div className="mt-4 border-t border-[var(--panel-border)] pt-4">
+            <p className="mb-3 text-xs font-semibold text-[var(--text-secondary)]">
+              🎨 {t('settings.image.title')}
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="settings-image-model" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.image.model.desc')}>
+                    {t('settings.image.model')}
+                    <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.image.model.desc')}>ⓘ</span>
+                  </label>
+                </div>
+                <select
+                  id="settings-image-model"
+                  value={settings.imageModel}
+                  onChange={(e) => update('imageModel', e.target.value)}
+                  aria-label={t('settings.image.model')}
+                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+                >
+                  {AVAILABLE_IMAGE_MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {settings.imageModel === 'gpt-image-1.5' && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="settings-image-quality" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.image.quality.desc')}>
+                      {t('settings.image.quality')}
+                      <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.image.quality.desc')}>ⓘ</span>
+                    </label>
+                  </div>
+                  <select
+                    id="settings-image-quality"
+                    value={settings.imageQuality}
+                    onChange={(e) => update('imageQuality', e.target.value)}
+                    aria-label={t('settings.image.quality')}
+                    className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+                  >
+                    {IMAGE_QUALITY_OPTIONS.map((q) => (
+                      <option key={q.value} value={q.value}>{q.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {settings.imageModel === 'MAI-Image-2' && (
+                <>
+                  <SliderField
+                    inputId="settings-image-width"
+                    label={t('settings.image.width')}
+                    tooltip={t('settings.image.width.desc')}
+                    value={settings.imageWidth}
+                    min={768}
+                    max={1024}
+                    step={16}
+                    onChange={(v) => update('imageWidth', v)}
+                  />
+                  <SliderField
+                    inputId="settings-image-height"
+                    label={t('settings.image.height')}
+                    tooltip={t('settings.image.height.desc')}
+                    value={settings.imageHeight}
+                    min={768}
+                    max={1024}
+                    step={16}
+                    onChange={(v) => update('imageHeight', v)}
+                  />
+                </>
+              )}
+            </div>
+            {settings.imageModel === 'MAI-Image-2' && (
+              <p className="mt-2 text-[10px] text-[var(--text-muted)]">
+                ⓘ {t('settings.image.mai.constraint')}
+              </p>
+            )}
+          </div>
+
           <div className="mt-4 flex justify-end">
             <button
               type="button"

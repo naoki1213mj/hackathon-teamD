@@ -89,6 +89,12 @@ export async function connectSSE(
       top_p: settings.topP,
       iq_search_results: settings.iqSearchResults,
       iq_score_threshold: settings.iqScoreThreshold,
+      image_settings: {
+        image_model: settings.imageModel,
+        image_quality: settings.imageQuality,
+        image_width: settings.imageWidth,
+        image_height: settings.imageHeight,
+      },
     }
   }
 

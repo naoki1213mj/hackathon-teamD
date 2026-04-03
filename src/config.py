@@ -24,6 +24,7 @@ class AppSettings(TypedDict):
     speech_service_region: str
     logic_app_callback_url: str
     fabric_data_agent_url: str
+    image_project_endpoint_mai: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -40,6 +41,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "speech_service_region": ("SPEECH_SERVICE_REGION",),
     "logic_app_callback_url": ("LOGIC_APP_CALLBACK_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
+    "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
 }
 
 # デフォルト値（オプショナルな設定のみ）

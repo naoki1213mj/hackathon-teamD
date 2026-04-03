@@ -375,6 +375,7 @@ async def _build_brochure_fallback_outcome(
     total_steps: int,
     include_done: bool,
     start_time: float,
+    model_settings: dict | None = None,
 ) -> AgentExecutionOutcome:
     """Agent4 が失敗したときに最低限の販促物を返す。"""
     from src.agents.brochure_gen import (
@@ -383,10 +384,13 @@ async def _build_brochure_fallback_outcome(
         generate_hero_image,
         pop_pending_images,
         set_current_conversation_id,
+        set_current_image_settings,
     )
 
     title = _extract_plan_title(source_text)
     set_current_conversation_id(conversation_id)
+    if model_settings and model_settings.get("image_settings"):
+        set_current_image_settings(model_settings["image_settings"])
     await generate_hero_image(
         prompt="Bright family travel campaign hero image with resort atmosphere",
         destination=title,
@@ -698,11 +702,14 @@ async def _execute_agent(
     except ImportError, RuntimeError:
         pass
 
-    # brochure-gen-agent の場合、side-channel の conversation_id を設定
+    # brochure-gen-agent の場合、side-channel の conversation_id と画像設定を設定
     if agent_name == "brochure-gen-agent":
-        from src.agents.brochure_gen import set_current_conversation_id
+        from src.agents.brochure_gen import set_current_conversation_id, set_current_image_settings
 
         set_current_conversation_id(conversation_id)
+        # model_settings 内の image_settings を画像コンテキスト変数にセット
+        if model_settings and model_settings.get("image_settings"):
+            set_current_image_settings(model_settings["image_settings"])
     if agent_name == "video-gen-agent":
         from src.agents.video_gen import set_current_conversation_id
 
@@ -754,6 +761,7 @@ async def _execute_agent(
                     total_steps=total_steps,
                     include_done=include_done,
                     start_time=start_time,
+                    model_settings=model_settings,
                 )
 
             if attempt == max_attempts or not _is_retryable_agent_error(exc):
@@ -1626,9 +1634,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
                 break
 
     if destination_text and settings["project_endpoint"]:
-        from src.agents.brochure_gen import set_current_conversation_id
+        from src.agents.brochure_gen import set_current_conversation_id, set_current_image_settings
 
         set_current_conversation_id(conversation_id)
+        ctx_model_settings = context.get("model_settings")
+        if ctx_model_settings and ctx_model_settings.get("image_settings"):
+            set_current_image_settings(ctx_model_settings["image_settings"])
 
         async def _pregenerate_hero():
             from src.agents.brochure_gen import generate_hero_image

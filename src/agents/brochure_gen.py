@@ -24,8 +24,24 @@ _FALLBACK_IMAGE = (
     "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
 )
 
-# 画像生成モデル名（Foundry にデプロイ済み）
-_IMAGE_MODEL = "gpt-image-1.5"
+# 画像生成モデル名（デフォルト値）
+_DEFAULT_IMAGE_MODEL = "gpt-image-1.5"
+
+# 利用可能な画像生成モデル
+AVAILABLE_IMAGE_MODELS = {
+    "gpt-image-1.5": {
+        "label": "GPT Image 1.5",
+        "format": "openai",
+        "sizes": ["1024x1024", "1024x1536", "1536x1024"],
+        "qualities": ["low", "medium", "high"],
+    },
+    "MAI-Image-2": {
+        "label": "MAI-Image-2",
+        "format": "mai",
+        "min_dimension": 768,
+        "max_pixels": 1_048_576,
+    },
+}
 
 # --- ブランドテンプレートプリセット ---
 # 旧 functions/function_app.py (Azure Functions MCP サーバー) から移植。
@@ -52,8 +68,24 @@ _image_client_initialized: bool = False
 # Azure AD token provider — caching + auto-refresh
 _AZURE_AI_SCOPE = "https://ai.azure.com/.default"
 
+# 画像設定コンテキスト変数（ツール関数から参照）
+_image_settings_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "brochure_image_settings",
+    default={},
+)
 
-def _get_image_openai_client():
+
+def set_current_image_settings(settings: dict) -> None:
+    """現在の画像生成設定をコンテキスト変数にセットする。"""
+    _image_settings_var.set(settings)
+
+
+def _get_current_image_settings() -> dict:
+    """現在の非同期コンテキストに紐づく画像設定を返す。"""
+    return _image_settings_var.get()
+
+
+def _get_image_openai_client(deployment: str = _DEFAULT_IMAGE_MODEL):
     """Responses API 経由で画像生成する OpenAI クライアントを返す。
 
     Foundry project endpoint は legacy images.generate() をサポートしないため、
@@ -84,10 +116,10 @@ def _get_image_openai_client():
                 base_url=base_url,
                 api_key=token_provider,
                 default_headers={
-                    "x-ms-oai-image-generation-deployment": _IMAGE_MODEL,
+                    "x-ms-oai-image-generation-deployment": deployment,
                 },
             )
-            logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, _IMAGE_MODEL)
+            logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, deployment)
         except (ImportError, ValueError, OSError) as exc:
             logger.warning("画像クライアント初期化失敗: %s", exc)
             _image_openai_client = None
@@ -98,6 +130,43 @@ def _get_image_openai_client():
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
+    """画像設定に応じて適切なモデルで画像を生成し、data URI を返す。"""
+    img_settings = _get_current_image_settings()
+    image_model = img_settings.get("image_model", _DEFAULT_IMAGE_MODEL)
+
+    model_info = AVAILABLE_IMAGE_MODELS.get(image_model)
+    if model_info and model_info["format"] == "mai":
+        width, height = _parse_size_for_mai(size, img_settings)
+        return await _generate_image_mai(prompt, width, height)
+
+    quality = img_settings.get("image_quality", "medium")
+    return await _generate_image_gpt(prompt, size, quality)
+
+
+def _parse_size_for_mai(size: str, img_settings: dict) -> tuple[int, int]:
+    """GPT 形式の size 文字列または MAI 設定から width/height を導出する。"""
+    # UI から明示的に指定されていればそれを使う
+    if img_settings.get("image_width") and img_settings.get("image_height"):
+        w = int(img_settings["image_width"])
+        h = int(img_settings["image_height"])
+    else:
+        # GPT の size 文字列をパースし、MAI の制約内に収める
+        parts = size.split("x")
+        w, h = int(parts[0]), int(parts[1])
+
+    # MAI 制約: 最小 768px、w×h ≤ 1,048,576
+    w = max(768, w)
+    h = max(768, h)
+    max_pixels = AVAILABLE_IMAGE_MODELS["MAI-Image-2"]["max_pixels"]
+    if w * h > max_pixels:
+        # アスペクト比を維持しつつ制約内に収める
+        ratio = (max_pixels / (w * h)) ** 0.5
+        w = max(768, int(w * ratio))
+        h = max(768, int(h * ratio))
+    return w, h
+
+
+async def _generate_image_gpt(prompt: str, size: str = "1024x1024", quality: str = "medium") -> str:
     """Responses API の image_generation ツールで画像を生成し、data URI を返す。"""
     try:
         client = _get_image_openai_client()
@@ -112,7 +181,7 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
             return client.responses.create(
                 model=model_name,
                 input=prompt,
-                tools=[{"type": "image_generation", "size": size, "quality": "medium"}],
+                tools=[{"type": "image_generation", "size": size, "quality": quality}],
             )
 
         response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=30)
@@ -134,6 +203,65 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
         return _FALLBACK_IMAGE
     except Exception as exc:
         logger.exception("画像生成で予期しないエラー。フォールバック画像を返します: %s", exc)
+        return _FALLBACK_IMAGE
+
+
+async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024) -> str:
+    """MAI Image API で画像を生成し、data URI を返す。
+
+    API: POST /mai/v1/images/generations
+    認証: Azure AD トークン（https://ai.azure.com/.default）
+    """
+    try:
+        settings = get_settings()
+        endpoint = settings.get("image_project_endpoint_mai", "")
+        if not endpoint:
+            logger.info("IMAGE_PROJECT_ENDPOINT_MAI 未設定。フォールバック画像を返します")
+            return _FALLBACK_IMAGE
+
+        api_url = f"{endpoint.rstrip('/')}/mai/v1/images/generations"
+
+        credential = DefaultAzureCredential()
+        token = credential.get_token(_AZURE_AI_SCOPE)
+
+        body = json.dumps({
+            "model": "MAI-Image-2",
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+        }).encode("utf-8")
+
+        request = urllib.request.Request(
+            api_url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token.token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        def _sync_request():
+            with urllib.request.urlopen(request, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        result = await asyncio.wait_for(asyncio.to_thread(_sync_request), timeout=90)
+
+        data_list = result.get("data", [])
+        if not data_list or not data_list[0].get("b64_json"):
+            logger.warning("MAI-Image-2: 画像データなし。レスポンス: %s", list(result.keys()))
+            return _FALLBACK_IMAGE
+
+        b64_data = data_list[0]["b64_json"]
+        return f"data:image/png;base64,{b64_data}"
+    except TimeoutError:
+        logger.warning("MAI-Image-2 画像生成タイムアウト（90秒）。フォールバック画像を返します")
+        return _FALLBACK_IMAGE
+    except (ValueError, OSError, urllib.error.URLError) as exc:
+        logger.warning("MAI-Image-2 画像生成に失敗。フォールバック画像を返します: %s", exc)
+        return _FALLBACK_IMAGE
+    except Exception as exc:
+        logger.exception("MAI-Image-2 画像生成で予期しないエラー。フォールバック画像を返します: %s", exc)
         return _FALLBACK_IMAGE
 
 
