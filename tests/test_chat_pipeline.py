@@ -117,6 +117,26 @@ class TestExtractBrochureHtml:
         assert result is None
 
 
+class TestExtractPlanSummary:
+    """_extract_plan_summary のテスト"""
+
+    def test_skips_reference_lines_and_headings(self):
+        markdown = """[参考パンフレット: C:/tmp/ref.pdf]
+## タイトル
+春の北海道絶景ツアー
+## キャッチコピー
+雪景色と温泉を満喫
+## プラン概要
+美食と雪遊びを楽しむ旅
+"""
+
+        result = chat_module._extract_plan_summary(markdown)
+
+        assert "参考パンフレット" not in result
+        assert "タイトル" not in result
+        assert result.startswith("春の北海道絶景ツアー。雪景色と温泉を満喫")
+
+
 # --- _extract_inline_images テスト ---
 
 

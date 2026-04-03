@@ -12,7 +12,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - Fabric data access via Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) when available, then Fabric Lakehouse SQL via pyodbc, then CSV fallback
 - Foundry Evaluation integration with built-in metrics (relevance, coherence, fluency), custom business metrics (travel-law compliance, conversion potential, appeal, differentiation, KPI validity, brand tone), optional Foundry portal logging, and evaluation-driven refinement with frontend-side round comparison
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
-- Photo Avatar video generation (`casual-sitting` style, MP4/H.264 with soft-embedded subtitles)
+- Photo Avatar video generation (HD voice narration with SSML pacing, intro gesture, `casual-sitting` avatar, MP4/H.264 with soft-embedded subtitles)
 - Voice Live API with MSAL.js authentication (Entra App Registration) and Web Speech API fallback
 - Code Interpreter auto-detection with graceful fallback for data analysis
 - Azure integrations for Microsoft Foundry, Azure AI Search, Cosmos DB, Logic Apps callback, Content Understanding, Speech / Photo Avatar, and Fabric Lakehouse
@@ -27,7 +27,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - The pipeline uses 5 user-facing steps powered by 7 internal agents (Agent3a+3b share step 4, Agent4+5 share step 5).
 - Agent1 first tries the Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) with AAD auth and the Assistants-compatible endpoint. If unavailable, it falls back to Fabric Lakehouse SQL via pyodbc (`SQL_COPT_SS_ACCESS_TOKEN`), then CSV data.
 - Agent4 generates customer-facing brochures that exclude KPI, sales targets, and internal analysis.
-- Agent5 (video-gen-agent) generates Photo Avatar promotional videos using the `casual-sitting` style with `ja-JP-NanamiNeural` voice and MP4/H.264 output.
+- Agent5 (video-gen-agent) generates Photo Avatar promotional videos using SSML-driven narration, `ja-JP-Nanami:DragonHDLatestNeural`, an intro gesture, and MP4/H.264 output.
 - Agent6 (quality-review-agent) uses `GitHubCopilotAgent` with `PermissionHandler.approve_all` for automated permission handling.
 - Code Interpreter is auto-detected at runtime with a graceful fallback (`ENABLE_CODE_INTERPRETER=false` to disable).
 - A model selector in the frontend lets users choose between `gpt-5-4-mini` (default), `gpt-5.4`, `gpt-4-1-mini`, and `gpt-4.1`.

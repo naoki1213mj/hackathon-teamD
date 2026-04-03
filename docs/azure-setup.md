@@ -34,7 +34,7 @@
 | `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse SQL フォールバック検索（未設定時は CSV フォールバック） |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用に別 deployment を使いたい場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（`casual-sitting` スタイル） |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
 
@@ -258,7 +258,7 @@ curl https://<container-app-fqdn>/api/ready
 
 - `SPEECH_SERVICE_ENDPOINT` が設定済み
 - `SPEECH_SERVICE_REGION` が設定済み
-- Photo Avatar 動画生成が動作する（`casual-sitting` スタイル、MP4 出力）
+- Photo Avatar 動画生成が動作する（`ja-JP-Nanami:DragonHDLatestNeural`、SSML ナレーション、`casual-sitting` スタイル、MP4 出力）
 
 ### Voice Live 疎通
 
@@ -285,7 +285,7 @@ curl https://<container-app-fqdn>/api/ready
 - APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）とポリシーが自動構成される
 - Agent1 は `FABRIC_DATA_AGENT_URL` があれば Fabric Data Agent Published URL を優先利用し、利用不可時のみ Fabric SQL → CSV にフォールバックする
 - Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない
-- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を生成
+- Agent5（動画生成）は Photo Avatar で SSML ナレーションを生成し、`ja-JP-Nanami:DragonHDLatestNeural` 音声と冒頭ジェスチャー付きの販促動画を生成
 - Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
 - Code Interpreter は自動検出でグレースフルフォールバック
 - Voice Live API は MSAL.js + Entra アプリ登録で認証。Web Speech API への自動フォールバックあり

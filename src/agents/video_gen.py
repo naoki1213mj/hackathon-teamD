@@ -6,9 +6,13 @@ import asyncio
 import contextvars
 import json
 import logging
+import os
+import re
 import threading
 import time
+import urllib.error
 import urllib.request
+from xml.sax.saxutils import escape
 
 import httpx
 from agent_framework import tool
@@ -17,6 +21,23 @@ from azure.identity import DefaultAzureCredential
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PROMO_VOICE = "ja-JP-Nanami:DragonHDLatestNeural"
+_DEFAULT_AVATAR_STYLE = "casual-sitting"
+_DEFAULT_BACKGROUND_COLOR = "#FFFFFFFF"
+_DEFAULT_BITRATE_KBPS = 4000
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
+_MULTISPACE_RE = re.compile(r"\s+")
+_VIDEO_SECTION_LABELS = {
+    "タイトル",
+    "キャッチコピー",
+    "ターゲットペルソナ",
+    "プラン概要",
+    "差別化ポイント",
+    "改善ポイント",
+    "販促チャネル",
+    "kpi",
+}
 
 # --- Side-channel 動画ジョブストア ---
 # Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
@@ -46,6 +67,110 @@ def store_pending_video_job(job: dict[str, str]) -> None:
     conversation_id = _conversation_id_var.get()
     with _video_lock:
         _pending_video_jobs[conversation_id] = job
+
+
+def _read_positive_int_env(name: str, default_value: int) -> int:
+    """正の整数環境変数を取得する。未設定や不正値は既定値にフォールバックする。"""
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return default_value
+    try:
+        parsed_value = int(raw_value)
+    except ValueError:
+        logger.warning("%s が整数ではないため既定値を使用します: %s", name, raw_value)
+        return default_value
+    if parsed_value <= 0:
+        logger.warning("%s が正の整数ではないため既定値を使用します: %s", name, raw_value)
+        return default_value
+    return parsed_value
+
+
+def _normalize_summary_text(summary_text: str) -> str:
+    """動画ナレーション用に企画書サマリを整形する。"""
+    cleaned_lines: list[str] = []
+    for raw_line in summary_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("|"):
+            continue
+        if line.startswith("[参考パンフレット:"):
+            continue
+
+        normalized = line.lstrip("#").strip()
+        normalized = normalized.lstrip("-*・ ").strip()
+        normalized = _MARKDOWN_LINK_RE.sub(r"\1", normalized)
+        normalized = normalized.replace("**", "").replace("__", "").replace("`", "")
+        normalized = re.sub(
+            r"^(タイトル|キャッチコピー|ターゲットペルソナ|プラン概要|差別化ポイント|改善ポイント|販促チャネル|KPI)\s*[:：]\s*",
+            "",
+            normalized,
+            flags=re.IGNORECASE,
+        ).strip()
+        if not normalized:
+            continue
+        if normalized.lower().rstrip(":：") in _VIDEO_SECTION_LABELS:
+            continue
+
+        cleaned_lines.append(normalized)
+
+    normalized_text = _MULTISPACE_RE.sub(" ", " ".join(cleaned_lines)).strip(" 。")
+    return normalized_text[:320]
+
+
+def _split_sentences(summary_text: str) -> list[str]:
+    """テキストをナレーション向けの短い文に分割する。"""
+    normalized = _normalize_summary_text(summary_text)
+    if not normalized:
+        return []
+
+    raw_parts = re.split(r"[。！？!?]+", normalized)
+    sentences: list[str] = []
+    for raw_part in raw_parts:
+        part = raw_part.strip(" 、")
+        if not part:
+            continue
+        sentences.append(f"{part}。")
+    return sentences[:4]
+
+
+def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
+    """Photo Avatar 用の高品質な SSML を構築する。"""
+    source_sentences = _split_sentences(summary_text)
+    if not source_sentences:
+        source_sentences = ["おすすめの旅行プランをご紹介します。"]
+
+    intro = "こんにちは。今回ご紹介するのは、こちらのおすすめ旅行プランです。"
+    headline = source_sentences[0]
+    detail_sentences = source_sentences[1:3]
+    closing = "詳しくはブローシャをご確認のうえ、ぜひお問い合わせください。"
+
+    ssml_parts = [
+        "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' ",
+        "xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='ja-JP'>",
+        f"<voice name='{escape(voice_name)}' parameters='temperature=0.72'>",
+        "<bookmark mark='gesture.wave-left-1'/>",
+        f"<prosody rate='+4.0%' pitch='+1Hz'>{escape(intro)}</prosody>",
+        "<break time='450ms'/>",
+        f"<prosody rate='+6.0%' pitch='+2Hz'>{escape(headline)}</prosody>",
+    ]
+
+    for sentence in detail_sentences:
+        ssml_parts.extend(
+            [
+                "<break time='320ms'/>",
+                f"<prosody rate='+2.0%'>{escape(sentence)}</prosody>",
+            ]
+        )
+
+    ssml_parts.extend(
+        [
+            "<break time='380ms'/>",
+            "<mstts:paralinguistic type='breathing'/>",
+            f"<prosody rate='+5.0%' pitch='+1Hz'>{escape(closing)}</prosody>",
+            "</voice>",
+            "</speak>",
+        ]
+    )
+    return "".join(ssml_parts)
 
 
 async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
@@ -156,7 +281,16 @@ async def generate_promo_video(
         "guide": "lori",
         "presenter": "lisa",
     }
-    character = avatar_characters.get(avatar_style, "lisa")
+    configured_character = os.environ.get("VIDEO_GEN_AVATAR_CHARACTER", "").strip()
+    configured_style = os.environ.get("VIDEO_GEN_AVATAR_STYLE", "").strip()
+    configured_voice = os.environ.get("VIDEO_GEN_VOICE", _DEFAULT_PROMO_VOICE).strip()
+    background_color = os.environ.get("VIDEO_GEN_BACKGROUND_COLOR", _DEFAULT_BACKGROUND_COLOR).strip()
+    bitrate_kbps = _read_positive_int_env("VIDEO_GEN_BITRATE_KBPS", _DEFAULT_BITRATE_KBPS)
+
+    character = configured_character or avatar_characters.get(avatar_style, "lisa")
+    avatar_pose = configured_style or _DEFAULT_AVATAR_STYLE
+    voice_name = configured_voice or _DEFAULT_PROMO_VOICE
+    ssml_content = _build_avatar_ssml(summary_text, voice_name)
 
     try:
         credential = DefaultAzureCredential()
@@ -167,17 +301,17 @@ async def generate_promo_video(
         batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
         payload = json.dumps(
             {
-                "inputKind": "PlainText",
-                "inputs": [{"content": summary_text}],
+                "inputKind": "SSML",
+                "inputs": [{"content": ssml_content}],
                 "avatarConfig": {
                     "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": "casual-sitting",
-                    "videoFormat": "mp4",
+                    "talkingAvatarStyle": avatar_pose,
+                    "videoFormat": "Mp4",
                     "videoCodec": "h264",
                     "subtitleType": "soft_embedded",
-                    "backgroundColor": "#FFFFFFFF",
+                    "backgroundColor": background_color,
+                    "bitrateKbps": bitrate_kbps,
                 },
-                "synthesisConfig": {"voice": "ja-JP-NanamiNeural"},
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -204,7 +338,7 @@ async def generate_promo_video(
                 "status": "submitted",
                 "job_id": actual_job_id,
                 "message": (
-                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_style}"
+                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_pose}, 音声: {voice_name}"
                 ),
             },
             ensure_ascii=False,
@@ -239,11 +373,13 @@ INSTRUCTIONS = """\
 企画書のサマリテキストを受け取り、Photo Avatar を使って旅行プラン紹介動画を生成します。
 
 ## 入力
-企画書のサマリテキスト（100〜200文字程度）
+企画書のサマリテキスト（100〜240文字程度）
 
 ## ツール使用ルール
 - `generate_promo_video` を必ず呼び出してください
-- `summary_text` には企画書のキャッチコピーとプラン概要を要約したテキストを渡してください
+- `summary_text` には顧客向けの短いナレーション台本を渡してください
+- ナレーションは 3〜4 文で、冒頭の導入 → 主な魅力 → 締めの案内、の流れにしてください
+- KPI、売上目標、セグメント分析、競合分析などの社内情報は含めないでください
 - ツールがエラーを返した場合のみスキップしてください
 
 ## 出力の注意事項

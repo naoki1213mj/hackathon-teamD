@@ -12,7 +12,7 @@
 - Fabric データアクセス: `FABRIC_DATA_AGENT_URL` がある場合は Fabric Data Agent Published URL を優先し、利用不可時は Fabric Lakehouse SQL、その次に CSV へフォールバック
 - Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、改善ラウンド比較を前提にした評価起点の再改善
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
-- Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
+- Photo Avatar 動画生成: HD voice + SSML ナレーション、イントロジェスチャー、`casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
 - Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
 - Code Interpreter の自動検出とグレースフルフォールバック
 - Microsoft Foundry、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar、Fabric Lakehouse との連携
@@ -27,7 +27,7 @@
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - Agent1 はまず Fabric Data Agent Published URL（`FABRIC_DATA_AGENT_URL`）を AAD 認証付きの Assistants 互換エンドポイントとして利用し、利用できない場合は Fabric Lakehouse SQL の pyodbc 接続（`SQL_COPT_SS_ACCESS_TOKEN`）、最後に CSV へフォールバックします。
 - Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
-- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で出力します。
+- Agent5（動画生成）は Photo Avatar で SSML ベースのナレーションを組み立て、`ja-JP-Nanami:DragonHDLatestNeural` 音声とイントロジェスチャー付きの販促動画を MP4/H.264 で出力します。
 - Agent6（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
 - Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
 - フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。

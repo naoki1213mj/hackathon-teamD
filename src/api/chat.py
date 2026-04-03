@@ -1549,13 +1549,30 @@ def _extract_plan_summary(plan_text: str) -> str:
     """企画書から100〜200文字のサマリを抽出する。"""
     lines = plan_text.strip().split("\n")
     summary_parts = []
-    for line in lines[:20]:
+    ignored_headings = {
+        "タイトル",
+        "キャッチコピー",
+        "ターゲットペルソナ",
+        "プラン概要",
+        "差別化ポイント",
+        "改善ポイント",
+        "販促チャネル",
+        "KPI",
+    }
+    for line in lines[:30]:
         line = line.strip().lstrip("#").strip()
-        if line and not line.startswith("|") and not line.startswith("-"):
-            summary_parts.append(line)
-        if len("".join(summary_parts)) > 200:
+        if not line or line.startswith("|") or line.startswith("-") or line.startswith("[参考パンフレット:"):
+            continue
+        if line.rstrip(":：") in ignored_headings:
+            continue
+        normalized = line.replace("**", "").replace("`", "").strip()
+        if normalized:
+            summary_parts.append(normalized.rstrip("。"))
+        if len("。".join(summary_parts)) > 240:
             break
-    return "".join(summary_parts)[:200] if summary_parts else plan_text[:200]
+    if not summary_parts:
+        return plan_text[:240]
+    return "。".join(summary_parts)[:240]
 
 
 async def _post_approval_events(user_response: str, conversation_id: str):
@@ -1699,7 +1716,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
 
     # Agent5: 販促動画生成（Photo Avatar）
     # 企画書サマリを渡して動画を生成
-    video_summary = _extract_plan_summary(brochure_input)
+    video_summary = _extract_plan_summary(revised_plan_markdown)
     if video_summary:
         video_outcome = await _execute_agent(
             agent_name="video-gen-agent",

@@ -105,7 +105,7 @@ flowchart TB
 | `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse SQL フォールバック接続に必要（未設定時は CSV フォールバック） |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` に評価専用 deployment を使う場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（`casual-sitting` スタイル） |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の HTTP callback に必要 |
 
@@ -124,7 +124,7 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 - `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - Agent1 は `FABRIC_DATA_AGENT_URL` がある場合、Fabric Data Agent Published URL を最優先で使用します。利用不可時のみ Fabric Lakehouse SQL endpoint の pyodbc 接続、その後 CSV → ハードコードデータへフォールバックします。
 - Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
-- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で生成します。
+- Agent5（動画生成）は Photo Avatar で SSML ナレーションを生成し、`ja-JP-Nanami:DragonHDLatestNeural` 音声、冒頭ジェスチャー、`casual-sitting` スタイルの販促動画を MP4/H.264 で生成します。
 - Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
 - Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
 - APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。加えて Voice Live 用 Prompt Agent と Entra SPA アプリ登録も作成します。
