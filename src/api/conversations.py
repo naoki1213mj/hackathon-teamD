@@ -60,7 +60,7 @@ def _sanitize_conversation_document(doc: dict) -> dict:
 
 
 @router.get("/conversations")
-async def conversations_list(limit: int = 20, request: Request | None = None) -> Response:
+async def conversations_list(request: Request, limit: int = 20) -> Response:
     """会話一覧を取得する。"""
     items = await list_conversations(limit=limit)
     etag = _build_conversations_list_etag(items)
@@ -69,7 +69,7 @@ async def conversations_list(limit: int = 20, request: Request | None = None) ->
         "Pragma": "no-cache",
         "ETag": etag,
     }
-    if request is not None and _if_none_match_matches(request.headers.get("if-none-match"), etag):
+    if _if_none_match_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=cache_headers)
     return JSONResponse(
         content={"conversations": items},
