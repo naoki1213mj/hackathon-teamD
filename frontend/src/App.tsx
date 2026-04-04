@@ -57,10 +57,16 @@ function App() {
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
   const [revisionInProgress, setRevisionInProgress] = useState(false)
-  const [selectedCommittedPreviewVersion, setSelectedCommittedPreviewVersion] = useState<{
+  const [pendingPreviewSelection, setPendingPreviewSelection] = useState<{
     pendingVersion: number
-    committedVersion: number
+    committedVersion: number | null
   } | null>(null)
+
+  useEffect(() => {
+    if (!state.pendingVersion) {
+      setPendingPreviewSelection(null)
+    }
+  }, [state.pendingVersion])
 
   // Esc キーでリセット
   useEffect(() => {
@@ -75,9 +81,12 @@ function App() {
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const selectedPendingPreviewVersion = state.pendingVersion
-    && selectedCommittedPreviewVersion?.pendingVersion === state.pendingVersion.version
-      ? selectedCommittedPreviewVersion.committedVersion
-      : null
+    ? pendingPreviewSelection?.pendingVersion === state.pendingVersion.version
+      ? pendingPreviewSelection.committedVersion
+      : state.versions.length > 0
+        ? state.versions.length
+        : null
+    : null
   const previewSnapshot = selectedPendingPreviewVersion && state.pendingVersion
     ? state.versions[selectedPendingPreviewVersion - 1] ?? null
     : null
@@ -202,36 +211,43 @@ function App() {
   ) : null
   const handleSendMessage = (message: string) => {
     setRevisionInProgress(false)
+    setPendingPreviewSelection(null)
     void sendMessage(message)
   }
   const handleReset = () => {
     setRevisionInProgress(false)
+    setPendingPreviewSelection(null)
     reset()
   }
   const handleRestoreConversation = (conversationId: string) => {
     setRevisionInProgress(false)
-    setSelectedCommittedPreviewVersion(null)
+    setPendingPreviewSelection(null)
     void restoreConversation(conversationId)
   }
   const handleApproval = (response: string) => {
     const trimmed = response.trim()
     setRevisionInProgress(!isApprovalResponseText(trimmed))
+    setPendingPreviewSelection(null)
     void approve(trimmed)
   }
   const handleVersionChange = (version: number) => {
     if (state.pendingVersion) {
-      setSelectedCommittedPreviewVersion({
+      setPendingPreviewSelection({
         pendingVersion: state.pendingVersion.version,
         committedVersion: version,
       })
       return
     }
 
-    setSelectedCommittedPreviewVersion(null)
+    setPendingPreviewSelection(null)
     restoreVersion(version)
   }
   const handleSelectPendingVersion = () => {
-    setSelectedCommittedPreviewVersion(null)
+    if (!state.pendingVersion) return
+    setPendingPreviewSelection({
+      pendingVersion: state.pendingVersion.version,
+      committedVersion: null,
+    })
   }
 
   if (managerPortalRequest) {

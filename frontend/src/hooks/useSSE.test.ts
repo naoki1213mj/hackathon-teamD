@@ -212,6 +212,35 @@ describe('buildRestoredPipelineState', () => {
     ])
   })
 
+  it('attaches evaluations recorded before the first done event to the committed version', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '京都の秋プランを企画して',
+        messages: [
+          { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+          {
+            event: 'evaluation_result',
+            data: {
+              version: 1,
+              round: 1,
+              created_at: '2026-04-02T00:00:00+00:00',
+              result: { builtin: { relevance: { score: 4, reason: 'good' } } },
+            },
+          },
+          { event: 'done', data: { conversation_id: 'conv-queued-eval', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+        ],
+      },
+      'conv-queued-eval',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.versions).toHaveLength(1)
+    expect(state.currentVersion).toBe(1)
+    expect(state.versions[0].evaluations).toHaveLength(1)
+    expect(state.versions[0].evaluations[0].round).toBe(1)
+  })
+
   it('tracks a pending version while a refinement round is running', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',
@@ -307,6 +336,60 @@ describe('buildRestoredPipelineState', () => {
         toolEventOffset: 0,
       })
     })
+  })
+
+  it('replaces the draft snapshot when the first evaluated run completes', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '沖縄の家族旅行を企画して',
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-eval-draft',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    sendApproval.mockImplementationOnce(async (_threadId, _response, handlers) => {
+      handlers.done({
+        conversation_id: 'conv-eval-draft',
+        metrics: { latency_seconds: 11, tool_calls: 1, total_tokens: 120 },
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-eval-draft')
+    })
+
+    act(() => {
+      result.current.saveEvaluation({
+        version: 1,
+        round: 1,
+        createdAt: '2026-04-02T00:00:00+00:00',
+        result: { builtin: { relevance: { score: 4, reason: 'good' } } },
+      })
+    })
+
+    expect(result.current.state.versions).toHaveLength(1)
+    expect(result.current.state.versions[0].isDraft).toBe(true)
+
+    await act(async () => {
+      await result.current.approve('approve')
+    })
+
+    expect(result.current.state.status).toBe('completed')
+    expect(result.current.state.currentVersion).toBe(1)
+    expect(result.current.state.versions).toHaveLength(1)
+    expect(result.current.state.versions[0].isDraft).toBe(false)
+    expect(result.current.state.versions[0].evaluations).toHaveLength(1)
+    expect(result.current.state.versions[0].metrics?.total_tokens).toBe(120)
   })
 
   it('keeps the first run as v1 after approval', async () => {

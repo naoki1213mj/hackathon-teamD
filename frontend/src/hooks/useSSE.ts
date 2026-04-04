@@ -66,6 +66,7 @@ export interface ArtifactSnapshot {
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
   evaluations: EvaluationRecord[]
+  isDraft?: boolean
 }
 
 export interface PendingVersion {
@@ -81,6 +82,7 @@ interface SnapshotSource {
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
   evaluations?: EvaluationRecord[]
+  isDraft?: boolean
 }
 
 export interface ConversationEvent {
@@ -177,6 +179,7 @@ export function createArtifactSnapshot(source: SnapshotSource): ArtifactSnapshot
     toolEvents: cloneToolEvents(source.toolEvents),
     metrics: source.metrics ? { ...source.metrics } : null,
     evaluations: cloneEvaluations(source.evaluations ?? []),
+    isDraft: source.isDraft === true,
   }
 }
 
@@ -224,6 +227,7 @@ export function buildRestoredPipelineState(
   let latestAgentProgress: AgentProgress | null = null
   let hasManagerApprovalPhase = false
   const versions: ArtifactSnapshot[] = []
+  const pendingEvaluations = new Map<number, EvaluationRecord[]>()
   const metadata = doc.metadata && typeof doc.metadata === 'object' ? doc.metadata : {}
   const backgroundUpdatesPending = metadata.background_updates_pending === true
 
@@ -317,13 +321,30 @@ export function buildRestoredPipelineState(
         break
       case 'done':
         metrics = (data.metrics as PipelineMetrics | undefined) ?? null
-        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
+        {
+          const versionNumber = versions.length + 1
+          versions.push(createArtifactSnapshot({
+            textContents,
+            images,
+            toolEvents,
+            metrics,
+            evaluations: pendingEvaluations.get(versionNumber) ?? [],
+          }))
+          pendingEvaluations.delete(versionNumber)
+        }
         break
       case 'evaluation_result': {
-        const evaluation = buildEvaluationRecord(data, versions.length)
+        const evaluation = buildEvaluationRecord(data, Math.max(versions.length, 1))
         if (!evaluation) break
         const snapshot = versions[evaluation.version - 1]
-        if (!snapshot) break
+        if (!snapshot) {
+          pendingEvaluations.set(
+            evaluation.version,
+            [...(pendingEvaluations.get(evaluation.version) ?? []), cloneEvaluationRecord(evaluation)],
+          )
+          break
+        }
+
         snapshot.evaluations = [...snapshot.evaluations, cloneEvaluationRecord(evaluation)]
         if (isBackgroundUpdate(data) && versions.length > 0) {
           versions[versions.length - 1] = createArtifactSnapshot({
@@ -368,7 +389,13 @@ export function buildRestoredPipelineState(
     && (doc.status === 'awaiting_manager_approval' || doc.status === 'running')
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
-    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, evaluations: [] }))
+    versions.push(createArtifactSnapshot({
+      textContents,
+      images,
+      toolEvents,
+      metrics,
+      evaluations: pendingEvaluations.get(1) ?? [],
+    }))
   }
 
   return {
@@ -444,6 +471,7 @@ function ensureDraftSnapshot(state: PipelineState): PipelineState {
     toolEvents: state.toolEvents,
     metrics: state.metrics,
     evaluations: [],
+    isDraft: true,
   })
 
   return {
@@ -469,6 +497,15 @@ function inferPendingVersion(state: PipelineState): PendingVersion | null {
       textOffset: 0,
       imageOffset: 0,
       toolEventOffset: 0,
+    }
+  }
+
+  if (latestSnapshot.isDraft) {
+    return {
+      version: state.versions.length,
+      textOffset: latestSnapshot.textContents.length,
+      imageOffset: latestSnapshot.images.length,
+      toolEventOffset: latestSnapshot.toolEvents.length,
     }
   }
 
@@ -605,14 +642,19 @@ export function useSSE() {
       if (requestId !== activeRequestIdRef.current) return
       const doneData = data as { conversation_id: string; metrics: PipelineMetrics; background_updates_pending?: boolean }
       setState(prev => {
+        const latestSnapshot = prev.versions[prev.versions.length - 1]
+        const shouldReplaceDraft = Boolean(latestSnapshot?.isDraft)
+          && (!prev.pendingVersion || prev.pendingVersion.version === prev.versions.length)
         const snapshot = createArtifactSnapshot({
           textContents: prev.textContents,
           images: prev.images,
           toolEvents: prev.toolEvents,
           metrics: doneData.metrics,
-          evaluations: [],
+          evaluations: shouldReplaceDraft ? latestSnapshot?.evaluations ?? [] : [],
         })
-        const newVersions = [...prev.versions, snapshot]
+        const newVersions = shouldReplaceDraft
+          ? [...prev.versions.slice(0, -1), snapshot]
+          : [...prev.versions, snapshot]
         return {
           ...prev,
           metrics: doneData.metrics,

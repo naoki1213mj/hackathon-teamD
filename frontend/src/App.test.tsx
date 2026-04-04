@@ -200,10 +200,6 @@ describe('App', () => {
 
     render(<App />)
 
-    expect(screen.queryByTestId('evaluation-panel')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'v1' }))
-
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
 
