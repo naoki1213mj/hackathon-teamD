@@ -752,6 +752,104 @@ def test_extract_brochure_html_and_images() -> None:
     assert images == [{"url": "data:image/png;base64,abc", "alt": "Hero image"}]
 
 
+def test_inject_images_into_html_replaces_banner_placeholders() -> None:
+    """HTML 内のヒーロー画像とバナープレースホルダーを置換できる"""
+    html = (
+        "<html><body><main>"
+        '<img src="HERO_IMAGE" alt="ヒーロー" />'
+        '<img src="INSTAGRAM_BANNER_IMAGE" alt="Instagram" />'
+        '<img src="X_BANNER_IMAGE" alt="X" />'
+        "</main></body></html>"
+    )
+
+    result = chat_module._inject_images_into_html(
+        html,
+        {
+            "hero": "data:image/png;base64,hero",
+            "banner_instagram": "data:image/png;base64,instagram",
+            "banner_x": "data:image/png;base64,xbanner",
+        },
+    )
+
+    assert "HERO_IMAGE" not in result
+    assert "INSTAGRAM_BANNER_IMAGE" not in result
+    assert "X_BANNER_IMAGE" not in result
+    assert "data:image/png;base64,hero" in result
+    assert "data:image/png;base64,instagram" in result
+    assert "data:image/png;base64,xbanner" in result
+
+
+def test_inject_images_into_html_adds_platform_specific_banner_gallery() -> None:
+    """プレースホルダーがない場合はプラットフォーム別バナーセクションを挿入する"""
+    html = "<html><body><main><p>body</p></main><footer>footer</footer></body></html>"
+
+    result = chat_module._inject_images_into_html(
+        html,
+        {
+            "banner_instagram": "data:image/png;base64,instagram",
+            "banner_x": "data:image/png;base64,xbanner",
+        },
+    )
+
+    assert "Instagram 投稿用" in result
+    assert "X 投稿用" in result
+    assert "aspect-ratio:1 / 1" in result
+    assert "aspect-ratio:1.91 / 1" in result
+    assert result.index("SNS バナー") < result.index("<footer>")
+
+
+@pytest.mark.asyncio
+async def test_build_brochure_fallback_outcome_generates_instagram_and_x_banners(monkeypatch) -> None:
+    """フォールバック販促物でも Instagram と X の両バナーを生成する"""
+    banner_calls: list[tuple[str, str]] = []
+
+    async def fake_generate_hero_image(prompt: str, destination: str, style: str = "photorealistic") -> str:
+        return json.dumps({"status": "generated", "type": "hero"})
+
+    async def fake_generate_banner_image(prompt: str, platform: str = "instagram") -> str:
+        banner_calls.append((prompt, platform))
+        return json.dumps({"status": "generated", "type": "banner", "platform": platform})
+
+    monkeypatch.setattr("src.agents.brochure_gen.generate_hero_image", fake_generate_hero_image)
+    monkeypatch.setattr("src.agents.brochure_gen.generate_banner_image", fake_generate_banner_image)
+    monkeypatch.setattr("src.agents.brochure_gen.set_current_conversation_id", lambda _conversation_id: None)
+    monkeypatch.setattr("src.agents.brochure_gen.set_current_image_settings", lambda _settings: None)
+    monkeypatch.setattr(
+        "src.agents.brochure_gen.pop_pending_images",
+        lambda _conversation_id: {
+            "hero": "data:image/png;base64,hero",
+            "banner_instagram": "data:image/png;base64,instagram",
+            "banner_x": "data:image/png;base64,xbanner",
+        },
+    )
+
+    outcome = await chat_module._build_brochure_fallback_outcome(
+        events=[],
+        source_text="# 雪灯りのご褒美ステイ北海道",
+        conversation_id="conv-brochure",
+        step=5,
+        total_steps=5,
+        include_done=True,
+        start_time=0.0,
+    )
+
+    assert banner_calls == [
+        (
+            "Instagram square travel promotion for 雪灯りのご褒美ステイ北海道, premium travel campaign, strong focal subject, clean visual hierarchy",
+            "instagram",
+        ),
+        (
+            "Wide X social banner for 雪灯りのご褒美ステイ北海道, cinematic horizontal travel landscape, clear safe margins for overlay copy",
+            "x",
+        ),
+    ]
+    assert outcome["tool_calls"] == 3
+    assert "Instagram 投稿用" in outcome["text"]
+    assert "X 投稿用" in outcome["text"]
+    image_events = [event for event in outcome["events"] if event.startswith("event: image")]
+    assert len(image_events) == 3
+
+
 @pytest.mark.asyncio
 async def test_workflow_event_generator_creates_pending_approval(monkeypatch) -> None:
     """Azure 経路でも Agent2 の後に approval_request で停止する"""

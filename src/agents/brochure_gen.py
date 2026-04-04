@@ -43,6 +43,44 @@ AVAILABLE_IMAGE_MODELS = {
     },
 }
 
+_BANNER_PLATFORM_ALIASES = {
+    "twitter": "x",
+}
+
+_BANNER_PLATFORM_SPECS = {
+    "instagram": {
+        "label": "Instagram",
+        "gpt_size": "1024x1024",
+        "mai_size": "1024x1024",
+        "display_aspect_ratio": "1:1",
+        "prompt_suffix": (
+            "Square Instagram campaign creative, centered focal subject,"
+            " leave clean negative space for copy, no embedded text, no logos."
+        ),
+    },
+    "x": {
+        "label": "X",
+        "gpt_size": "1536x1024",
+        "mai_size": "1365x768",
+        "display_aspect_ratio": "1.91:1",
+        "prompt_suffix": (
+            "Wide X social banner, cinematic horizontal composition,"
+            " leave generous left and right safe margins for copy,"
+            " no embedded text, no logos."
+        ),
+    },
+    "facebook": {
+        "label": "Facebook",
+        "gpt_size": "1536x1024",
+        "mai_size": "1344x768",
+        "display_aspect_ratio": "1.75:1",
+        "prompt_suffix": (
+            "Wide Facebook travel promotion creative, balanced horizontal composition,"
+            " leave clear safe space for copy, no embedded text, no logos."
+        ),
+    },
+}
+
 # --- ブランドテンプレートプリセット ---
 # 旧 functions/function_app.py (Azure Functions MCP サーバー) から移植。
 # APIM が REST→MCP 変換を行うため Functions は廃止。
@@ -179,6 +217,29 @@ def _parse_size_for_mai(size: str, img_settings: dict) -> tuple[int, int]:
     return w, h
 
 
+def _normalize_banner_platform(platform: str) -> str:
+    """バナーの platform 名を正規化する。"""
+    normalized = platform.strip().lower() if platform else "instagram"
+    normalized = _BANNER_PLATFORM_ALIASES.get(normalized, normalized)
+    return normalized if normalized in _BANNER_PLATFORM_SPECS else "instagram"
+
+
+def _get_banner_platform_spec(platform: str) -> dict[str, str]:
+    """platform ごとのバナー仕様を返す。"""
+    normalized = _normalize_banner_platform(platform)
+    img_settings = _get_current_image_settings()
+    image_model = img_settings.get("image_model", _DEFAULT_IMAGE_MODEL)
+    base_spec = _BANNER_PLATFORM_SPECS[normalized]
+    size = base_spec["mai_size"] if image_model == "MAI-Image-2" else base_spec["gpt_size"]
+    return {
+        "platform": normalized,
+        "label": base_spec["label"],
+        "size": size,
+        "display_aspect_ratio": base_spec["display_aspect_ratio"],
+        "prompt_suffix": base_spec["prompt_suffix"],
+    }
+
+
 async def _generate_image_gpt(prompt: str, size: str = "1024x1024", quality: str = "medium") -> str:
     """Responses API の image_generation ツールで画像を生成し、data URI を返す。"""
     try:
@@ -238,12 +299,14 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
         credential = DefaultAzureCredential()
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-        body = json.dumps({
-            "model": "MAI-Image-2",
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "model": "MAI-Image-2",
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+            }
+        ).encode("utf-8")
 
         request = urllib.request.Request(
             api_url,
@@ -348,18 +411,20 @@ async def generate_banner_image(
         prompt: 画像生成プロンプト（英語推奨）
         platform: SNS プラットフォーム（instagram/twitter/facebook）
     """
-    size = "1024x1024" if platform == "instagram" else "1536x1024"
-    data_uri = await _generate_image(prompt, size)
+    spec = _get_banner_platform_spec(platform)
+    full_prompt = f"{prompt}. {spec['prompt_suffix']}"
+    data_uri = await _generate_image(full_prompt, spec["size"])
     conversation_id = _get_current_conversation_id()
     with _images_lock:
-        _pending_images.setdefault(conversation_id, {})[f"banner_{platform}"] = data_uri
+        _pending_images.setdefault(conversation_id, {})[f"banner_{spec['platform']}"] = data_uri
     return json.dumps(
         {
             "status": "generated",
             "type": "banner",
-            "platform": platform,
-            "size": size,
-            "message": f"{platform}用バナーを生成しました。",
+            "platform": spec["platform"],
+            "size": spec["size"],
+            "display_aspect_ratio": spec["display_aspect_ratio"],
+            "message": f"{spec['label']} 用バナーを生成しました。",
         }
     )
 
@@ -469,7 +534,7 @@ INSTRUCTIONS = """\
 ## 生成する成果物
 1. **HTML ブローシャ**: Tailwind CSS を使用したレスポンシブ HTML
 2. **ヒーロー画像**: `generate_hero_image` でメインビジュアルを生成（1536x1024px）
-3. **SNS バナー**: `generate_banner_image` で Instagram/Twitter 用バナーを生成
+3. **SNS バナー**: `generate_banner_image` で Instagram と X 用バナーを生成
 
 ## HTML ブローシャのルール
 - ```html で囲んで出力すること
@@ -479,6 +544,7 @@ INSTRUCTIONS = """\
 - フッターに**旅行業登録番号**と**取引条件**を必ず挿入
 - 企画書のキャッチコピー・プラン概要を反映
 - **`generate_hero_image` で生成した画像のプレースホルダーとして、HTML 内に `<img src="HERO_IMAGE" alt="メインビジュアル" class="w-full rounded-lg" />` を配置すること**
+- **SNS バナー用のセクションを作り、HTML 内に `<img src="INSTAGRAM_BANNER_IMAGE" alt="Instagramバナー" />` と `<img src="X_BANNER_IMAGE" alt="Xバナー" />` を配置すること**
 - 視覚的に魅力的なデザイン（旅行の雰囲気が伝わるように）
 
 ## ブローシャの対象読者: 旅行を検討している一般顧客
@@ -496,8 +562,11 @@ INSTRUCTIONS = """\
   - 例: 北海道なら "snowy mountains, lavender fields, fresh seafood market"
   - 例: 沖縄なら "tropical beach, coral reef, Shuri Castle"
 - `generate_banner_image` を呼ぶとき:
-  - `prompt` に旅行先名と季節を英語で含める
-  - 例: "Spring Hokkaido travel promotion, cherry blossoms and snow mountains"
+    - **必ず 2 回**呼ぶ: `platform="instagram"` と `platform="x"`
+    - `prompt` に旅行先名と季節を英語で含める
+    - Instagram: 正方形、中央に主題、コピーを載せる余白、テキストなし
+    - X: 横長、シネマティックな横構図、左右にコピー用の余白、テキストなし
+    - 例: "Spring Hokkaido travel promotion, cherry blossoms and snow mountains"
 - **絶対に他の地域の名所を混ぜないでください**（北海道プランに富士山を入れない等）
 
 ## ツール使用ルール

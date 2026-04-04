@@ -581,10 +581,20 @@ def _extract_inline_images(html_content: str) -> list[dict[str, str]]:
 def _inject_images_into_html(html: str, images: dict[str, str]) -> str:
     """生成画像をブローシャ HTML に埋め込む。"""
     hero = images.get("hero", "")
+    instagram_banner = images.get("banner_instagram", "")
+    x_banner = images.get("banner_x", images.get("banner_twitter", ""))
 
     # HERO_IMAGE プレースホルダーを置換
     if hero and "HERO_IMAGE" in html:
         html = html.replace("HERO_IMAGE", hero)
+
+    # バナーのプレースホルダーを置換
+    if instagram_banner and "INSTAGRAM_BANNER_IMAGE" in html:
+        html = html.replace("INSTAGRAM_BANNER_IMAGE", instagram_banner)
+    if x_banner:
+        for placeholder in ["X_BANNER_IMAGE", "TWITTER_BANNER_IMAGE"]:
+            if placeholder in html:
+                html = html.replace(placeholder, x_banner)
 
     # プレースホルダーがない場合、最初の <main> または <body> タグの直後に挿入
     if hero and "HERO_IMAGE" not in html and hero not in html:
@@ -597,19 +607,51 @@ def _inject_images_into_html(html: str, images: dict[str, str]) -> str:
                     html = html[: close + 1] + "\n" + img_tag + "\n" + html[close + 1 :]
                     break
 
-    # バナー画像も埋め込む（あれば）
-    for key, uri in images.items():
-        if key.startswith("banner_") and uri and uri not in html:
-            footer_idx = html.lower().find("<footer")
-            if footer_idx >= 0:
-                banner_tag = f'<img src="{uri}" alt="SNSバナー ({key})" class="w-full rounded-lg my-4" />'
-                html = html[:footer_idx] + banner_tag + "\n" + html[footer_idx:]
-            else:
-                # footer がなければ </body> の前に挿入
-                body_end = html.lower().find("</body")
-                if body_end >= 0:
-                    banner_tag = f'<img src="{uri}" alt="SNSバナー ({key})" class="w-full rounded-lg my-4" />'
-                    html = html[:body_end] + banner_tag + "\n" + html[body_end:]
+    missing_banner_cards: list[str] = []
+    if instagram_banner and instagram_banner not in html:
+        missing_banner_cards.append(
+            (
+                '<figure style="margin:0;display:flex;flex-direction:column;gap:12px;">'
+                '<figcaption style="font-size:14px;font-weight:600;color:#0f172a;">Instagram 投稿用</figcaption>'
+                '<div style="aspect-ratio:1 / 1;overflow:hidden;border-radius:24px;border:1px solid #e2e8f0;background:#f8fafc;">'
+                f'<img src="{instagram_banner}" alt="Instagramバナー" '
+                'style="display:block;width:100%;height:100%;object-fit:cover;" />'
+                "</div>"
+                "</figure>"
+            )
+        )
+    if x_banner and x_banner not in html:
+        missing_banner_cards.append(
+            (
+                '<figure style="margin:0;display:flex;flex-direction:column;gap:12px;">'
+                '<figcaption style="font-size:14px;font-weight:600;color:#0f172a;">X 投稿用</figcaption>'
+                '<div style="aspect-ratio:1.91 / 1;overflow:hidden;border-radius:24px;border:1px solid #e2e8f0;background:#f8fafc;">'
+                f'<img src="{x_banner}" alt="Xバナー" '
+                'style="display:block;width:100%;height:100%;object-fit:cover;" />'
+                "</div>"
+                "</figure>"
+            )
+        )
+
+    if missing_banner_cards:
+        banner_section = (
+            '<section style="margin-top:32px;">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+            '<h2 style="margin:0;font-size:24px;color:#0f172a;">SNS バナー</h2>'
+            '<p style="margin:0;font-size:14px;color:#475569;">Instagram と X 向けの出稿イメージです。</p>'
+            "</div>"
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:16px;">'
+            + "".join(missing_banner_cards)
+            + "</div>"
+            "</section>"
+        )
+        footer_idx = html.lower().find("<footer")
+        if footer_idx >= 0:
+            html = html[:footer_idx] + banner_section + "\n" + html[footer_idx:]
+        else:
+            body_end = html.lower().find("</body")
+            if body_end >= 0:
+                html = html[:body_end] + banner_section + "\n" + html[body_end:]
 
     return html
 
@@ -751,12 +793,23 @@ async def _build_brochure_fallback_outcome(
         style="photorealistic",
     )
     await generate_banner_image(
-        prompt=f"Travel promotion banner for {title}",
+        prompt=(
+            f"Instagram square travel promotion for {title}, premium travel campaign, "
+            "strong focal subject, clean visual hierarchy"
+        ),
         platform="instagram",
+    )
+    await generate_banner_image(
+        prompt=(
+            f"Wide X social banner for {title}, cinematic horizontal travel landscape, "
+            "clear safe margins for overlay copy"
+        ),
+        platform="x",
     )
     pending_images = pop_pending_images(conversation_id)
     hero_image = pending_images.get("hero", _FALLBACK_IMAGE)
-    banner_image = pending_images.get("banner_instagram", _FALLBACK_IMAGE)
+    instagram_banner_image = pending_images.get("banner_instagram", _FALLBACK_IMAGE)
+    x_banner_image = pending_images.get("banner_x", pending_images.get("banner_twitter", _FALLBACK_IMAGE))
     escaped_source = escape(source_text).replace("\n", "<br />")
     html_content = f"""<!DOCTYPE html>
 <html lang=\"ja\">
@@ -781,8 +834,25 @@ async def _build_brochure_fallback_outcome(
         <div style=\"font-size:15px;line-height:1.9;color:#334155;word-break:break-word;\">{escaped_source}</div>
       </div>
     </section>
-    <section style=\"margin-top:24px;overflow:hidden;border:1px solid #e2e8f0;border-radius:24px;background:white;\">
-      <img src=\"{banner_image}\" alt=\"{escape(title)} SNS バナー\" style=\"display:block;width:100%;height:auto;background:#e2e8f0;\" />
+        <section style=\"margin-top:24px;border:1px solid #e2e8f0;border-radius:24px;background:white;padding:24px;\">
+            <div style=\"display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;\">
+                <h2 style=\"margin:0;font-size:24px;\">SNS バナー</h2>
+                <p style=\"margin:0;font-size:14px;line-height:1.7;color:#475569;\">Instagram と X に合わせた比率で出稿イメージを用意しています。</p>
+            </div>
+            <div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:20px;\">
+                <figure style=\"margin:0;display:flex;flex-direction:column;gap:12px;\">
+                    <figcaption style=\"font-size:14px;font-weight:600;color:#0f172a;\">Instagram 投稿用</figcaption>
+                    <div style=\"aspect-ratio:1 / 1;overflow:hidden;border-radius:24px;background:#e2e8f0;\">
+                        <img src=\"{instagram_banner_image}\" alt=\"{escape(title)} Instagram バナー\" style=\"display:block;width:100%;height:100%;object-fit:cover;background:#e2e8f0;\" />
+                    </div>
+                </figure>
+                <figure style=\"margin:0;display:flex;flex-direction:column;gap:12px;\">
+                    <figcaption style=\"font-size:14px;font-weight:600;color:#0f172a;\">X 投稿用</figcaption>
+                    <div style=\"aspect-ratio:1.91 / 1;overflow:hidden;border-radius:24px;background:#e2e8f0;\">
+                        <img src=\"{x_banner_image}\" alt=\"{escape(title)} X バナー\" style=\"display:block;width:100%;height:100%;object-fit:cover;background:#e2e8f0;\" />
+                    </div>
+                </figure>
+            </div>
     </section>
   </main>
   <footer style=\"padding:20px 24px;background:#0f172a;color:#cbd5e1;font-size:12px;line-height:1.8;\">
@@ -814,7 +884,13 @@ async def _build_brochure_fallback_outcome(
     events.append(
         format_sse(
             SSEEventType.IMAGE,
-            {"url": banner_image, "alt": f"{title} SNS バナー", "agent": "brochure-gen-agent"},
+            {"url": instagram_banner_image, "alt": f"{title} Instagram バナー", "agent": "brochure-gen-agent"},
+        )
+    )
+    events.append(
+        format_sse(
+            SSEEventType.IMAGE,
+            {"url": x_banner_image, "alt": f"{title} X バナー", "agent": "brochure-gen-agent"},
         )
     )
     events.append(
@@ -831,7 +907,7 @@ async def _build_brochure_fallback_outcome(
                 SSEEventType.DONE,
                 {
                     "conversation_id": conversation_id,
-                    "metrics": {"latency_seconds": elapsed, "tool_calls": 2, "total_tokens": 0},
+                    "metrics": {"latency_seconds": elapsed, "tool_calls": 3, "total_tokens": 0},
                 },
             )
         )
@@ -841,7 +917,7 @@ async def _build_brochure_fallback_outcome(
         "text": html_content,
         "success": True,
         "latency_seconds": elapsed,
-        "tool_calls": 2,
+        "tool_calls": 3,
     }
 
 

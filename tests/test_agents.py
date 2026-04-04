@@ -190,7 +190,7 @@ class TestBrochureGenTools:
 
     @pytest.mark.asyncio
     async def test_generate_banner_image_twitter_size(self, monkeypatch):
-        """Twitter 用バナーは 1536x1024 サイズ"""
+        """twitter 指定は X 用バナーへ正規化される"""
         import src.agents.brochure_gen as bg
 
         monkeypatch.setattr(bg, "_image_openai_client", None)
@@ -203,7 +203,8 @@ class TestBrochureGenTools:
         )
         parsed = json.loads(result)
         assert parsed["size"] == "1536x1024"
-        assert parsed["platform"] == "twitter"
+        assert parsed["platform"] == "x"
+        assert parsed["display_aspect_ratio"] == "1.91:1"
 
     def test_pop_pending_images_returns_and_clears(self):
         """pop_pending_images が保存済み画像を返しクリアする"""
