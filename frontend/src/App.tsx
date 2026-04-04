@@ -169,6 +169,16 @@ function App() {
   const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
   const shouldPollConversationUpdates = Boolean(state.conversationId)
     && (state.managerApprovalPolling || state.backgroundUpdatesPending)
+  const workflowHeaderTags = [
+    t('panel.workflow.hint.progress'),
+    t('panel.workflow.hint.approval'),
+    t('panel.workflow.hint.rounds'),
+  ]
+  const previewHeaderTags = [
+    t('panel.preview.hint.version'),
+    t('panel.preview.hint.plan'),
+    t('panel.preview.hint.assets'),
+  ]
 
   useEffect(() => {
     if (managerPortalRequest) return
@@ -294,6 +304,16 @@ function App() {
           <div className="border-b border-[var(--panel-border)] px-5 py-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('panel.workflow')}</h2>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('panel.workflow.subtitle')}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {workflowHeaderTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* 会話履歴（インラインパネル） */}
@@ -423,6 +443,16 @@ function App() {
           <div className="border-b border-[var(--panel-border)] px-5 py-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('panel.preview')}</h2>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('panel.preview.subtitle')}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {previewHeaderTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5">

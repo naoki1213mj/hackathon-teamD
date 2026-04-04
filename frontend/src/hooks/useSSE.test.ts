@@ -221,6 +221,27 @@ describe('buildRestoredPipelineState', () => {
     expect(state.metrics?.total_tokens).toBe(180)
   })
 
+  it('assigns tool events to the correct version while restoring multiple rounds', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '京都の秋プランを企画して',
+        messages: [
+          { event: 'tool_event', data: { tool: 'web_search', status: 'completed', agent: 'marketing-plan-agent' } },
+          { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-tools', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'tool_event', data: { tool: 'web_search', status: 'completed', agent: 'marketing-plan-agent' } },
+          { event: 'text', data: { content: 'plan v2', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-tools', metrics: { latency_seconds: 12, tool_calls: 1, total_tokens: 120 } } },
+        ],
+      },
+      'conv-tools',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.toolEvents.map(event => event.version)).toEqual([1, 2])
+  })
+
   it('keeps polling metadata and merges background updates into the latest completed version', () => {
     const state = buildRestoredPipelineState(
       {
@@ -531,6 +552,73 @@ describe('buildRestoredPipelineState', () => {
       headers: {
         'Cache-Control': 'no-cache',
       },
+    })
+  })
+
+  it('assigns version 1 to live tool events during the first run', async () => {
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.tool_event?.({
+        tool: 'search_sales_history',
+        status: 'completed',
+        agent: 'data-search-agent',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(result.current.state.toolEvents).toEqual([
+      {
+        tool: 'search_sales_history',
+        status: 'completed',
+        agent: 'data-search-agent',
+        version: 1,
+      },
+    ])
+  })
+
+  it('assigns the pending version number to live tool events during a refinement run', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'completed',
+      input: '京都の秋プランを企画して',
+      messages: [
+        { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+        { event: 'done', data: { conversation_id: 'conv-live-tools', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+      ],
+    })))
+
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.tool_event?.({
+        tool: 'web_search',
+        status: 'completed',
+        agent: 'marketing-plan-agent',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-live-tools')
+    })
+
+    await act(async () => {
+      await result.current.sendMessage('評価結果をもとに改善して')
+    })
+
+    expect(result.current.state.pendingVersion).toEqual({
+      version: 2,
+      textOffset: 1,
+      imageOffset: 0,
+      toolEventOffset: 0,
+    })
+    expect(result.current.state.toolEvents.at(-1)).toEqual({
+      tool: 'web_search',
+      status: 'completed',
+      agent: 'marketing-plan-agent',
+      version: 2,
     })
   })
 })

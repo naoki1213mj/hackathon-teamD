@@ -31,6 +31,14 @@ interface Round {
   contents: TextContent[]
 }
 
+function getCollapsedSummary(stepKey: string, content: TextContent | undefined, t: (key: string) => string): string {
+  if (!content) return ''
+  if (stepKey === 'brochure-gen-agent' || content.content_type === 'html') {
+    return t('workflow.brochure.ready')
+  }
+  return `${content.content.replace(/[#*_]/g, '').slice(0, 120)}…`
+}
+
 /** textContents を marketing-plan-agent の出現回数でラウンドに分割する */
 function splitIntoRounds(textContents: TextContent[]): Round[] {
   if (textContents.length === 0) return []
@@ -84,16 +92,14 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   const rounds = useMemo(() => splitIntoRounds(textContents), [textContents])
   const totalRounds = rounds.length || 1
   const isMultiRound = totalRounds > 1
+  const latestRoundContents = rounds[rounds.length - 1]?.contents ?? []
 
   // 折りたたみ状態をステップから導出（最新ラウンドのみ適用）
   const autoCollapsed = useMemo(() => {
     const result: Record<string, boolean> = {}
-    // 最新ラウンドのコンテンツで「既に結果がある」ステップを判定
-    const latestRound = rounds[rounds.length - 1]
-    const latestContents = latestRound?.contents ?? []
 
     ALL_STEPS.forEach((step) => {
-      const hasContentInLatest = latestContents.some(c => c.agent === step.key)
+      const hasContentInLatest = latestRoundContents.some(c => c.agent === step.key)
 
       if (!agentProgress) {
         // agentProgress がない（改善開始直後 or 初期状態）: 結果があれば折りたたむ、なければ閉じる
@@ -115,18 +121,20 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
       }
     })
     return result
-  }, [activeStepKey, currentStep, currentAgent, agentProgress, rounds])
+  }, [activeStepKey, currentStep, currentAgent, agentProgress, latestRoundContents])
 
   // 手動トグル用の state（ユーザー操作のみ）
-  const [userToggled, setUserToggled] = useState<{ step: number; overrides: Record<string, boolean> }>({ step: 0, overrides: {} })
-  const activeOverrides = userToggled.step === currentStep ? userToggled.overrides : {}
+  const [userToggled, setUserToggled] = useState<Record<string, boolean>>({})
 
-  const isSectionCollapsed = (key: string): boolean => {
-    if (key in activeOverrides) return activeOverrides[key]
-    return autoCollapsed[key] ?? false
+  const isSectionCollapsed = (sectionKey: string, fallback: boolean): boolean => {
+    if (sectionKey in userToggled) return userToggled[sectionKey]
+    return fallback
   }
 
-  const toggle = (key: string) => setUserToggled({ step: currentStep, overrides: { ...activeOverrides, [key]: !isSectionCollapsed(key) } })
+  const toggle = (sectionKey: string, fallback: boolean) => setUserToggled(prev => ({
+    ...prev,
+    [sectionKey]: !isSectionCollapsed(sectionKey, fallback),
+  }))
 
   // アクティブセクションにスクロール
   useEffect(() => {
@@ -155,19 +163,25 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     return 'pending'
   }
 
-  const getToolEvents = (agentKey: string) => toolEvents.filter(e => e.agent === agentKey)
+  const getToolEvents = (agentKey: string, roundNumber: number) => toolEvents.filter(
+    event => event.agent === agentKey && event.version === roundNumber,
+  )
 
   /** 1 つのステップ（アコーディオン項目）を描画する */
   const renderStep = (
     step: { key: string; labelKey: string; step: number },
+    roundNumber: number,
     roundContents: TextContent[],
     isPastRound: boolean,
   ) => {
     const status = getStatusForRound(step.key, step.step, isPastRound, roundContents)
     const content = roundContents.findLast(c => c.agent === step.key)
-    const sectionCollapsed = isPastRound ? true : isSectionCollapsed(step.key)
+    const sectionKey = `${roundNumber}:${step.key}`
+    const fallbackCollapsed = isPastRound ? true : (autoCollapsed[step.key] ?? false)
+    const sectionCollapsed = isSectionCollapsed(sectionKey, fallbackCollapsed)
     const isActive = status === 'active'
-    const stepTools = isPastRound ? [] : getToolEvents(step.key)
+    const stepTools = getToolEvents(step.key, roundNumber)
+    const collapsedSummary = getCollapsedSummary(step.key, content, t)
 
     return (
       <div
@@ -183,7 +197,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
       >
         {/* セクションヘッダー */}
         <button
-          onClick={() => { if (!isPastRound) toggle(step.key) }}
+          onClick={() => toggle(sectionKey, fallbackCollapsed)}
           className="flex w-full items-center justify-between px-4 py-3 text-left"
         >
           <div className="flex items-center gap-3">
@@ -200,21 +214,24 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                 <span className="text-xs text-[var(--accent-strong)]">{t('status.running')}</span>
               </span>
             )}
+            {stepTools.length > 0 && (
+              <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                {t('workflow.tool_count').replace('{n}', String(stepTools.length))}
+              </span>
+            )}
           </div>
-          {!isPastRound && (
-            <svg
-              className={`h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 ${sectionCollapsed ? '' : 'rotate-180'}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          )}
+          <svg
+            className={`h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 ${sectionCollapsed ? '' : 'rotate-180'}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
         </button>
 
         {/* 折りたたみ時のサマリー */}
-        {sectionCollapsed && content && (
+        {sectionCollapsed && collapsedSummary && (
           <p className="px-4 pb-3 text-xs text-[var(--text-muted)] line-clamp-1">
-            {content.content.replace(/[#*_]/g, '').slice(0, 120)}…
+            {collapsedSummary}
           </p>
         )}
 
@@ -266,7 +283,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
     const roundAccordion = (
       <div className="space-y-2">
-        {steps.map((step) => renderStep(step, round.contents, isPastRound))}
+        {steps.map((step) => renderStep(step, round.number, round.contents, isPastRound))}
       </div>
     )
 
@@ -299,7 +316,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
         <div className="space-y-2">
           {ALL_STEPS.map((step) => {
             const roundContents = rounds[0]?.contents ?? textContents
-            return renderStep(step, roundContents, false)
+            return renderStep(step, 1, roundContents, false)
           })}
         </div>
       )}

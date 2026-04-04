@@ -22,6 +22,7 @@ export interface ToolEvent {
   tool: string
   status: string
   agent: string
+  version?: number
 }
 
 export interface TextContent {
@@ -150,6 +151,19 @@ function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map(item => ({ ...item }))
 }
 
+function resolveToolEventVersion(state: PipelineState): number {
+  if (state.pendingVersion) {
+    return state.pendingVersion.version
+  }
+  if (state.currentVersion > 0) {
+    return state.currentVersion
+  }
+  if (state.versions.length > 0) {
+    return state.versions.length
+  }
+  return 1
+}
+
 function cloneEvaluations(evaluations: EvaluationRecord[]): EvaluationRecord[] {
   return evaluations.map(cloneEvaluationRecord)
 }
@@ -230,6 +244,7 @@ export function buildRestoredPipelineState(
   const pendingEvaluations = new Map<number, EvaluationRecord[]>()
   const metadata = doc.metadata && typeof doc.metadata === 'object' ? doc.metadata : {}
   const backgroundUpdatesPending = metadata.background_updates_pending === true
+  let activeVersion = 1
 
   for (const event of doc.messages ?? []) {
     const data = event.data ?? {}
@@ -275,13 +290,20 @@ export function buildRestoredPipelineState(
           })
         }
         break
-      case 'tool_event':
+      case 'tool_event': {
+        const requestedVersion = Number(data.version || 0)
+        const resolvedVersion = Number.isFinite(requestedVersion) && requestedVersion > 0
+          ? requestedVersion
+          : isBackgroundUpdate(data) && versions.length > 0
+            ? versions.length
+            : activeVersion
         toolEvents = [
           ...toolEvents,
           {
             tool: String(data.tool || ''),
             status: String(data.status || ''),
             agent: String(data.agent || ''),
+            version: resolvedVersion,
           },
         ].slice(-MAX_TOOL_EVENTS)
         if (isBackgroundUpdate(data) && versions.length > 0) {
@@ -294,6 +316,7 @@ export function buildRestoredPipelineState(
           })
         }
         break
+      }
       case 'approval_request':
         hasManagerApprovalPhase = hasManagerApprovalPhase || data.approval_scope === 'manager'
         approvalRequest = {
@@ -331,6 +354,7 @@ export function buildRestoredPipelineState(
             evaluations: pendingEvaluations.get(versionNumber) ?? [],
           }))
           pendingEvaluations.delete(versionNumber)
+          activeVersion = versionNumber + 1
         }
         break
       case 'evaluation_result': {
@@ -573,7 +597,14 @@ export function useSSE() {
     tool_event: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       setState(prev => {
-        const toolEvents = [...prev.toolEvents, data as ToolEvent].slice(-MAX_TOOL_EVENTS)
+        const requestedVersion = Number((data as ToolEvent).version || 0)
+        const toolEvent = {
+          ...(data as ToolEvent),
+          version: Number.isFinite(requestedVersion) && requestedVersion > 0
+            ? requestedVersion
+            : resolveToolEventVersion(prev),
+        }
+        const toolEvents = [...prev.toolEvents, toolEvent].slice(-MAX_TOOL_EVENTS)
         return {
           ...prev,
           toolEvents,

@@ -26,10 +26,16 @@ vi.mock('./hooks/useI18n', () => ({
         'status.running': 'Running',
         'panel.workflow': 'Workflow',
         'panel.workflow.subtitle': 'Workflow subtitle',
+        'panel.workflow.hint.progress': 'Progress hint',
+        'panel.workflow.hint.approval': 'Approval hint',
+        'panel.workflow.hint.rounds': 'Rounds hint',
         'panel.composer': 'Composer',
         'panel.composer.subtitle': 'Composer subtitle',
         'panel.preview': 'Preview',
         'panel.preview.subtitle': 'Preview subtitle',
+        'panel.preview.hint.version': 'Version hint',
+        'panel.preview.hint.plan': 'Plan hint',
+        'panel.preview.hint.assets': 'Assets hint',
         'tab.plan': 'Plan',
         'tab.evaluation': 'Evaluation',
         'tab.brochure': 'Brochure',
@@ -369,5 +375,68 @@ describe('App', () => {
 
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
+  })
+
+  it('renders explicit workflow and preview header hints', () => {
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'completed',
+        conversationId: 'conv-hints',
+        agentProgress: null,
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v1',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v1',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 1,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['北海道プランを改善して'],
+      },
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(screen.getByText('Progress hint')).toBeInTheDocument()
+    expect(screen.getByText('Approval hint')).toBeInTheDocument()
+    expect(screen.getByText('Rounds hint')).toBeInTheDocument()
+    expect(screen.getByText('Version hint')).toBeInTheDocument()
+    expect(screen.getByText('Plan hint')).toBeInTheDocument()
+    expect(screen.getByText('Assets hint')).toBeInTheDocument()
   })
 })
