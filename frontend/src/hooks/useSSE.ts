@@ -797,6 +797,7 @@ export function useSSE() {
       if (requestId !== activeRequestIdRef.current) return
       const doneData = data as { conversation_id: string; metrics: PipelineMetrics; background_updates_pending?: boolean }
       migrateCachedEvaluations(stateRef.current.conversationId, doneData.conversation_id)
+      conversationIdRef.current = doneData.conversation_id
       setState(prev => {
         const latestSnapshot = prev.versions[prev.versions.length - 1]
         const shouldReplaceDraft = Boolean(latestSnapshot?.isDraft)

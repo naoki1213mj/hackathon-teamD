@@ -370,6 +370,47 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.currentVersion).toBe(2)
   })
 
+  it('continues a refinement run on the completed conversation thread', async () => {
+    connectSSE
+      .mockImplementationOnce(async (_message, handlers) => {
+        handlers.text?.({ content: 'plan v1', agent: 'marketing-plan-agent' })
+        handlers.done?.({
+          conversation_id: 'conv-v1',
+          metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 },
+        })
+      })
+      .mockImplementationOnce(async () => {})
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('京都の秋プランを企画して')
+    })
+
+    expect(result.current.state.conversationId).toBe('conv-v1')
+    expect(connectSSE).toHaveBeenNthCalledWith(
+      1,
+      '京都の秋プランを企画して',
+      expect.any(Object),
+      undefined,
+      expect.any(AbortSignal),
+      DEFAULT_SETTINGS,
+    )
+
+    await act(async () => {
+      await result.current.sendMessage('評価結果をもとに改善して')
+    })
+
+    expect(connectSSE).toHaveBeenNthCalledWith(
+      2,
+      '評価結果をもとに改善して',
+      expect.any(Object),
+      'conv-v1',
+      expect.any(AbortSignal),
+      DEFAULT_SETTINGS,
+    )
+  })
+
   it('seeds a first snapshot when evaluating before the first round is committed', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'awaiting_approval',
