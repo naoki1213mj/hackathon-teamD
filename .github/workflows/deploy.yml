@@ -36,6 +36,14 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Build and push to ACR
         run: |
           az acr build \
@@ -107,6 +115,13 @@ jobs:
               --scope "$MAI_SCOPE" \
               --only-show-errors >/dev/null 2>&1 || true
           done
+
+      - name: Deploy improvement MCP Function
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          AZURE_CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+        run: uv run --with azure-identity python scripts/deploy_improvement_mcp.py
 
       - name: Health check
         run: |

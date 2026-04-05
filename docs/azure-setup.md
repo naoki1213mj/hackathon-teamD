@@ -44,6 +44,8 @@
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用に別 deployment を使いたい場合 |
 | Azure Functions MCP サーバーのデプロイ | 評価起点の改善で `generate_improvement_brief` をリモート実行するため |
 | APIM への MCP サーバー登録 | 公開 route `improvement-mcp/runtime/webhooks/mcp` を用意するため |
+| `IMPROVEMENT_MCP_FUNCTION_APP_NAME` | `postprovision.py` で APIM の improvement-mcp 登録を自動化するため |
+| `IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP` | MCP Function App がアプリ本体と別 RG にある場合に必要 |
 | `IMPROVEMENT_MCP_API_KEY` の設定 | APIM で subscription key を必須にした場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
@@ -125,17 +127,27 @@ azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval
 
 `AZURE_APIM_NAME` が未設定の場合、APIM 関連の設定はスキップされます。スクリプトは冪等で、複数回実行しても安全です。
 
+`postprovision.py` は既定で improvement MCP 用の Function App 名と storage account 名を導出し、Flex Consumption Function App の作成、`mcp_server/` の zip 配備、Function App の `mcp_extension` system key 取得、APIM の named value / backend / `improvement-mcp` API / policy 構成まで自動で実行します。別名や別 RG にしたい場合だけ `IMPROVEMENT_MCP_FUNCTION_APP_NAME` / `IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP` / `IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME` を設定してください。
+
 ### 4.3.1 Improvement MCP の登録
 
-現行 IaC は Container App に `IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を注入しますが、その APIM route 自体は別途作成が必要です。
+現行構成では Container App に `IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を注入し、同じ post-provision で Function App 作成と APIM route 構成まで自動化します。
 
-1. `mcp_server/` を Azure Functions Flex Consumption にデプロイする
-2. APIM の `Expose an existing MCP server` で backend に `https://<funcapp>.azurewebsites.net/runtime/webhooks/mcp` を指定する
-3. APIM backend で Functions の system key `mcp_extension` を `x-functions-key` として転送する
-4. APIM で `subscriptionRequired=false` にするか、必要なら `IMPROVEMENT_MCP_API_KEY` と `IMPROVEMENT_MCP_API_KEY_HEADER` を Container App 側へ設定する
-5. APIM の公開 route が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` で疎通することを確認する
+1. `scripts/postprovision.py` が `mcp_server/` を Flex Consumption Function App へ zip 配備する
+2. 同じスクリプトが Function App の `mcp_extension` system key を取得する
+3. APIM に `improvement-mcp` backend / API / policy を作成または更新する
+4. APIM の公開 route `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` で疎通することを確認する
+5. APIM で subscription key を要求する場合だけ `IMPROVEMENT_MCP_API_KEY` と `IMPROVEMENT_MCP_API_KEY_HEADER` を Container App 側へ設定する
 
 この route が未登録または失敗しても、FastAPI は従来の改善ロジックへ自動フォールバックします。
+
+既定名を上書きしたい場合だけ、事前に次を `azd env` へ設定してください。
+
+```bash
+azd env set IMPROVEMENT_MCP_FUNCTION_APP_NAME func-mcp-<suffix>
+azd env set IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP rg-dev
+azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
+```
 
 ### 4.4 画像生成モデルの確認
 

@@ -35,6 +35,12 @@ class ImprovementBriefResult(TypedDict):
     must_keep: list[str]
 
 
+def is_improvement_mcp_configured() -> bool:
+    """改善ブリーフ用 MCP endpoint が設定済みかを返す。"""
+    settings = get_settings()
+    return bool(settings["improvement_mcp_endpoint"].strip())
+
+
 async def generate_improvement_brief(
     plan_markdown: str,
     evaluation_result: dict[str, Any] | None,

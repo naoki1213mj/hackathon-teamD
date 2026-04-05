@@ -24,6 +24,8 @@ export interface ToolEvent {
   tool: string
   status: string
   agent: string
+  source?: string
+  fallback?: string
   version?: number
 }
 
@@ -378,6 +380,8 @@ export function buildRestoredPipelineState(
             tool: String(data.tool || ''),
             status: String(data.status || ''),
             agent: String(data.agent || ''),
+            source: data.source ? String(data.source) : undefined,
+            fallback: data.fallback ? String(data.fallback) : undefined,
             version: resolvedVersion,
           },
         ].slice(-MAX_TOOL_EVENTS)

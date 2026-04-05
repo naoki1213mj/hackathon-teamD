@@ -10,6 +10,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - FastAPI backend with rate limiting, liveness/readiness probes, static asset serving from the built frontend, and a dedicated `/api/evaluate` endpoint
 - Seven agents in the pipeline (data search, marketing plan, regulation check, plan revision, brochure generation, video generation, and quality review) with 5 user-facing steps: data → plan → approval → regulation + revision → brochure + video, plus an optional manager approval gate between revision and brochure generation via a built-in approval portal
 - APIM-fronted Azure Functions MCP integration for evaluation-driven refinement. When `IMPROVEMENT_MCP_ENDPOINT` is configured, the backend calls `generate_improvement_brief` through APIM first and falls back to the legacy prompt-only refinement path if the MCP route is unavailable
+- `scripts/postprovision.py` now auto-creates the Flex Consumption Function App for that MCP tool, deploys `mcp_server/`, and syncs the APIM `improvement-mcp` route; `.github/workflows/deploy.yml` reuses the same flow via `scripts/deploy_improvement_mcp.py`
 - Fabric data access via Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) when available, then Fabric Lakehouse SQL via pyodbc, then CSV fallback
 - Foundry Evaluation integration with built-in metrics (relevance, coherence, fluency), custom business metrics (travel-law compliance, conversion potential, appeal, differentiation, KPI validity, brand tone), optional Foundry portal logging, and evaluation-driven refinement with frontend-side round comparison
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
@@ -35,6 +36,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - Agent6 (quality-review-agent) uses `GitHubCopilotAgent` with `PermissionHandler.approve_all` for automated permission handling.
 - Code Interpreter is auto-detected at runtime with a graceful fallback (`ENABLE_CODE_INTERPRETER=false` to disable).
 - The current release uses Azure Functions MCP only for the improvement-brief step in evaluation-driven refinement. Other business tools remain in-process `@tool` implementations inside the FastAPI-hosted agent flow.
+- The frontend surfaces this remote MCP call inside the refinement round as a tool badge with `source=mcp`, so UI tests can distinguish it from local tool execution.
 - The expected APIM public MCP route is `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp`. If APIM keeps `subscriptionRequired=false`, leave `IMPROVEMENT_MCP_API_KEY` empty.
 - A model selector in the frontend lets users choose between `gpt-5-4-mini` (default), `gpt-5.4`, `gpt-4-1-mini`, and `gpt-4.1`.
 - `POST /api/evaluate` combines `azure-ai-evaluation` built-in evaluators (Relevance / Coherence / Fluency) with code-based and prompt-based custom evaluators, and can return a Foundry portal URL for the logged evaluation run.

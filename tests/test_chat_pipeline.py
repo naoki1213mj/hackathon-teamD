@@ -1016,6 +1016,7 @@ async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch)
         }
 
     monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: True)
     monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
 
@@ -1036,6 +1037,7 @@ async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch)
     assert "## 維持すべき要素" in str(captured["user_input"])
     assert any(
         event_name == chat_module.SSEEventType.TOOL_EVENT and payload.get("tool") == "generate_improvement_brief"
+        and payload.get("source") == "mcp"
         for event_name, payload in parsed
     )
     assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
@@ -1086,6 +1088,7 @@ async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) 
         return None
 
     monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: False)
     monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
 
@@ -1102,6 +1105,75 @@ async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) 
     assert "品質評価を踏まえて改善してください" in str(captured["user_input"])
     assert not any(
         event_name == chat_module.SSEEventType.TOOL_EVENT and payload.get("tool") == "generate_improvement_brief"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
+async def test_refine_events_emits_failed_tool_event_when_mcp_falls_back(monkeypatch) -> None:
+    """MCP が設定済みで失敗した場合は fallback を明示する"""
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "input": "北海道プランを作って",
+            "messages": [
+                {"event": "text", "data": {"agent": "plan-revision-agent", "content": "現在の企画書"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"temperature": 0.2},
+                        "workflow_settings": {"manager_approval_enabled": False, "manager_email": ""},
+                    },
+                },
+                {"event": "evaluation_result", "data": {"result": {"builtin": {}}}},
+            ],
+        }
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        captured["user_input"] = user_input
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    async def fake_generate_improvement_brief(**kwargs):
+        return None
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: True)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    events = [
+        event
+        async for event in chat_module._refine_events(
+            "品質評価を踏まえて改善してください",
+            "conv-eval-failed-mcp",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert "品質評価を踏まえて改善してください" in str(captured["user_input"])
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "generate_improvement_brief"
+        and payload.get("status") == "failed"
+        and payload.get("source") == "mcp"
+        and payload.get("fallback") == "legacy_prompt"
         for event_name, payload in parsed
     )
 

@@ -10,6 +10,7 @@
 - FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信、`/api/evaluate` 品質評価 API
 - パイプラインの 7 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、企画書修正、販促物生成（顧客向け HTML）、動画生成（Photo Avatar）、品質レビュー。ユーザーには 5 ステップ表示で、企画書修正後に組み込み承認ページ経由の任意の上司承認ゲートを挟めます
 - 評価起点の改善では、APIM 配下の Azure Functions MCP `generate_improvement_brief` を優先利用します。`IMPROVEMENT_MCP_ENDPOINT` が未設定、未登録、または一時的に失敗した場合は、従来のプロンプトベース改善へ自動フォールバックします
+- `scripts/postprovision.py` はこの MCP 用 Flex Consumption Function App の作成、`mcp_server/` の zip 配備、APIM `improvement-mcp` route の同期まで自動実行します。.github/workflows/deploy.yml でも `scripts/deploy_improvement_mcp.py` 経由で同じ処理を再利用します
 - Fabric データアクセス: `FABRIC_DATA_AGENT_URL` がある場合は Fabric Data Agent Published URL を優先し、利用不可時は Fabric Lakehouse SQL、その次に CSV へフォールバック
 - Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、改善ラウンド比較を前提にした評価起点の再改善
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
@@ -35,6 +36,7 @@
 - Agent6（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
 - Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
 - 現行リリースでは、Azure Functions MCP を改善ブリーフ生成にだけ使っています。その他の業務ツールは従来どおり FastAPI 内の `@tool` 実装です。
+- フロントエンドでは、このリモート MCP 呼び出しを改善ラウンドのツールバッジとして表示し、`source=mcp` でローカルツール実行と見分けられるようにしています。
 - APIM 側の公開 MCP endpoint は `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` 形式を前提にしています。APIM の `subscriptionRequired=false` 構成なら `IMPROVEMENT_MCP_API_KEY` は空で問題ありません。
 - フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
 - `POST /api/evaluate` は `azure-ai-evaluation` の Built-in 評価器（Relevance / Coherence / Fluency）と、code-based / prompt-based のカスタム評価器を組み合わせ、成功時は Foundry ポータル URL も返します。

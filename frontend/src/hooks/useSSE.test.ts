@@ -757,6 +757,33 @@ describe('buildRestoredPipelineState', () => {
     })
   })
 
+  it('restores MCP tool metadata from conversation history', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'completed',
+      input: '品質評価をもとに改善して',
+      messages: [
+        { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+        { event: 'done', data: { conversation_id: 'conv-mcp-restore', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+        { event: 'tool_event', data: { tool: 'generate_improvement_brief', status: 'failed', agent: 'improvement-mcp', source: 'mcp', fallback: 'legacy_prompt' } },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-mcp-restore')
+    })
+
+    expect(result.current.state.toolEvents).toContainEqual({
+      tool: 'generate_improvement_brief',
+      status: 'failed',
+      agent: 'improvement-mcp',
+      source: 'mcp',
+      fallback: 'legacy_prompt',
+      version: 2,
+    })
+  })
+
   it('keeps a locally evaluated draft after approval request and restore polling', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'awaiting_approval',

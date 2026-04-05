@@ -434,6 +434,18 @@ data: <json>
 }
 ```
 
+改善ブリーフ MCP が設定済みで失敗した場合は、次のような fallback イベントも返ります。
+
+```json
+{
+  "tool": "generate_improvement_brief",
+  "status": "failed",
+  "agent": "improvement-mcp",
+  "source": "mcp",
+  "fallback": "legacy_prompt"
+}
+```
+
 主な `tool` 値:
 
 - `generate_improvement_brief`

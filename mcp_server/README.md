@@ -23,11 +23,21 @@ MCP endpoint は `http://localhost:7071/runtime/webhooks/mcp` です。
 
 ## Azure への出し方
 
-1. `mcp_server/` を Azure Functions Flex Consumption にデプロイする
-2. Functions の system key `mcp_extension` を取得する
-3. APIM の `Expose an existing MCP server` で backend に `https://<funcapp>.azurewebsites.net/runtime/webhooks/mcp` を登録する
-4. backend へ `x-functions-key: <mcp_extension system key>` を転送する
-5. FastAPI 側の `IMPROVEMENT_MCP_ENDPOINT` を `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` に合わせる
+既定では `azd provision` 後の `scripts/postprovision.py` が、このディレクトリを Flex Consumption Function App へ zip 配備し、そのまま APIM の `improvement-mcp` route まで同期します。
+
+個別に再配備したい場合は、リポジトリ直下で次を実行します。
+
+```powershell
+uv run python scripts/deploy_improvement_mcp.py
+```
+
+このスクリプトは次を行います。
+
+1. improvement MCP 用 storage account と Function App を作成または再利用する
+2. `mcp_server/` を zip 化して Flex Consumption Function App へ remote build 付きで配備する
+3. Function App の system key `mcp_extension` を取得する
+4. APIM の backend / `improvement-mcp` API / policy を更新する
+5. FastAPI 側の `IMPROVEMENT_MCP_ENDPOINT` が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を向く状態に揃える
 
 ## APIM 登録
 

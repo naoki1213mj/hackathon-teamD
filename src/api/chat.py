@@ -25,7 +25,7 @@ from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import get_conversation, save_conversation
-from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief
+from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -2039,6 +2039,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
                     }
 
         improvement_instructions = refine_text
+        mcp_configured = is_improvement_mcp_configured()
         improvement_brief = await generate_improvement_brief(
             plan_markdown=original_plan,
             evaluation_result=latest_evaluation_result,
@@ -2050,7 +2051,23 @@ async def _refine_events(refine_text: str, conversation_id: str):
             improvement_instructions = _format_improvement_brief_for_prompt(improvement_brief, refine_text)
             yield format_sse(
                 SSEEventType.TOOL_EVENT,
-                {"tool": "generate_improvement_brief", "status": "completed", "agent": "improvement-mcp"},
+                {
+                    "tool": "generate_improvement_brief",
+                    "status": "completed",
+                    "agent": "improvement-mcp",
+                    "source": "mcp",
+                },
+            )
+        elif mcp_configured:
+            yield format_sse(
+                SSEEventType.TOOL_EVENT,
+                {
+                    "tool": "generate_improvement_brief",
+                    "status": "failed",
+                    "agent": "improvement-mcp",
+                    "source": "mcp",
+                    "fallback": "legacy_prompt",
+                },
             )
 
         revision_prompt = (

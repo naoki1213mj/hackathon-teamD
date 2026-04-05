@@ -24,8 +24,11 @@ const t = (key: string) => ({
   'tool.web_search': 'Web 検索',
   'tool.check_ng_expressions': 'NG 表現チェック',
   'tool.check_travel_law_compliance': '旅行業法チェック',
+  'tool.generate_improvement_brief': '改善ブリーフ生成',
   'tool.generate_hero_image': 'ヒーロー画像生成',
   'tool.generate_banner_image': 'バナー画像生成',
+  'tool.source.mcp': 'MCP',
+  'tool.fallback.legacy_prompt': '従来経路へフォールバック',
   'error.retry': '再試行',
 }[key] ?? key)
 
@@ -92,6 +95,31 @@ describe('WorkflowAccordion', () => {
 
     expect(screen.getAllByText('ヒーロー画像生成')).toHaveLength(1)
     expect(screen.getAllByText('バナー画像生成')).toHaveLength(1)
+  })
+
+  it('shows improvement MCP usage inside the latest refinement step', () => {
+    const mcpToolEvents: ToolEvent[] = [
+      ...toolEvents,
+      { tool: 'generate_improvement_brief', status: 'completed', agent: 'improvement-mcp', source: 'mcp', version: 2 },
+    ]
+
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={textContents}
+        toolEvents={mcpToolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: /施策生成/ }).at(-1) as HTMLButtonElement)
+
+    expect(screen.getByText('改善ブリーフ生成')).toBeInTheDocument()
+    expect(container.querySelector('[data-tool-name="generate_improvement_brief"][data-tool-source="mcp"]')).not.toBeNull()
   })
 
   it('shows a friendly collapsed summary for brochure steps instead of raw html', () => {

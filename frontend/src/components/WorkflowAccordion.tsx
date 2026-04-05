@@ -67,6 +67,17 @@ function splitIntoRounds(textContents: TextContent[]): Round[] {
   return rounds
 }
 
+function isStepToolEvent(event: ToolEvent, agentKey: string, roundNumber: number): boolean {
+  if (event.version !== roundNumber) {
+    return false
+  }
+  if (event.agent === agentKey) {
+    return true
+  }
+
+  return roundNumber > 1 && agentKey === 'marketing-plan-agent' && event.agent === 'improvement-mcp'
+}
+
 interface Props {
   agentProgress: AgentProgress | null
   textContents: TextContent[]
@@ -164,7 +175,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   }
 
   const getToolEvents = (agentKey: string, roundNumber: number) => toolEvents.filter(
-    event => event.agent === agentKey && event.version === roundNumber,
+    event => isStepToolEvent(event, agentKey, roundNumber),
   )
 
   /** 1 つのステップ（アコーディオン項目）を描画する */

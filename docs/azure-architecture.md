@@ -101,8 +101,8 @@ flowchart TB
 | AI Services | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、`gpt-5-4-mini` を既定で配備 |
 | Foundry project | `accounts/projects@2025-06-01` |
 | Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
-| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーを適用。評価改善用の `improvement-mcp` route は現状 post-provision / 手動登録 |
-| Azure Functions MCP | 現行 IaC では未作成。`mcp_server/` を別デプロイして APIM 配下に公開 |
+| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーに加え、評価改善用 `improvement-mcp` route の backend / API / policy も自動同期 |
+| Azure Functions MCP | `scripts/postprovision.py` が Flex Consumption Function App を作成し、`mcp_server/` を zip 配備して APIM 配下へ公開 |
 | Logic Apps | Consumption、HTTP trigger ベース。`post_approval_actions` の payload を受け付ける |
 | Manager approval notification workflow | 現行 IaC では未作成。組み込み上司承認ページはアプリに含まれ、Teams やメールで自動通知したい場合だけ別 workflow を用意して `MANAGER_APPROVAL_TRIGGER_URL` を FastAPI に渡す |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
