@@ -18,6 +18,7 @@ param speechServiceEndpoint string = ''
 param speechServiceRegion string = ''
 param voiceSpaClientId string = ''
 param tenantId string = ''
+param improvementMcpEndpoint string = ''
 @secure()
 param logicAppCallbackUrl string = ''
 @secure()
@@ -103,6 +104,11 @@ var containerEnv = concat([
   {
     name: 'AZURE_TENANT_ID'
     value: tenantId
+  }
+] : [], !empty(improvementMcpEndpoint) ? [
+  {
+    name: 'IMPROVEMENT_MCP_ENDPOINT'
+    value: improvementMcpEndpoint
   }
 ] : [])
 

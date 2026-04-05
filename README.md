@@ -9,6 +9,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), dark mode with WCAG AA contrast, a dedicated Evaluation tab with side-by-side version comparison, a global artifact version selector that can inspect committed versions while a new round or a second manager approval is pending, and a manager approval portal that compares the current revision against previous committed versions
 - FastAPI backend with rate limiting, liveness/readiness probes, static asset serving from the built frontend, and a dedicated `/api/evaluate` endpoint
 - Seven agents in the pipeline (data search, marketing plan, regulation check, plan revision, brochure generation, video generation, and quality review) with 5 user-facing steps: data → plan → approval → regulation + revision → brochure + video, plus an optional manager approval gate between revision and brochure generation via a built-in approval portal
+- APIM-fronted Azure Functions MCP integration for evaluation-driven refinement. When `IMPROVEMENT_MCP_ENDPOINT` is configured, the backend calls `generate_improvement_brief` through APIM first and falls back to the legacy prompt-only refinement path if the MCP route is unavailable
 - Fabric data access via Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) when available, then Fabric Lakehouse SQL via pyodbc, then CSV fallback
 - Foundry Evaluation integration with built-in metrics (relevance, coherence, fluency), custom business metrics (travel-law compliance, conversion potential, appeal, differentiation, KPI validity, brand tone), optional Foundry portal logging, and evaluation-driven refinement with frontend-side round comparison
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
@@ -33,7 +34,8 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - Agent5 (video-gen-agent) generates Photo Avatar promotional videos using SSML-driven narration, `ja-JP-Nanami:DragonHDLatestNeural`, an intro gesture, and MP4/H.264 output.
 - Agent6 (quality-review-agent) uses `GitHubCopilotAgent` with `PermissionHandler.approve_all` for automated permission handling.
 - Code Interpreter is auto-detected at runtime with a graceful fallback (`ENABLE_CODE_INTERPRETER=false` to disable).
-- Azure Functions MCP is not part of the current deployment. Treat it as a Phase2 extension for future remote tools that need AI Gateway governance or external connector isolation.
+- The current release uses Azure Functions MCP only for the improvement-brief step in evaluation-driven refinement. Other business tools remain in-process `@tool` implementations inside the FastAPI-hosted agent flow.
+- The expected APIM public MCP route is `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp`. If APIM keeps `subscriptionRequired=false`, leave `IMPROVEMENT_MCP_API_KEY` empty.
 - A model selector in the frontend lets users choose between `gpt-5-4-mini` (default), `gpt-5.4`, `gpt-4-1-mini`, and `gpt-4.1`.
 - `POST /api/evaluate` combines `azure-ai-evaluation` built-in evaluators (Relevance / Coherence / Fluency) with code-based and prompt-based custom evaluators, and can return a Foundry portal URL for the logged evaluation run.
 - Evaluation-driven refinement sends generated feedback back into `POST /api/chat`, regenerates the marketing plan, returns a fresh `approval_request`, and on approval reruns regulation, brochure, image, and video generation.
@@ -51,12 +53,10 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for the current Azu
 
 ## Verified Azure Snapshot
 
-- Verified environment as of `2026-04-04`: Azure deployment is healthy with `/api/health=ok` and `/api/ready=ready`.
-- Runtime text deployment is `gpt-5-4-mini`; the evaluation deployment used in the live environment is `gpt-4-1-mini`.
-- `gpt-image-1.5` is deployed on the main Foundry project. `MAI-Image-2` remains an optional secondary image resource.
-- Fabric is live with workspace `TeamD`, capacity `teamdfabric` (F64, Japan East), Lakehouse `Travel_Lakehouse`, and the SQL endpoint configured on the app. The Fabric Data Agent path remains optional and higher priority when explicitly configured.
-- APIM AI Gateway provisioning plus the `travel-ai-gateway` connection and token policies are configured by `scripts/postprovision.py`.
-- The built-in post-approval Logic Apps callback is enabled. Manager notification workflow remains an optional separate endpoint behind `MANAGER_APPROVAL_TRIGGER_URL`.
+- Verified in a deployed dev environment as of `2026-04-05`: `/api/health=ok` and `/api/ready=ready`.
+- The runtime text deployment, evaluation deployment, and `gpt-image-1.5` image deployment are active in Azure.
+- The evaluation-refinement path has been validated through an APIM-fronted `improvement-mcp` route backed by Azure Functions MCP.
+- Fabric-backed search, AI Gateway post-provisioning, and the built-in post-approval Logic Apps callback have all been exercised in Azure.
 
 ## Architecture At A Glance
 
@@ -152,6 +152,9 @@ If you want Teams or email notifications for manager approval, also follow [docs
 | `AZURE_AI_PROJECT_ENDPOINT` | Production | Microsoft Foundry project endpoint for runtime agent calls |
 | `MODEL_NAME` | Optional | Text deployment name, default `gpt-5-4-mini`. Frontend model selector also offers `gpt-5.4`, `gpt-4-1-mini`, `gpt-4.1` |
 | `EVAL_MODEL_DEPLOYMENT` | Recommended | Separate deployment name for `/api/evaluate`. Falls back to `MODEL_NAME` if unset |
+| `IMPROVEMENT_MCP_ENDPOINT` | Optional | APIM public MCP route for `generate_improvement_brief`. If unset or unavailable, refinement falls back to the legacy in-process prompt path |
+| `IMPROVEMENT_MCP_API_KEY` | Optional | APIM subscription key or other gateway key, only if the MCP API requires it |
+| `IMPROVEMENT_MCP_API_KEY_HEADER` | Optional | Header name for the MCP gateway key. Defaults to `Ocp-Apim-Subscription-Key` |
 | `ENVIRONMENT` | Optional | `development`, `staging`, or `production` |
 | `SERVE_STATIC` | Optional | Serve the built frontend from FastAPI (`true` in containerized deployments) |
 | `API_KEY` | Optional | Enables `x-api-key` protection for `/api/*` except `health` / `ready` |
@@ -173,11 +176,11 @@ See [.env.example](.env.example) for the complete local example file.
 
 For Azure provisioning and GitHub Actions deploys, MAI-Image-2 also needs `MAI_RESOURCE_NAME` so the Container App managed identity can receive RBAC on the separate Azure AI / Foundry account.
 
-## Phase 2 Extensions
+## Remote MCP Tool
 
-- The current release keeps business tools in-process via `@tool` and does not deploy Azure Functions MCP.
-- Use Azure Functions MCP only for future remote tools that must be governed through AI Gateway or isolated behind a separate connector boundary.
-- If you implement it later, prefer the Azure Functions MCP extension on Flex Consumption and design for stateless, streamable HTTP execution.
+- The current release already uses one remote MCP tool: `generate_improvement_brief`, hosted on Azure Functions and exposed through APIM.
+- The rest of the pipeline still uses in-process `@tool` implementations, which keeps the main agent flow simple while allowing the evaluation-refinement step to be governed separately.
+- For additional remote tools, follow the same pattern: Azure Functions MCP extension on Flex Consumption, APIM exposure, and graceful fallback in FastAPI when the MCP route is unavailable.
 
 ## Repository Layout
 
@@ -197,5 +200,6 @@ docs/                API, deployment, Azure setup, architecture documentation
 - [docs/api-reference.md](docs/api-reference.md): REST and SSE contract for the current implementation
 - [docs/deployment-guide.md](docs/deployment-guide.md): local, Docker, CI/CD, and Azure deployment behavior
 - [docs/azure-setup.md](docs/azure-setup.md): Azure provisioning, post-provision steps, and auth model
+- [mcp_server/README.md](mcp_server/README.md): Azure Functions MCP tool shape, APIM registration, and compatibility notes
 - [docs/manager-approval-workflow.md](docs/manager-approval-workflow.md): request/callback contract for the optional external manager approval notification workflow
 - [docs/requirements_v4.0.md](docs/requirements_v4.0.md): requirements document (v4.0, aligned with current implementation)

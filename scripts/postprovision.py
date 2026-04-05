@@ -11,14 +11,40 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from typing import Any
 
 from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_cli(name: str) -> str:
+    """Windows でも実行できる CLI 実体を解決する。"""
+    for candidate in (name, f"{name}.exe", f"{name}.cmd", f"{name}.bat"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return name
+
+
+def _run_cli(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """az / azd などの CLI を OS 非依存に実行する。"""
+    resolved_command = [_resolve_cli(command[0]), *command[1:]]
+    run_kwargs = {
+        "check": False,
+        "text": True,
+        **kwargs,
+    }
+    try:
+        return subprocess.run(resolved_command, **run_kwargs)
+    except FileNotFoundError as exc:
+        logger.warning("CLI が見つかりません: %s (%s)", command[0], exc)
+        return subprocess.CompletedProcess(resolved_command, 127, stdout="", stderr=str(exc))
 
 # ---------------------------------------------------------------------------
 # ユーティリティ
@@ -27,11 +53,9 @@ logger = logging.getLogger(__name__)
 
 def _get_azd_env() -> dict[str, str]:
     """azd env get-values から環境変数を読み込む"""
-    result = subprocess.run(
+    result = _run_cli(
         ["azd", "env", "get-values"],
         capture_output=True,
-        text=True,
-        check=False,
     )
     if result.returncode != 0:
         logger.warning("azd env get-values に失敗: %s", result.stderr.strip())
@@ -228,11 +252,9 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
     import os as _os
 
     # 既存アプリの確認
-    result = subprocess.run(
+    result = _run_cli(
         ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
         capture_output=True,
-        text=True,
-        check=False, shell=True,
     )
     existing_id = result.stdout.strip()
     if existing_id:
@@ -240,7 +262,7 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
         return existing_id
 
     # 新規 SPA アプリ作成
-    result = subprocess.run(
+    result = _run_cli(
         [
             "az", "ad", "app", "create",
             "--display-name", app_name,
@@ -250,9 +272,6 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
             "--query", "appId", "-o", "tsv",
         ],
         capture_output=True,
-        text=True,
-        check=False,
-        shell=True,
     )
     if result.returncode != 0:
         logger.warning("Entra App 作成失敗: %s", result.stderr)
@@ -269,16 +288,13 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
     if container_app_url:
         redirect_uris.append(container_app_url)
 
-    subprocess.run(
+    _run_cli(
         ["az", "ad", "app", "update", "--id", app_id, "--spa-redirect-uris", *redirect_uris],
         capture_output=True,
-        text=True,
-        check=False,
-        shell=True,
     )
 
     # Microsoft Graph User.Read 権限を追加
-    subprocess.run(
+    _run_cli(
         [
             "az", "ad", "app", "permission", "add",
             "--id", app_id,
@@ -286,9 +302,6 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
             "--api-permissions", "e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope",
         ],
         capture_output=True,
-        text=True,
-        check=False,
-        shell=True,
     )
 
     logger.info("Entra App 作成完了: %s (%s)", app_name, app_id)
@@ -435,19 +448,17 @@ def main() -> None:
     create_voice_agent(project_endpoint, subscription_id, rg)
 
     # Step 5: Entra App 登録（Voice Live SPA 認証用）
-    tenant_result = subprocess.run(
+    tenant_result = _run_cli(
         ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
         capture_output=True,
-        text=True,
-        check=False, shell=True,
     )
     tenant_id = tenant_result.stdout.strip()
     app_id = create_entra_app()
     if app_id:
-        subprocess.run(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id], check=False, shell=True)
+        _run_cli(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id])
         logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
     if tenant_id:
-        subprocess.run(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id], check=False, shell=True)
+        _run_cli(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id])
         logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
 
     logger.info("postprovision 完了")

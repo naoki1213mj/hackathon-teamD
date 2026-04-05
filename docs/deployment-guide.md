@@ -117,22 +117,34 @@ azd deploy
 ### 重要な補足
 
 - IaC は既定のテキストモデル (`gpt-5-4-mini`) と画像モデル (`gpt-image-1.5`) を自動配備します
+- `infra/modules/ai-services.bicep` では Foundry 配下の model deployment を直列化しています。これは Azure 側で同一親リソース配下の deployment 更新が並列実行されると `RequestConflict` になりやすいためです
 - MAI-Image-2 を使う場合は別リソースにデプロイし、`IMAGE_PROJECT_ENDPOINT_MAI` に加えて `MAI_RESOURCE_NAME` も設定してください（Container App の Managed Identity に別リソース RBAC を付与するため）
 - Container App には Content Understanding / Speech / post approval Logic Apps callback の基本設定も自動注入されます
-- post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、必要に応じた `FABRIC_DATA_AGENT_URL` または `FABRIC_SQL_ENDPOINT` の設定、評価専用モデルを分ける場合の `EVAL_MODEL_DEPLOYMENT` 設定です
+- Container App には `IMPROVEMENT_MCP_ENDPOINT` も自動注入されます。APIM 側に `improvement-mcp` API がまだ登録されていない場合でも、アプリは従来の改善ロジックへフォールバックして動作を継続します
+- post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、必要に応じた `FABRIC_DATA_AGENT_URL` または `FABRIC_SQL_ENDPOINT` の設定、評価専用モデルを分ける場合の `EVAL_MODEL_DEPLOYMENT` 設定、そして Azure Functions MCP を使う場合の APIM 登録です
 - 上司承認を使う場合、アプリ自体が上司承認ページ URL を発行するので、workflow がなくても本番運用できます
 - Teams やメールで自動通知したい場合だけ、通知用 workflow を別途作成して `MANAGER_APPROVAL_TRIGGER_URL` を設定してください
 - workflow 実装時は [manager-approval-workflow.md](manager-approval-workflow.md) の `manager_approval_url` と callback token 契約に従ってください
 - 詳細は [azure-setup.md](azure-setup.md) を参照してください
 
-## 5.1 2026-04-04 時点の実機スナップショット
+## 5.1 Improvement MCP の追加デプロイ
 
-- Azure 上の Container App は `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- ランタイムのテキスト deployment は `gpt-5-4-mini`、評価用 deployment は `gpt-4-1-mini` を使用しています。
-- 画像生成はメイン Foundry project 上の `gpt-image-1.5` が有効です。`MAI-Image-2` はオプションの別リソースです。
-- Fabric は workspace `TeamD` / capacity `teamdfabric` / Lakehouse `Travel_Lakehouse` が稼働中で、現行アプリは SQL endpoint を設定済みです。
-- APIM AI Gateway の `travel-ai-gateway` 接続と token policy は `scripts/postprovision.py` により構成済みです。
-- post approval actions 用 Logic Apps callback は有効です。manager 通知 workflow は別 endpoint として運用します。
+`mcp_server/` は評価起点の改善で使う Azure Functions MCP ツールです。現在の IaC は APIM 本体と Container App 側の endpoint 注入までは行いますが、Functions MCP サーバーの登録までは自動化していません。
+
+1. `mcp_server/` を Azure Functions Flex Consumption にデプロイする
+2. APIM の `Expose an existing MCP server` で backend に `https://<funcapp>.azurewebsites.net/runtime/webhooks/mcp` を登録する
+3. APIM 側の公開 route が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` になることを確認する
+4. backend へは Functions の system key `mcp_extension` を `x-functions-key` で転送する
+5. APIM で subscription key を要求する場合だけ `IMPROVEMENT_MCP_API_KEY` と `IMPROVEMENT_MCP_API_KEY_HEADER` を設定する
+
+この route が未登録または一時的に失敗しても、FastAPI は既存の改善ロジックへフォールバックします。
+
+## 5.2 2026-04-05 時点の実機スナップショット
+
+- Azure 上の dev 環境で `/api/health=ok`、`/api/ready=ready` を確認済みです。
+- ランタイム用テキスト deployment、評価用 deployment、`gpt-image-1.5` は稼働確認済みです。
+- 評価改善フローは APIM 公開 MCP route 経由でも動作確認済みです。
+- Fabric 接続、AI Gateway post-provision、post approval actions 用 Logic Apps callback も検証済みです。
 
 ## 6. 本番相当の環境変数
 
@@ -148,6 +160,9 @@ azd deploy
 | --- | --- |
 | `MODEL_NAME` | テキストモデル deployment 名 |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用の評価モデル deployment 名 |
+| `IMPROVEMENT_MCP_ENDPOINT` | APIM 公開 MCP route。`generate_improvement_brief` の呼び出し先 |
+| `IMPROVEMENT_MCP_API_KEY` | APIM subscription key など、MCP API に鍵が必要な場合だけ使用 |
+| `IMPROVEMENT_MCP_API_KEY_HEADER` | MCP API key のヘッダー名。既定値は `Ocp-Apim-Subscription-Key` |
 | `SERVE_STATIC` | FastAPI からビルド済みフロントエンドを返す場合に `true` |
 | `API_KEY` | APIM 経由アクセス時の `x-api-key` 保護 |
 | `COSMOS_DB_ENDPOINT` | 会話履歴保存 |
@@ -246,6 +261,10 @@ curl -X POST https://<your-app>/api/evaluate \
 ### Logic Apps が呼ばれない
 
 IaC で callback URL を注入する構成です。既存環境で未反映の場合は再プロビジョニングまたは Container App 再デプロイを確認してください。
+
+### 改善フローで MCP が使われない
+
+`IMPROVEMENT_MCP_ENDPOINT` が APIM の公開 route `.../improvement-mcp/runtime/webhooks/mcp` になっているかを確認してください。APIM の route 未登録、`x-functions-key` 未転送、subscription key 必須時の `IMPROVEMENT_MCP_API_KEY` 未設定では MCP 呼び出しが失敗しますが、アプリはフォールバックするため UI だけでは気付きにくいです。
 
 ### 上司承認通知が飛ばない
 

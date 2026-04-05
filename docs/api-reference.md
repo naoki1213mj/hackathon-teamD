@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | FastAPI オーケストレーションで主フローを実行。最終承認後はブローシャ生成完了時点で `done` を返し、動画・品質レビュー・承認後アクションは background update として後続追記されることがある |
 | モック / デモモード | `AZURE_AI_PROJECT_ENDPOINT` 未設定 | ハードコード済みの SSE イベントを返す |
-| 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
+| 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。`IMPROVEMENT_MCP_ENDPOINT` が有効なら評価フィードバック時に `generate_improvement_brief` を先に呼び、失敗時は従来ロジックへフォールバックする。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 | 承認継続モード | `POST /api/chat/{thread_id}/approve` | 承認なら Agent3a→Agent3b→Agent4→Agent5、非承認なら企画書を再生成して再度 `approval_request` を返す |
 
 ## エンドポイント一覧
@@ -120,6 +120,7 @@
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。
 - manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
+- `IMPROVEMENT_MCP_ENDPOINT` が設定されている場合、評価フィードバックでは保存済み評価結果・規制要約・差し戻し履歴をまとめて APIM 配下の MCP `generate_improvement_brief` に渡し、成功時は `tool_event` を 1 件返します。
 - フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
 - 2 回目以降の上司承認待ちでは、`GET /api/conversations/{id}` のイベント列から未確定ラウンドを復元し、直前の確定版を `pendingVersion` として保持します。
 
@@ -435,6 +436,7 @@ data: <json>
 
 主な `tool` 値:
 
+- `generate_improvement_brief`
 - `query_data_agent`
 - `search_sales_history`
 - `search_customer_reviews`

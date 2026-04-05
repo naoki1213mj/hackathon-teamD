@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import get_conversation, save_conversation
+from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief
 from src.middleware import check_prompt_shield, check_tool_response
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -263,6 +264,69 @@ def _append_user_message_history(conversation: dict | None, message: str | None 
     if not sanitized_message:
         return history
     return [*history, sanitized_message]
+
+
+def _extract_latest_evaluation_result(conversation: dict | None) -> dict | None:
+    """保存済み会話から最新の evaluation_result を返す。"""
+    if not isinstance(conversation, dict):
+        return None
+    latest: dict | None = None
+    for message in conversation.get("messages", []):
+        if not isinstance(message, dict) or message.get("event") != "evaluation_result":
+            continue
+        data = message.get("data")
+        if not isinstance(data, dict):
+            continue
+        result = data.get("result")
+        if isinstance(result, dict):
+            latest = result
+    return latest
+
+
+def _extract_latest_agent_text(conversation: dict | None, agent_names: set[str]) -> str:
+    """対象エージェント群の最新 text イベントを返す。"""
+    if not isinstance(conversation, dict):
+        return ""
+    latest_text = ""
+    for message in conversation.get("messages", []):
+        if not isinstance(message, dict) or message.get("event") != SSEEventType.TEXT.value:
+            continue
+        data = message.get("data")
+        if not isinstance(data, dict):
+            continue
+        if data.get("agent") not in agent_names:
+            continue
+        content = data.get("content")
+        if isinstance(content, str) and content:
+            latest_text = content
+    return latest_text
+
+
+def _format_improvement_brief_for_prompt(result: ImprovementBriefResult, original_feedback: str) -> str:
+    """MCP の改善ブリーフを agent 用プロンプトへ整形する。"""
+    lines: list[str] = []
+    evaluation_summary = _sanitize_optional_text(result["evaluation_summary"])
+    if evaluation_summary:
+        lines.extend(["## 評価サマリ", evaluation_summary, ""])
+
+    improvement_brief = _sanitize_optional_text(result["improvement_brief"])
+    if improvement_brief:
+        lines.extend(["## 改善ブリーフ", improvement_brief, ""])
+
+    if result["priority_issues"]:
+        lines.append("## 優先課題")
+        for issue in result["priority_issues"]:
+            lines.append(f"- {issue['label']}: {issue['suggested_action']}（{issue['reason']}）")
+        lines.append("")
+
+    if result["must_keep"]:
+        lines.append("## 維持すべき要素")
+        for item in result["must_keep"]:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    lines.extend(["## 元の評価フィードバック", original_feedback])
+    return "\n".join(lines)
 
 
 def _build_conversation_metadata_for_save(
@@ -1948,13 +2012,18 @@ async def _refine_events(refine_text: str, conversation_id: str):
     if is_eval_feedback:
         # 評価フィードバック → 企画書を再生成して承認フローに再突入
         conversation = await get_conversation(conversation_id)
-        original_plan = ""
-        analysis_markdown = ""
+        user_messages = _extract_user_message_history(conversation)
+        user_input = user_messages[0] if user_messages else ""
+        rejection_history = user_messages[1:] if len(user_messages) > 1 else []
+        original_plan = _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
+        analysis_markdown = _extract_latest_agent_text(conversation, {"data-search-agent"})
+        regulation_summary = _extract_latest_agent_text(conversation, {"regulation-check-agent"})
+        latest_evaluation_result = _extract_latest_evaluation_result(conversation)
         model_settings: dict | None = None
         workflow_settings: WorkflowSettings | None = None
-        user_input = ""
         if conversation:
-            user_input = conversation.get("input", "")
+            if not user_input:
+                user_input = conversation.get("input", "")
             for msg in conversation.get("messages", []):
                 data = msg.get("data", {})
                 if msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
@@ -1968,16 +2037,27 @@ async def _refine_events(refine_text: str, conversation_id: str):
                         "manager_approval_enabled": _to_bool(data["workflow_settings"].get("manager_approval_enabled")),
                         "manager_email": _sanitize_optional_text(data["workflow_settings"].get("manager_email")),
                     }
-                if msg.get("event") == "text" and data.get("agent") == "data-search-agent" and not analysis_markdown:
-                    analysis_markdown = data.get("content", "")
-                if msg.get("event") == "text" and data.get("agent") == "marketing-plan-agent":
-                    original_plan = data.get("content", "")
+
+        improvement_instructions = refine_text
+        improvement_brief = await generate_improvement_brief(
+            plan_markdown=original_plan,
+            evaluation_result=latest_evaluation_result,
+            regulation_summary=regulation_summary,
+            rejection_history=rejection_history,
+            user_feedback=refine_text,
+        )
+        if improvement_brief is not None:
+            improvement_instructions = _format_improvement_brief_for_prompt(improvement_brief, refine_text)
+            yield format_sse(
+                SSEEventType.TOOL_EVENT,
+                {"tool": "generate_improvement_brief", "status": "completed", "agent": "improvement-mcp"},
+            )
 
         revision_prompt = (
             f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
             f"## 元の依頼\n{user_input}\n\n"
             f"## 現在の企画書\n{original_plan}\n\n"
-            f"## 改善指示\n{refine_text}"
+            f"## 改善指示\n{improvement_instructions}"
         )
 
         outcome = await _execute_agent(

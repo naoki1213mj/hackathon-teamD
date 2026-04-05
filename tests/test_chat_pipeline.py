@@ -944,6 +944,169 @@ async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch) -> None:
+    """品質評価の改善では MCP ブリーフを優先利用する"""
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "input": "沖縄向け春休みプランを作って",
+            "metadata": {"user_messages": ["沖縄向け春休みプランを作って", "ファミリー訴求を強めたい"]},
+            "messages": [
+                {"event": "text", "data": {"agent": "data-search-agent", "content": "分析結果"}},
+                {"event": "text", "data": {"agent": "marketing-plan-agent", "content": "初稿企画書"}},
+                {"event": "text", "data": {"agent": "plan-revision-agent", "content": "修正版企画書"}},
+                {"event": "text", "data": {"agent": "regulation-check-agent", "content": "⚠ 最安値表現に注意"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"top_p": 0.9},
+                        "workflow_settings": {"manager_approval_enabled": False, "manager_email": ""},
+                    },
+                },
+                {
+                    "event": "evaluation_result",
+                    "data": {"result": {"builtin": {"relevance": {"score": 2, "reason": "具体性不足"}}}},
+                },
+            ],
+        }
+
+    mcp_capture: dict[str, object] = {}
+
+    async def fake_generate_improvement_brief(**kwargs):
+        mcp_capture.update(kwargs)
+        return {
+            "evaluation_summary": "優先課題 2 件を検出しました。",
+            "improvement_brief": "差別化の根拠と注意書きを強化してください。",
+            "priority_issues": [
+                {
+                    "label": "関連性",
+                    "reason": "スコア 2.0/5。具体性不足",
+                    "suggested_action": "ターゲットに刺さる便益を明確にする",
+                }
+            ],
+            "must_keep": ["タイトル: 春の沖縄ファミリー旅"],
+        }
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        captured["agent_name"] = agent_name
+        captured["user_input"] = user_input
+        captured["model_settings"] = model_settings
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": "改善版企画書", "agent": agent_name},
+                )
+            ],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 50,
+        }
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    events = [
+        event
+        async for event in chat_module._refine_events(
+            "以下の品質評価結果に基づいて企画書を改善してください:\n- relevance が低い",
+            "conv-eval-mcp",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert mcp_capture["plan_markdown"] == "修正版企画書"
+    assert mcp_capture["regulation_summary"] == "⚠ 最安値表現に注意"
+    assert mcp_capture["rejection_history"] == ["ファミリー訴求を強めたい"]
+    assert captured["agent_name"] == "marketing-plan-agent"
+    assert "## 改善ブリーフ" in str(captured["user_input"])
+    assert "## 維持すべき要素" in str(captured["user_input"])
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT and payload.get("tool") == "generate_improvement_brief"
+        for event_name, payload in parsed
+    )
+    assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
+
+
+@pytest.mark.asyncio
+async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) -> None:
+    """MCP が未使用でも従来の改善フローを維持する"""
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "input": "北海道プランを作って",
+            "messages": [
+                {"event": "text", "data": {"agent": "plan-revision-agent", "content": "現在の企画書"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"temperature": 0.2},
+                        "workflow_settings": {"manager_approval_enabled": False, "manager_email": ""},
+                    },
+                },
+                {"event": "evaluation_result", "data": {"result": {"builtin": {}}}},
+            ],
+        }
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        captured["user_input"] = user_input
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    async def fake_generate_improvement_brief(**kwargs):
+        return None
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    events = [
+        event
+        async for event in chat_module._refine_events(
+            "品質評価を踏まえて改善してください",
+            "conv-eval-fallback",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert "## 改善ブリーフ" not in str(captured["user_input"])
+    assert "品質評価を踏まえて改善してください" in str(captured["user_input"])
+    assert not any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT and payload.get("tool") == "generate_improvement_brief"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
 async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypatch) -> None:
     """承認後の品質レビューと Logic Apps 連携は修正版企画書を使う"""
 

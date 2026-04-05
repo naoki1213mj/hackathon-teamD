@@ -14,6 +14,9 @@ class AppSettings(TypedDict):
 
     project_endpoint: str
     model_name: str
+    improvement_mcp_endpoint: str
+    improvement_mcp_api_key: str
+    improvement_mcp_api_key_header: str
     applicationinsights_connection_string: str
     environment: str
     cosmos_db_endpoint: str
@@ -32,6 +35,9 @@ class AppSettings(TypedDict):
 _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "project_endpoint": ("AZURE_AI_PROJECT_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINT"),
     "model_name": ("MODEL_NAME", "FOUNDRY_MODEL"),
+    "improvement_mcp_endpoint": ("IMPROVEMENT_MCP_ENDPOINT", "IMPROVEMENT_MCP_URL"),
+    "improvement_mcp_api_key": ("IMPROVEMENT_MCP_API_KEY",),
+    "improvement_mcp_api_key_header": ("IMPROVEMENT_MCP_API_KEY_HEADER",),
     "applicationinsights_connection_string": ("APPLICATIONINSIGHTS_CONNECTION_STRING",),
     "environment": ("ENVIRONMENT",),
     "cosmos_db_endpoint": ("COSMOS_DB_ENDPOINT",),
@@ -49,6 +55,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
     "model_name": "gpt-5-4-mini",
+    "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "allowed_origins": "http://localhost:5173",
 }

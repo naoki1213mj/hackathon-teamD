@@ -4,13 +4,12 @@
 
 推奨リージョンは East US 2 です。構成図は [azure-architecture.md](azure-architecture.md) を参照してください。
 
-## 0. 2026-04-04 時点の実機スナップショット
+## 0. 2026-04-05 時点の実機スナップショット
 
-- Azure デプロイ済み環境では `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- ランタイムの既定 deployment は `gpt-5-4-mini`、評価用 deployment は `gpt-4-1-mini` を使っています。
-- メイン Foundry project には `gpt-image-1.5` を配備済みです。`MAI-Image-2` は任意の別リソース構成です。
-- Fabric は workspace `TeamD`、capacity `teamdfabric`（F64, Japan East）、Lakehouse `Travel_Lakehouse` が稼働し、現行アプリには `FABRIC_SQL_ENDPOINT` が設定されています。
-- APIM AI Gateway の `travel-ai-gateway` 接続と token policy は `scripts/postprovision.py` が構成します。
+- Azure の dev 環境では `/api/health=ok`、`/api/ready=ready` を確認済みです。
+- ランタイム用 deployment、評価用 deployment、`gpt-image-1.5` は Azure 上で稼働確認済みです。
+- APIM AI Gateway 接続と token policy は `scripts/postprovision.py` が構成します。
+- 評価改善では APIM 公開の `improvement-mcp` route と Azure Functions MCP バックエンドを通る構成を検証済みです。
 - Logic Apps は承認後アクション用 callback を有効化済みです。manager 通知 workflow は別 endpoint として任意追加します。
 
 ## 1. `azd up` で自動作成されるリソース
@@ -43,6 +42,9 @@
 | `FABRIC_DATA_AGENT_URL` の設定 | Agent1 が Fabric Data Agent Published URL を優先利用するため |
 | `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse SQL フォールバック検索（未設定時は CSV フォールバック） |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用に別 deployment を使いたい場合 |
+| Azure Functions MCP サーバーのデプロイ | 評価起点の改善で `generate_improvement_brief` をリモート実行するため |
+| APIM への MCP サーバー登録 | 公開 route `improvement-mcp/runtime/webhooks/mcp` を用意するため |
+| `IMPROVEMENT_MCP_API_KEY` の設定 | APIM で subscription key を必須にした場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
@@ -123,6 +125,18 @@ azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval
 
 `AZURE_APIM_NAME` が未設定の場合、APIM 関連の設定はスキップされます。スクリプトは冪等で、複数回実行しても安全です。
 
+### 4.3.1 Improvement MCP の登録
+
+現行 IaC は Container App に `IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を注入しますが、その APIM route 自体は別途作成が必要です。
+
+1. `mcp_server/` を Azure Functions Flex Consumption にデプロイする
+2. APIM の `Expose an existing MCP server` で backend に `https://<funcapp>.azurewebsites.net/runtime/webhooks/mcp` を指定する
+3. APIM backend で Functions の system key `mcp_extension` を `x-functions-key` として転送する
+4. APIM で `subscriptionRequired=false` にするか、必要なら `IMPROVEMENT_MCP_API_KEY` と `IMPROVEMENT_MCP_API_KEY_HEADER` を Container App 側へ設定する
+5. APIM の公開 route が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` で疎通することを確認する
+
+この route が未登録または失敗しても、FastAPI は従来の改善ロジックへ自動フォールバックします。
+
 ### 4.4 画像生成モデルの確認
 
 最新の IaC では `gpt-image-1.5` を自動配備します。既存環境が古いテンプレートで作成されている場合のみ、ポータルまたは CLI で追加してください。
@@ -196,7 +210,7 @@ Foundry ポータルで Azure AI Search connection を追加し、既定 connect
 
 ### 4.7 Container App に追加環境変数を入れる
 
-最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` や `MANAGER_APPROVAL_TRIGGER_URL` を入れておけば同じく Container App に注入されます。`MANAGER_APPROVAL_TRIGGER_URL` は自動通知が必要な場合だけ設定してください。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
+最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL`、`IMPROVEMENT_MCP_ENDPOINT` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` や `MANAGER_APPROVAL_TRIGGER_URL` を入れておけば同じく Container App に注入されます。`MANAGER_APPROVAL_TRIGGER_URL` は自動通知が必要な場合だけ設定してください。`IMPROVEMENT_MCP_ENDPOINT` は APIM route 未登録時でも入りますが、その場合はアプリがフォールバック動作します。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
 
 ```bash
 az containerapp update \
@@ -205,6 +219,7 @@ az containerapp update \
   --set-env-vars \
     CONTENT_UNDERSTANDING_ENDPOINT=https://<endpoint> \
     IMAGE_PROJECT_ENDPOINT_MAI=https://<mai-resource-account>.services.ai.azure.com \
+    IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_REGION=eastus2 \
     LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
@@ -228,6 +243,17 @@ az containerapp update \
 評価専用 deployment を使う場合は、同じコマンドに `EVAL_MODEL_DEPLOYMENT=<deployment-name>` も追加してください。
 
 MAI-Image-2 を既存の Container App から使うには、環境変数だけでなく Managed Identity に別 MAI アカウントへの RBAC も必要です。最新 IaC では `azd env set MAI_RESOURCE_NAME <mai-resource-account-name>` のうえで `azd provision` を再実行すると、Container App MI に必要な Azure AI / Cognitive Services ロールが付与されます。
+
+改善ブリーフ MCP を APIM で subscription key 保護する場合は、追加で以下も Container App に設定してください。
+
+```bash
+az containerapp update \
+  --name <container-app-name> \
+  --resource-group <resource-group> \
+  --set-env-vars \
+    IMPROVEMENT_MCP_API_KEY=<apim-subscription-key> \
+    IMPROVEMENT_MCP_API_KEY_HEADER=Ocp-Apim-Subscription-Key
+```
 
 ### 4.8 Fabric Data Agent の設定（推奨）
 

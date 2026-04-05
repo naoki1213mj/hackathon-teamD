@@ -33,9 +33,11 @@ var resourceToken = toLower(uniqueString(subscription().id, environmentName, loc
 var tags = {
   'azd-env-name': environmentName
 }
+var apimName = '${abbrs.apim}${resourceToken}'
 var defaultModelDeploymentName = 'gpt-5-4-mini'
 var defaultImageModelDeploymentName = 'gpt-image-1.5'
 var aiServicesApiBase = 'https://${abbrs.aiFoundry}${resourceToken}.services.ai.azure.com'
+var improvementMcpEndpoint = 'https://${apimName}.azure-api.net/improvement-mcp/runtime/webhooks/mcp'
 
 // リソースグループ
 resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
@@ -169,6 +171,7 @@ module containerApp 'modules/container-app.bicep' = {
     managerApprovalTriggerUrl: managerApprovalTriggerUrl
     voiceSpaClientId: voiceSpaClientId
     tenantId: tenant().tenantId
+    improvementMcpEndpoint: improvementMcpEndpoint
   }
 }
 
@@ -197,7 +200,7 @@ module apim 'modules/api-management.bicep' = {
   name: 'api-management'
   scope: rg
   params: {
-    name: '${abbrs.apim}${resourceToken}'
+    name: apimName
     location: location
     tags: tags
     appInsightsId: appInsights.outputs.id
@@ -260,6 +263,7 @@ output MODEL_NAME string = defaultModelDeploymentName
 output IMAGE_MODEL_NAME string = defaultImageModelDeploymentName
 output AZURE_APIM_NAME string = apim.outputs.name
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
+output IMPROVEMENT_MCP_ENDPOINT string = improvementMcpEndpoint
 output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name
 output AZURE_RESOURCE_GROUP string = rg.name
 output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.endpoint

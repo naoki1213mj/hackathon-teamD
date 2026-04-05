@@ -11,6 +11,8 @@ flowchart LR
     ui -. evaluate / refine .-> eval[/POST /api/evaluate/]
     eval --> foundryEval[Foundry Evaluations]
     api --> flow[FastAPI orchestration pipeline]
+    api -. improvement brief .-> apimMcp[APIM improvement-mcp route]
+    apimMcp --> mcpFunc[Azure Functions MCP]
 
     flow --> a1[data-search-agent]
     a1 --> dataAgent[Fabric Data Agent Published URL]
@@ -41,6 +43,8 @@ flowchart LR
 
     a4 --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar video]
+
+    mcpFunc --> mcpTool[generate_improvement_brief]
 
     subgraph fabricLayer[Fabric Data]
         fabricSQL[Fabric SQL Endpoint]
@@ -73,6 +77,8 @@ flowchart TB
 
     foundryProject -. travel-ai-gateway connection .-> apim
     apim -. backend auth .-> aiServices
+    ca -. improvement brief via APIM .-> apim
+    apim -. MCP backend auth .-> func[Azure Functions MCP app]
 
     aiSearch[Azure AI Search] --> foundryProject
 
@@ -95,7 +101,8 @@ flowchart TB
 | AI Services | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、`gpt-5-4-mini` を既定で配備 |
 | Foundry project | `accounts/projects@2025-06-01` |
 | Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
-| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーを適用 |
+| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーを適用。評価改善用の `improvement-mcp` route は現状 post-provision / 手動登録 |
+| Azure Functions MCP | 現行 IaC では未作成。`mcp_server/` を別デプロイして APIM 配下に公開 |
 | Logic Apps | Consumption、HTTP trigger ベース。`post_approval_actions` の payload を受け付ける |
 | Manager approval notification workflow | 現行 IaC では未作成。組み込み上司承認ページはアプリに含まれ、Teams やメールで自動通知したい場合だけ別 workflow を用意して `MANAGER_APPROVAL_TRIGGER_URL` を FastAPI に渡す |
 | Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
@@ -111,6 +118,9 @@ flowchart TB
 | `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent Published URL を優先利用するため |
 | `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse SQL フォールバック接続に必要（未設定時は CSV フォールバック） |
 | `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` に評価専用 deployment を使う場合 |
+| Azure Functions MCP のデプロイ | 評価起点の改善で `generate_improvement_brief` をリモート実行するため |
+| APIM の MCP route 登録 | `improvement-mcp/runtime/webhooks/mcp` を公開するため |
+| `IMPROVEMENT_MCP_API_KEY` の投入 | APIM が subscription key を要求する場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
@@ -131,6 +141,7 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 ## 6. 現在の実装メモ
 
 - `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に担当者向け `approval_request` を返します。
+- 評価フィードバックによる改善では、`IMPROVEMENT_MCP_ENDPOINT` が有効な場合に APIM 配下の Azure Functions MCP `generate_improvement_brief` を先に呼びます。失敗時は従来の改善ロジックへフォールバックします。
 - 担当者承認後は Agent3a → Agent3b を実行し、`manager_approval_enabled=true` の場合は組み込み上司承認ページ URL を生成して待機します。上司承認オフならそのまま Agent4 → Agent5 に進みます。
 - `MANAGER_APPROVAL_TRIGGER_URL` が設定されている場合だけ、その approval URL を上司へ届ける外部 notification workflow も併せて呼び出します。未設定または送信失敗時は共有リンク運用へフォールバックします。
 - 上司承認待ちは会話 status と `approval_request.approval_scope=manager` で復元され、差し戻し時は担当者承認 UI へ戻ります。2 回目以降の上司承認でも、直前の確定版は `pendingVersion` として保持され、UI から見失わないようにしています。
@@ -156,14 +167,14 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 
 ## 6.1 実機メモ
 
-- `2026-04-04` 時点で、Azure 実機は `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- テキストの実行 deployment は `gpt-5-4-mini`、評価用 deployment は `gpt-4-1-mini`、画像は `gpt-image-1.5` を使用しています。
-- Fabric は workspace `TeamD`、capacity `teamdfabric`（F64, Japan East）、Lakehouse `Travel_Lakehouse` が稼働し、現行アプリでは SQL endpoint を接続済みです。
-- APIM AI Gateway の `travel-ai-gateway` 接続と token policy は post-provision で構成済みです。
+- `2026-04-05` 時点で、Azure dev 環境は `/api/health=ok`、`/api/ready=ready` を確認済みです。
+- テキスト実行 deployment、評価用 deployment、`gpt-image-1.5` は Azure 上で稼働確認済みです。
+- 評価改善フローは APIM 公開 `improvement-mcp` route と Azure Functions MCP backend を通した実経路で確認済みです。
+- APIM AI Gateway 接続と token policy は post-provision で構成済みです。
 
-## 7. Phase2 拡張候補
+## 7. Remote MCP と今後の拡張
 
-- Azure Functions MCP は現行 IaC とランタイムには含めません。現在のツール呼び出しはエージェント内 `@tool` 実装が前提です。
-- MCP 化を検討するのは、AI Gateway で統制したい新規リモートツールや、別コネクタ境界に分離したい外部連携を追加するときだけです。
-- 将来実装する場合は Azure Functions MCP extension を優先し、Flex Consumption、stateless、streamable HTTP の制約を前提に設計します。
+- 現在 Azure Functions MCP を使っているのは、評価改善用の `generate_improvement_brief` だけです。
+- それ以外のツール呼び出しは引き続きエージェント内 `@tool` 実装が前提です。
+- 新規リモートツールを追加する場合も、Azure Functions MCP extension、Flex Consumption、stateless、streamable HTTP、APIM 公開、FastAPI 側 graceful fallback の組み合わせを推奨します。
 - Teams / メール通知 workflow は MCP 対象ではなく、必要になった場合だけ `MANAGER_APPROVAL_TRIGGER_URL` で呼ぶ外部 workflow として追加します。

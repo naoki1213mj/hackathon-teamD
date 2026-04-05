@@ -46,6 +46,9 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
 resource imageModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: aiFoundry
   name: imageModelDeploymentName
+  dependsOn: [
+    modelDeployment
+  ]
   sku: {
     capacity: 9
     name: 'GlobalStandard'

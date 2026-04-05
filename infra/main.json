@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "14076838660466462758"
+      "templateHash": "2633903649709976355"
     }
   },
   "parameters": {
@@ -83,9 +83,11 @@
     "tags": {
       "azd-env-name": "[parameters('environmentName')]"
     },
+    "apimName": "[format('{0}{1}', variables('abbrs').apim, variables('resourceToken'))]",
     "defaultModelDeploymentName": "gpt-5-4-mini",
     "defaultImageModelDeploymentName": "gpt-image-1.5",
-    "aiServicesApiBase": "[format('https://{0}{1}.services.ai.azure.com', variables('abbrs').aiFoundry, variables('resourceToken'))]"
+    "aiServicesApiBase": "[format('https://{0}{1}.services.ai.azure.com', variables('abbrs').aiFoundry, variables('resourceToken'))]",
+    "improvementMcpEndpoint": "[format('https://{0}.azure-api.net/improvement-mcp/runtime/webhooks/mcp', variables('apimName'))]"
   },
   "resources": {
     "rg": {
@@ -535,7 +537,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "10200795175672424026"
+              "templateHash": "7244403325358407731"
             }
           },
           "parameters": {
@@ -614,7 +616,8 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]",
+                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('name'), parameters('modelDeploymentName'))]"
               ]
             }
           ],
@@ -984,6 +987,9 @@
           },
           "tenantId": {
             "value": "[tenant().tenantId]"
+          },
+          "improvementMcpEndpoint": {
+            "value": "[variables('improvementMcpEndpoint')]"
           }
         },
         "template": {
@@ -993,7 +999,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "10317887474396286623"
+              "templateHash": "11163536967227564431"
             }
           },
           "parameters": {
@@ -1058,6 +1064,10 @@
               "type": "string",
               "defaultValue": ""
             },
+            "improvementMcpEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "logicAppCallbackUrl": {
               "type": "securestring",
               "defaultValue": ""
@@ -1070,7 +1080,7 @@
           "variables": {
             "containerSecrets": "[concat(if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'logic-app-callback-url', 'value', parameters('logicAppCallbackUrl'))), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'manager-approval-trigger-url', 'value', parameters('managerApprovalTriggerUrl'))), createArray()))]",
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'MANAGER_APPROVAL_TRIGGER_URL', 'secretRef', 'manager-approval-trigger-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'MANAGER_APPROVAL_TRIGGER_URL', 'secretRef', 'manager-approval-trigger-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()), if(not(empty(parameters('improvementMcpEndpoint'))), createArray(createObject('name', 'IMPROVEMENT_MCP_ENDPOINT', 'value', parameters('improvementMcpEndpoint'))), createArray()))]"
           },
           "resources": [
             {
@@ -1417,7 +1427,7 @@
         "mode": "Incremental",
         "parameters": {
           "name": {
-            "value": "[format('{0}{1}', variables('abbrs').apim, variables('resourceToken'))]"
+            "value": "[variables('apimName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -1676,7 +1686,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "9881996559036502560"
+              "templateHash": "18326266279728776534"
             }
           },
           "parameters": {
@@ -1753,6 +1763,15 @@
                   }
                 }
               }
+            },
+            "manualTrigger": {
+              "existing": true,
+              "type": "Microsoft.Logic/workflows/triggers",
+              "apiVersion": "2019-05-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'manual')]",
+              "dependsOn": [
+                "logicApp"
+              ]
             }
           },
           "outputs": {
@@ -1766,7 +1785,7 @@
             },
             "callbackUrl": {
               "type": "securestring",
-              "value": "[listCallbackUrl('logicApp', '2019-05-01').value]"
+              "value": "[listCallbackUrl('manualTrigger', '2019-05-01').value]"
             },
             "principalId": {
               "type": "string",
@@ -2108,6 +2127,10 @@
     "AZURE_APIM_GATEWAY_URL": {
       "type": "string",
       "value": "[reference('apim').outputs.gatewayUrl.value]"
+    },
+    "IMPROVEMENT_MCP_ENDPOINT": {
+      "type": "string",
+      "value": "[variables('improvementMcpEndpoint')]"
     },
     "AZURE_LOGIC_APP_NAME": {
       "type": "string",

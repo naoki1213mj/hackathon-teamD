@@ -9,6 +9,9 @@ def test_get_settings_returns_all_fields(monkeypatch):
     for key in [
         "AZURE_AI_PROJECT_ENDPOINT",
         "MODEL_NAME",
+        "IMPROVEMENT_MCP_ENDPOINT",
+        "IMPROVEMENT_MCP_API_KEY",
+        "IMPROVEMENT_MCP_API_KEY_HEADER",
         "APPLICATIONINSIGHTS_CONNECTION_STRING",
         "ENVIRONMENT",
         "COSMOS_DB_ENDPOINT",
@@ -54,6 +57,15 @@ def test_default_values(monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     settings = get_settings()
     assert settings["model_name"] == "gpt-5-4-mini"
+
+
+def test_improvement_mcp_header_default(monkeypatch):
+    """MCP API キーヘッダーは APIM 既定名を使う"""
+    monkeypatch.delenv("IMPROVEMENT_MCP_API_KEY_HEADER", raising=False)
+
+    settings = get_settings()
+
+    assert settings["improvement_mcp_api_key_header"] == "Ocp-Apim-Subscription-Key"
 
 
 def test_foundry_env_aliases(monkeypatch):

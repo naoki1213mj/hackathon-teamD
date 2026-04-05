@@ -14,9 +14,9 @@ services:
 
 hooks:
   postprovision:
-    shell: sh
+    shell: pwsh
     run: uv run python scripts/postprovision.py
-    interactive: true
+    interactive: false
     continueOnError: true
 
 infra:
