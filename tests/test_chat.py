@@ -268,6 +268,45 @@ def test_chat_refine_with_conversation_id():
     assert "event: text" in content or "event: approval_request" in content
 
 
+def test_chat_refine_forwards_evaluation_context(monkeypatch):
+    """評価結果ベースの改善は refine_context を伴って _refine_events へ渡す"""
+    captured: dict[str, object] = {}
+
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "input": "春の沖縄ファミリー向けプランを企画して",
+            "messages": [],
+            "metadata": {"user_messages": ["春の沖縄ファミリー向けプランを企画して"]},
+        }
+
+    async def fake_refine_events(_message: str, _conversation_id: str, refine_context=None):
+        captured["source"] = getattr(refine_context, "source", None)
+        captured["artifact_version"] = getattr(refine_context, "artifact_version", None)
+        yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
+
+    async def fake_save_conversation(**_kwargs):
+        return None
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr("src.api.chat._refine_events", fake_refine_events)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "以下の評価結果に基づいて改善してください",
+            "conversation_id": "existing-conv",
+            "refine_context": {
+                "source": "evaluation",
+                "artifact_version": 2,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {"source": "evaluation", "artifact_version": 2}
+
+
 def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
     """既存 conversation_id での修正時も確定済み履歴を保持して保存する"""
     saved: dict[str, object] = {}
@@ -283,7 +322,7 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
             "metadata": {"user_messages": ["春の沖縄ファミリー向けプランを企画して"]},
         }
 
-    async def fake_refine_events(_message: str, _conversation_id: str):
+    async def fake_refine_events(_message: str, _conversation_id: str, _refine_context=None):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
 
@@ -350,7 +389,7 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
             "metadata": {"user_messages": ["秋の京都シニア向けプランを企画して"]},
         }
 
-    async def fake_refine_events(_message: str, _conversation_id: str):
+    async def fake_refine_events(_message: str, _conversation_id: str, _refine_context=None):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "再確認してください", "conversation_id": "test-thread", "plan_markdown": "# Plan v2"}\n\n'
 

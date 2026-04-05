@@ -10,6 +10,7 @@ from src.conversations import (
     _get_container,
     _get_cosmos_client,
     _memory_store,
+    append_conversation_events,
     get_conversation,
     get_replay_data,
     list_conversations,
@@ -22,12 +23,14 @@ from src.conversations import (
 def _clear_memory_store(monkeypatch):
     """各テスト前にインメモリストアをクリアし、Cosmos DB シングルトンをリセットする"""
     _memory_store.clear()
+    _conv_mod._conversation_locks.clear()
     monkeypatch.delenv("COSMOS_DB_ENDPOINT", raising=False)
     # シングルトンをリセットして各テストが独立して初期化できるようにする
     _conv_mod._cosmos_client = None
     _conv_mod._cosmos_initialized = False
     yield
     _memory_store.clear()
+    _conv_mod._conversation_locks.clear()
     _conv_mod._cosmos_client = None
     _conv_mod._cosmos_initialized = False
 
@@ -76,6 +79,29 @@ async def test_save_conversation_preserves_created_at_on_update():
 
     assert _memory_store["test-conv-update"]["created_at"] == created_at
     assert _memory_store["test-conv-update"]["status"] == "completed"
+
+
+async def test_append_conversation_events_preserves_existing_messages():
+    """append 保存は既存メッセージを消さずに新規イベントだけを追記する"""
+    await save_conversation(
+        conversation_id="test-conv-append",
+        user_input="初回入力",
+        events=[{"event": "text", "data": {"content": "# Plan v1"}}],
+        metrics={"user_messages": ["初回入力"]},
+    )
+
+    await append_conversation_events(
+        conversation_id="test-conv-append",
+        user_input=None,
+        new_events=[{"event": "evaluation_result", "data": {"version": 1, "round": 1, "result": {"builtin": {}}}}],
+        metrics={"background_updates_pending": False},
+        status="completed",
+    )
+
+    doc = _memory_store["test-conv-append"]
+    assert [event["event"] for event in doc["messages"]] == ["text", "evaluation_result"]
+    assert doc["metadata"]["user_messages"] == ["初回入力"]
+    assert doc["metadata"]["background_updates_pending"] is False
 
 
 async def test_get_conversation_from_memory():

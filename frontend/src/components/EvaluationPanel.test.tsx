@@ -402,4 +402,26 @@ describe('EvaluationPanel', () => {
     expect(screen.getAllByText(/fee_display/).length).toBeGreaterThan(0)
     expect(screen.queryByText('Task Adherence')).toBeNull()
   })
+
+  it('passes the artifact version when refining from evaluation results', () => {
+    const onRefine = vi.fn()
+
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        artifactVersion={2}
+        evaluations={[evaluationV2]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([evaluationV2])]}
+        onRefine={onRefine}
+        isLatestVersion
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refine from results' }))
+
+    expect(onRefine).toHaveBeenCalledWith(expect.stringContaining('評価結果'), 2)
+  })
 })

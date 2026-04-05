@@ -395,6 +395,7 @@ describe('buildRestoredPipelineState', () => {
       undefined,
       expect.any(AbortSignal),
       DEFAULT_SETTINGS,
+      undefined,
     )
 
     await act(async () => {
@@ -408,6 +409,35 @@ describe('buildRestoredPipelineState', () => {
       'conv-v1',
       expect.any(AbortSignal),
       DEFAULT_SETTINGS,
+      undefined,
+    )
+  })
+
+  it('passes refine context when an evaluation-based refinement starts', async () => {
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('評価結果をもとに改善して', {
+        refineContext: {
+          source: 'evaluation',
+          artifactVersion: 2,
+        },
+      })
+    })
+
+    expect(connectSSE).toHaveBeenNthCalledWith(
+      1,
+      '評価結果をもとに改善して',
+      expect.any(Object),
+      undefined,
+      expect.any(AbortSignal),
+      DEFAULT_SETTINGS,
+      {
+        refineContext: {
+          source: 'evaluation',
+          artifactVersion: 2,
+        },
+      },
     )
   })
 

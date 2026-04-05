@@ -14,7 +14,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from src.config import get_settings
-from src.conversations import get_conversation, save_conversation
+from src.conversations import append_conversation_events, get_conversation
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
 logger = logging.getLogger(__name__)
@@ -472,18 +472,17 @@ async def _persist_evaluation_result(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    await save_conversation(
+    await append_conversation_events(
         conversation_id=conversation_id,
         user_input=str(existing.get("input", "")),
-        events=[
-            *messages,
+        new_events=[
             {
                 "event": "evaluation_result",
                 "data": {
                     **evaluation_meta,
                     "result": result,
                 },
-            },
+            }
         ],
         metrics=existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {},
         status=str(existing.get("status", "completed")),

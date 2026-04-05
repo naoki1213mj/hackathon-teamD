@@ -105,13 +105,30 @@ vi.mock('./components/VersionSelector', () => ({
 }))
 
 vi.mock('./components/EvaluationPanel', () => ({
-  EvaluationPanel: ({ artifactVersion, evaluations, query }: { artifactVersion?: number; evaluations?: unknown[]; query?: string }) => (
-    <div
-      data-testid="evaluation-panel"
-      data-version={artifactVersion ? String(artifactVersion) : ''}
-      data-evaluations={String(evaluations?.length ?? 0)}
-      data-query={query ?? ''}
-    />
+  EvaluationPanel: ({
+    artifactVersion,
+    evaluations,
+    query,
+    onRefine,
+  }: {
+    artifactVersion?: number
+    evaluations?: unknown[]
+    query?: string
+    onRefine?: (feedback: string, artifactVersion?: number) => void
+  }) => (
+    <div>
+      <div
+        data-testid="evaluation-panel"
+        data-version={artifactVersion ? String(artifactVersion) : ''}
+        data-evaluations={String(evaluations?.length ?? 0)}
+        data-query={query ?? ''}
+      />
+      {onRefine ? (
+        <button type="button" onClick={() => onRefine('eval feedback', artifactVersion)}>
+          Refine now
+        </button>
+      ) : null}
+    </div>
   ),
 }))
 
@@ -450,7 +467,7 @@ describe('App', () => {
     expect(screen.getByText('Assets hint')).toBeInTheDocument()
   })
 
-  it('passes only the original and latest user intent to the evaluation panel', () => {
+  it('passes version-scoped user intent to the evaluation panel', () => {
     mockUseSSE.mockReturnValue({
       state: {
         status: 'completed',
@@ -475,6 +492,18 @@ describe('App', () => {
             textContents: [
               {
                 agent: 'marketing-plan-agent',
+                content: '# Plan v1',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
                 content: '# Plan v2',
               },
             ],
@@ -484,7 +513,7 @@ describe('App', () => {
             evaluations: [],
           },
         ],
-        currentVersion: 1,
+        currentVersion: 2,
         pendingVersion: null,
         settings: {
           model: 'gpt-5-4-mini',
@@ -511,7 +540,97 @@ describe('App', () => {
 
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute(
       'data-query',
-      '北海道プランを改善して\n\n価格訴求を控えて高級感を強めて',
+      '北海道プランを改善して\n\n価格を強く出しすぎないで',
     )
+  })
+
+  it('sends evaluation refinements with explicit refine context', () => {
+    const sendMessage = vi.fn()
+
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'completed',
+        conversationId: 'conv-refine-context',
+        agentProgress: null,
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v2',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v1',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v2',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [
+              {
+                version: 2,
+                round: 1,
+                createdAt: '2026-04-03T00:00:00Z',
+                result: {
+                  builtin: {
+                    relevance: { score: 4, reason: 'good' },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        currentVersion: 2,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['北海道プランを改善して', '価格を強く出しすぎないで'],
+      },
+      sendMessage,
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refine now' }))
+
+    expect(sendMessage).toHaveBeenCalledWith('eval feedback', {
+      refineContext: {
+        source: 'evaluation',
+        artifactVersion: 2,
+      },
+    })
   })
 })

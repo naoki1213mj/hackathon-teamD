@@ -9,10 +9,20 @@ logger = logging.getLogger(__name__)
 
 # インメモリストア（Cosmos DB 未設定時のフォールバック）
 _memory_store: dict[str, dict] = {}
+_conversation_locks: dict[str, asyncio.Lock] = {}
 
 # Cosmos DB クライアントのシングルトン（接続プーリングを再利用するため）
 _cosmos_client = None
 _cosmos_initialized = False
+
+
+def _get_conversation_lock(conversation_id: str) -> asyncio.Lock:
+    """会話ごとの保存処理を直列化するロックを返す。"""
+    lock = _conversation_locks.get(conversation_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _conversation_locks[conversation_id] = lock
+    return lock
 
 
 def _is_demo_replay_request(conversation_id: str) -> bool:
@@ -76,14 +86,70 @@ async def save_conversation(
     status: str = "completed",
 ) -> None:
     """会話をストアに保存する。"""
+    async with _get_conversation_lock(conversation_id):
+        existing = await get_conversation(conversation_id)
+        doc = _build_conversation_doc(
+            conversation_id=conversation_id,
+            existing=existing,
+            user_input=user_input,
+            events=events,
+            artifacts=artifacts,
+            metrics=metrics,
+            status=status,
+        )
+        await _persist_conversation_doc(doc)
+
+
+async def append_conversation_events(
+    conversation_id: str,
+    user_input: str | None,
+    new_events: list[dict],
+    artifacts: dict | None = None,
+    metrics: dict | None = None,
+    status: str | None = None,
+) -> dict | None:
+    """既存会話へイベントを追記しつつ保存する。"""
+    async with _get_conversation_lock(conversation_id):
+        existing = await get_conversation(conversation_id)
+        existing_messages = existing.get("messages", []) if existing else []
+        if not isinstance(existing_messages, list):
+            existing_messages = []
+
+        resolved_user_input = user_input
+        if resolved_user_input is None:
+            resolved_user_input = str(existing.get("input", "")) if existing else ""
+
+        resolved_status = status or str(existing.get("status", "completed")) if existing else "completed"
+        doc = _build_conversation_doc(
+            conversation_id=conversation_id,
+            existing=existing,
+            user_input=resolved_user_input,
+            events=[*existing_messages, *new_events],
+            artifacts=artifacts,
+            metrics=metrics,
+            status=resolved_status,
+        )
+        await _persist_conversation_doc(doc)
+        return doc
+
+
+def _build_conversation_doc(
+    conversation_id: str,
+    existing: dict | None,
+    user_input: str,
+    events: list[dict],
+    artifacts: dict | None,
+    metrics: dict | None,
+    status: str,
+) -> dict:
+    """保存用の会話ドキュメントを構築する。"""
     now = datetime.now(timezone.utc).isoformat()
-    existing = await get_conversation(conversation_id)
-    # 既存の artifacts バージョン配列を維持しつつ新しいバージョンを追加
+
     existing_artifacts = existing.get("artifacts", []) if existing else []
     if not isinstance(existing_artifacts, list):
-        # フラット dict→配列への移行互換: 旧形式はバージョン 1 として取り込む
         existing_artifacts = [existing_artifacts] if existing_artifacts else []
-    new_artifact = artifacts or {}
+
+    new_artifact = dict(artifacts) if artifacts else {}
     if new_artifact:
         new_artifact["version"] = len(existing_artifacts) + 1
         new_artifact["created_at"] = now
@@ -96,7 +162,7 @@ async def save_conversation(
         existing_metadata = {}
     merged_metadata = {**existing_metadata, **(metrics or {})}
 
-    doc = {
+    return {
         "id": conversation_id,
         "user_id": "demo-user",
         "created_at": existing.get("created_at", now) if existing else now,
@@ -108,6 +174,10 @@ async def save_conversation(
         "metadata": merged_metadata,
     }
 
+
+async def _persist_conversation_doc(doc: dict) -> None:
+    """会話ドキュメントを実ストアへ保存する。"""
+    conversation_id = str(doc.get("id", ""))
     container = _get_container()
     if container:
         try:

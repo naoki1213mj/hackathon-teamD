@@ -145,7 +145,6 @@ function App() {
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
-  const evaluationQuery = buildEvaluationQuery(state.userMessages)
   const evaluationVersion = displayedPlan
     ? (isViewingCommittedPreview
         ? selectedPendingPreviewVersion ?? undefined
@@ -153,6 +152,7 @@ function App() {
           ? (state.currentVersion || 1)
           : undefined)
     : undefined
+  const evaluationQuery = buildEvaluationQuery(state.userMessages, evaluationVersion)
   const evaluationSnapshot = evaluationVersion
     ? state.versions[evaluationVersion - 1] ?? null
     : null
@@ -212,10 +212,10 @@ function App() {
       )}
     </div>
   ) : null
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = (message: string, options?: Parameters<typeof sendMessage>[1]) => {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
-    void sendMessage(message)
+    void sendMessage(message, options)
   }
   const handleReset = () => {
     setRevisionInProgress(false)
@@ -550,7 +550,16 @@ function App() {
                       isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
                       onEvaluationRecorded={saveEvaluation}
                       t={t}
-                      onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
+                      onRefine={state.status !== 'approval'
+                        ? (feedback, artifactVersion) => {
+                            handleSendMessage(feedback, {
+                              refineContext: {
+                                source: 'evaluation',
+                                artifactVersion,
+                              },
+                            })
+                          }
+                        : undefined}
                     />
                   </>
                 ) : (

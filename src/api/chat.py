@@ -15,7 +15,7 @@ from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from fastapi import APIRouter, BackgroundTasks, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -111,6 +111,13 @@ class AgentExecutionOutcome(TypedDict):
     latency_seconds: float
     tool_calls: int
     total_tokens: int
+
+
+class RefineContext(BaseModel):
+    """改善リクエストの補助文脈。"""
+
+    source: Literal["evaluation"] | None = Field(default=None)
+    artifact_version: int | None = Field(default=None, ge=1)
 
 
 class PostCompletionUpdateContext(TypedDict):
@@ -266,8 +273,11 @@ def _append_user_message_history(conversation: dict | None, message: str | None 
     return [*history, sanitized_message]
 
 
-def _extract_latest_evaluation_result(conversation: dict | None) -> dict | None:
-    """保存済み会話から最新の evaluation_result を返す。"""
+def _extract_latest_evaluation_result(
+    conversation: dict | None,
+    artifact_version: int | None = None,
+) -> dict | None:
+    """保存済み会話から対象 version の最新 evaluation_result を返す。"""
     if not isinstance(conversation, dict):
         return None
     latest: dict | None = None
@@ -276,6 +286,8 @@ def _extract_latest_evaluation_result(conversation: dict | None) -> dict | None:
             continue
         data = message.get("data")
         if not isinstance(data, dict):
+            continue
+        if artifact_version is not None and int(data.get("version", 0) or 0) != artifact_version:
             continue
         result = data.get("result")
         if isinstance(result, dict):
@@ -1476,6 +1488,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(None, max_length=100)
     settings: dict | None = Field(None, description="モデルパラメータ設定")
     workflow_settings: dict | None = Field(None, description="承認フロー設定")
+    refine_context: RefineContext | None = Field(None, description="改善リクエストの補助文脈")
 
     @field_validator("message")
     @classmethod
@@ -1967,7 +1980,11 @@ async def _run_single_agent(
         yield event
 
 
-async def _refine_events(refine_text: str, conversation_id: str):
+async def _refine_events(
+    refine_text: str,
+    conversation_id: str,
+    refine_context: RefineContext | None = None,
+):
     """完了後のマルチターン修正リクエストを処理する SSE イベント"""
     pending_context = await _load_pending_approval_context(conversation_id)
     if pending_context is not None:
@@ -2008,7 +2025,12 @@ async def _refine_events(refine_text: str, conversation_id: str):
 
     text_lower = refine_text.lower()
     # 評価フィードバック（品質評価結果に基づく改善指示）は常に企画書修正として処理
-    is_eval_feedback = "品質評価" in refine_text or "evaluation" in text_lower
+    is_eval_feedback = (
+        (refine_context is not None and refine_context.source == "evaluation")
+        or "品質評価" in refine_text
+        or "評価結果" in refine_text
+        or "evaluation" in text_lower
+    )
     if is_eval_feedback:
         # 評価フィードバック → 企画書を再生成して承認フローに再突入
         conversation = await get_conversation(conversation_id)
@@ -2018,7 +2040,10 @@ async def _refine_events(refine_text: str, conversation_id: str):
         original_plan = _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
         analysis_markdown = _extract_latest_agent_text(conversation, {"data-search-agent"})
         regulation_summary = _extract_latest_agent_text(conversation, {"regulation-check-agent"})
-        latest_evaluation_result = _extract_latest_evaluation_result(conversation)
+        latest_evaluation_result = _extract_latest_evaluation_result(
+            conversation,
+            refine_context.artifact_version if refine_context is not None else None,
+        )
         model_settings: dict | None = None
         workflow_settings: WorkflowSettings | None = None
         if conversation:
@@ -2544,12 +2569,13 @@ async def _append_post_completion_updates(
         brochure_html=update_context["brochure_html"],
     )
 
-    merged_messages = [*existing_conversation.get("messages", []), *appended_events]
-    conversation_status = _conversation_status_from_events(merged_messages)
-    await save_conversation(
+    conversation_status = _conversation_status_from_events(
+        [*existing_conversation.get("messages", []), *appended_events]
+    )
+    await append_conversation_events(
         conversation_id=conversation_id,
         user_input=existing_conversation.get("input", ""),
-        events=merged_messages,
+        new_events=appended_events,
         metrics=_build_conversation_metadata_for_save(
             conversation_id,
             existing_conversation,
@@ -2573,10 +2599,10 @@ async def _append_post_completion_updates_safe(
         if not existing_conversation:
             return
 
-        await save_conversation(
+        await append_conversation_events(
             conversation_id=conversation_id,
             user_input=existing_conversation.get("input", ""),
-            events=existing_conversation.get("messages", []),
+            new_events=[],
             metrics=_build_conversation_metadata_for_save(
                 conversation_id,
                 existing_conversation,
@@ -2698,12 +2724,13 @@ async def _continue_after_manager_approval_safe(
             ),
             time.monotonic(),
         )
-        merged_messages = [*existing_conversation.get("messages", []), *error_events]
-        conversation_status = _conversation_status_from_events(merged_messages)
-        await save_conversation(
+        conversation_status = _conversation_status_from_events(
+            [*existing_conversation.get("messages", []), *error_events]
+        )
+        await append_conversation_events(
             conversation_id=conversation_id,
             user_input=existing_conversation.get("input", ""),
-            events=merged_messages,
+            new_events=error_events,
             metrics=_build_conversation_metadata_for_save(
                 conversation_id,
                 existing_conversation,
@@ -2738,12 +2765,13 @@ async def _run_manager_approval_continuation(
     ):
         _record_sse_event(collected_events, event, start)
 
-    merged_messages = [*existing_conversation.get("messages", []), *collected_events]
-    conversation_status = _conversation_status_from_events(merged_messages)
-    await save_conversation(
+    conversation_status = _conversation_status_from_events(
+        [*existing_conversation.get("messages", []), *collected_events]
+    )
+    await append_conversation_events(
         conversation_id=conversation_id,
         user_input=existing_conversation.get("input", ""),
-        events=merged_messages,
+        new_events=collected_events,
         metrics=_build_conversation_metadata_for_save(
             conversation_id,
             existing_conversation,
@@ -2865,7 +2893,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
         # conversation_id が既存 = マルチターン修正
         if body.conversation_id:
-            async for event in _collect_and_yield(_refine_events(body.message, conversation_id)):
+            async for event in _collect_and_yield(_refine_events(body.message, conversation_id, body.refine_context)):
                 yield event
         else:
             # Azure 設定がある場合は実 Workflow、なければモック

@@ -442,10 +442,15 @@ export function buildEvaluationFeedback(
   return lines.join('\n')
 }
 
-export function buildEvaluationQuery(messages: string[]): string {
+export function buildEvaluationQuery(messages: string[], artifactVersion?: number): string {
   const normalized = messages.map(message => message.trim()).filter(Boolean)
-  if (normalized.length <= 1) {
-    return normalized.join('\n\n')
+  if (normalized.length === 0) {
+    return ''
   }
-  return [normalized[0], normalized[normalized.length - 1]].join('\n\n')
+
+  const scopedLength = artifactVersion && artifactVersion > 0
+    ? Math.min(normalized.length, artifactVersion)
+    : normalized.length
+
+  return normalized.slice(0, scopedLength).join('\n\n')
 }

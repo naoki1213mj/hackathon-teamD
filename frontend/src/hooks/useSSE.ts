@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
-import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
+import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50
@@ -122,6 +122,8 @@ export interface PipelineState {
   settings: ModelSettings
   userMessages: string[]
 }
+
+export type SendMessageOptions = ChatRequestOptions
 
 const initialState: PipelineState = {
   status: 'idle',
@@ -827,7 +829,7 @@ export function useSSE() {
     },
   }), [migrateCachedEvaluations])
 
-  const sendMessage = useCallback(async (message: string) => {
+  const sendMessage = useCallback(async (message: string, options?: SendMessageOptions) => {
     abortControllerRef.current?.abort()
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -861,7 +863,14 @@ export function useSSE() {
     const handlers = createHandlers(requestId)
     const currentSettings = stateRef.current.settings
     try {
-      await connectSSE(message, handlers, existingConversationId || undefined, controller.signal, currentSettings)
+      await connectSSE(
+        message,
+        handlers,
+        existingConversationId || undefined,
+        controller.signal,
+        currentSettings,
+        options,
+      )
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null

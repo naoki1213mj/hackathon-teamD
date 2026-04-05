@@ -31,7 +31,7 @@ interface EvaluationPanelProps {
   versions?: ArtifactSnapshot[]
   isLatestVersion?: boolean
   onEvaluationRecorded?: (record: EvaluationRecord) => void
-  onRefine?: (feedback: string) => void
+  onRefine?: (feedback: string, artifactVersion?: number) => void
 }
 
 interface ComparisonSummary {
@@ -711,7 +711,7 @@ export function EvaluationPanel({
               onClick={() => {
                 const feedback = buildEvaluationFeedback(result, previousResult, t)
                 if (feedback) {
-                  onRefine(feedback)
+                  onRefine(feedback, artifactVersion)
                 }
               }}
               className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-2 text-xs font-medium text-[var(--accent-strong)] transition-colors hover:bg-[var(--accent)]/20"

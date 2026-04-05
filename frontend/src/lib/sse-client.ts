@@ -19,6 +19,15 @@ export type SSEEventType =
 
 export type SSEHandlers = Partial<Record<SSEEventType, (data: unknown) => void>>
 
+export interface RefineContext {
+  source?: 'evaluation'
+  artifactVersion?: number
+}
+
+export interface ChatRequestOptions {
+  refineContext?: RefineContext
+}
+
 /**
  * SSE ストリームを読み取る共通処理
  */
@@ -78,10 +87,17 @@ export async function connectSSE(
   conversationId?: string,
   signal?: AbortSignal,
   settings?: ModelSettings,
+  options?: ChatRequestOptions,
 ): Promise<void> {
   const combinedSignal = buildSignal(signal)
 
   const body: Record<string, unknown> = { message, conversation_id: conversationId }
+  if (options?.refineContext) {
+    body.refine_context = {
+      source: options.refineContext.source,
+      artifact_version: options.refineContext.artifactVersion,
+    }
+  }
   if (settings) {
     const trimmedManagerEmail = settings.managerEmail.trim()
     if (settings.managerApprovalEnabled && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)) {
