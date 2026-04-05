@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
@@ -20,6 +19,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from pathlib import Path
 from typing import Any
 
 from azure.identity import DefaultAzureCredential
@@ -466,7 +466,11 @@ def setup_improvement_mcp(subscription_id: str, rg: str, apim_name: str, env: di
         if deployed:
             _sync_improvement_mcp_env(function_app_name, function_app_rg, storage_account_name)
     else:
-        logger.info("improvement-mcp の自動配備をスキップします (location=%s, storage=%s)", bool(location), bool(storage_account_name))
+        logger.info(
+            "improvement-mcp の自動配備をスキップします (location=%s, storage=%s)",
+            bool(location),
+            bool(storage_account_name),
+        )
 
     configured = configure_improvement_mcp(
         subscription_id=subscription_id,

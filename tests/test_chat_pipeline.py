@@ -1036,7 +1036,8 @@ async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch)
     assert "## 改善ブリーフ" in str(captured["user_input"])
     assert "## 維持すべき要素" in str(captured["user_input"])
     assert any(
-        event_name == chat_module.SSEEventType.TOOL_EVENT and payload.get("tool") == "generate_improvement_brief"
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "generate_improvement_brief"
         and payload.get("source") == "mcp"
         for event_name, payload in parsed
     )

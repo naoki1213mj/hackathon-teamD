@@ -142,7 +142,9 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
 
     monkeypatch.setattr(postprovision_module, "deploy_improvement_mcp_function", fake_deploy_improvement_mcp_function)
     monkeypatch.setattr(postprovision_module, "configure_improvement_mcp", fake_configure_improvement_mcp)
-    monkeypatch.setattr(postprovision_module, "_resolve_resource_group_location", lambda rg, configured_location="": "eastus2")
+    monkeypatch.setattr(
+        postprovision_module, "_resolve_resource_group_location", lambda rg, configured_location="": "eastus2"
+    )
     monkeypatch.setattr(postprovision_module, "_sync_improvement_mcp_env", lambda *args: None)
 
     result = postprovision_module.setup_improvement_mcp(
