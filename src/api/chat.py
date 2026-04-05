@@ -24,7 +24,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from src.config import get_settings
-from src.conversations import get_conversation, save_conversation
+from src.conversations import append_conversation_events, get_conversation, save_conversation
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
 
