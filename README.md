@@ -143,7 +143,6 @@ docs/                Architecture, API reference, deployment guides
 | [docs/api-reference.md](docs/api-reference.md) | REST API and SSE event specification |
 | [docs/deployment-guide.md](docs/deployment-guide.md) | Local, Docker, CI/CD, and Azure deployment |
 | [docs/azure-setup.md](docs/azure-setup.md) | Post-provision setup and troubleshooting |
-| [docs/presentation.md](docs/presentation.md) | 15-min presentation script and demo checklist |
 | [AGENTS.md](AGENTS.md) | Agent details and tech stack reference |
 
 ## Implementation Status
