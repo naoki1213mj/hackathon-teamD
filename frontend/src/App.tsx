@@ -29,6 +29,7 @@ import { isApprovalResponseText, shouldHidePlanDuringPostApprovalRevision } from
 import { buildEvaluationQuery } from './lib/evaluation'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 import { buildPlanVersions } from './lib/plan-versions'
+import { classifyVideoWorkflowStatus, extractVideoStatusMessage, extractVideoUrl } from './lib/video-status'
 
 
 const AGENT_STEP_KEY: Record<string, string> = {
@@ -96,6 +97,37 @@ function App() {
     : state.pendingVersion
       ? state.images.slice(state.pendingVersion.imageOffset)
       : state.images
+  const previewVideoContents = state.pendingVersion
+    ? state.textContents.slice(state.pendingVersion.textOffset)
+    : previewSnapshot && selectedPendingPreviewVersion
+      ? (() => {
+          const previousTextOffset = selectedPendingPreviewVersion > 1
+            ? state.versions[selectedPendingPreviewVersion - 2]?.textContents.length ?? 0
+            : 0
+          return previewSnapshot.textContents.slice(previousTextOffset)
+        })()
+      : state.currentVersion > 0
+        ? (() => {
+            const previousTextOffset = state.currentVersion > 1
+              ? state.versions[state.currentVersion - 2]?.textContents.length ?? 0
+              : 0
+            const currentSnapshotForPreview = state.versions[state.currentVersion - 1]
+            return currentSnapshotForPreview
+              ? currentSnapshotForPreview.textContents.slice(previousTextOffset)
+              : previewTextContents
+          })()
+        : previewTextContents
+  const stepperVideoContents = state.pendingVersion
+    ? state.textContents.slice(state.pendingVersion.textOffset)
+    : state.versions.length > 0
+      ? (() => {
+          const latestVersion = state.versions.length
+          const previousTextOffset = latestVersion > 1
+            ? state.versions[latestVersion - 2]?.textContents.length ?? 0
+            : 0
+          return state.versions[latestVersion - 1].textContents.slice(previousTextOffset)
+        })()
+      : state.textContents
   const workflowTextContents = previewSnapshot
     ? previewSnapshot.textContents
     : state.textContents
@@ -161,8 +193,9 @@ function App() {
   const showDraftPlanTabs = !revisionContent && planVersions.length > 1
   const showRevisionNotice = revisionInProgress && state.status === 'running'
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
-  const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
-  const previewVideoStatus = previewTextContents.findLast(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')?.content
+  const previewVideoUrl = extractVideoUrl(previewVideoContents)
+  const previewVideoStatus = extractVideoStatusMessage(previewVideoContents)
+  const videoWorkflowStatus = classifyVideoWorkflowStatus(stepperVideoContents, state.backgroundUpdatesPending)
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
   const showManagerApprovalPhase = state.hasManagerApprovalPhase
   const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
@@ -184,7 +217,7 @@ function App() {
     if (!shouldPollConversationUpdates || !state.conversationId) return
 
     const intervalId = window.setInterval(() => {
-      void restoreConversation(state.conversationId || '')
+      void restoreConversation(state.conversationId || '', { passive: true })
     }, 5000)
 
     return () => window.clearInterval(intervalId)
@@ -341,6 +374,7 @@ function App() {
                   t={t}
                   showManagerApprovalPhase={showManagerApprovalPhase}
                   managerApprovalActive={isManagerApprovalStepActive}
+                  videoStatus={videoWorkflowStatus}
                 />
                 {isRunning && (
                   <p className="mt-1 text-xs text-[var(--text-muted)]">

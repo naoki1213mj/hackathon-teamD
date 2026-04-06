@@ -161,4 +161,32 @@ describe('WorkflowAccordion', () => {
 
     expect(screen.getByText('このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。')).toBeInTheDocument()
   })
+
+  it('shows the latest avatar video status message instead of a perpetual running label', () => {
+    const contentsWithVideoTimeout: TextContent[] = [
+      ...textContents,
+      {
+        agent: 'video-gen-agent',
+        content: '{"status":"timeout","message":"⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"}',
+      },
+    ]
+
+    render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={contentsWithVideoTimeout}
+        toolEvents={toolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: /販促物生成/ }).at(-1) as HTMLButtonElement)
+
+    expect(screen.getByText('⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。')).toBeInTheDocument()
+    expect(screen.queryByText('アバター動画を生成中…')).toBeNull()
+  })
 })

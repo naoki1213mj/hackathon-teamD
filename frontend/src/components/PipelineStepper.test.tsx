@@ -38,4 +38,28 @@ describe('PipelineStepper', () => {
 
     expect(screen.getByText('上司承認').className).toContain('font-medium')
   })
+
+  it('keeps the video step active while avatar rendering is still pending', () => {
+    render(
+      <PipelineStepper
+        progress={{ agent: 'video-gen-agent', status: 'completed', step: 5, total_steps: 5 }}
+        t={t}
+        videoStatus="pending"
+      />,
+    )
+
+    expect(screen.getByText('動画生成').className).toContain('font-medium')
+  })
+
+  it('shows the video step as attention-needed when the video never materialized', () => {
+    render(
+      <PipelineStepper
+        progress={{ agent: 'video-gen-agent', status: 'completed', step: 5, total_steps: 5 }}
+        t={t}
+        videoStatus="issue"
+      />,
+    )
+
+    expect(screen.getByText('動画生成').className).toContain('text-[var(--warning-text)]')
+  })
 })

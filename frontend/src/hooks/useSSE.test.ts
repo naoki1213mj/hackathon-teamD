@@ -695,6 +695,32 @@ describe('buildRestoredPipelineState', () => {
     })
   })
 
+  it('ignores passive restore polling while a live SSE request is active', async () => {
+    let releaseConnect: (() => void) | null = null
+    connectSSE.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseConnect = resolve
+      })
+    })
+
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const { result } = renderHook(() => useSSE())
+
+    act(() => {
+      void result.current.sendMessage('評価結果をもとに改善して')
+    })
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-passive', { passive: true })
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      releaseConnect?.()
+    })
+  })
+
   it('reuses the last ETag and skips rebuilding state on 304 restores', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify({

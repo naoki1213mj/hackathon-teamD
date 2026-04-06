@@ -80,6 +80,33 @@ _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
 _BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
 _USER_MESSAGES_METADATA_KEY = "user_messages"
 _PIPELINE_TOTAL_STEPS = 5
+_VIDEO_POLL_MAX_WAIT_SECONDS = 420
+_VIDEO_BACKGROUND_PENDING_MESSAGE = "販促動画をバックグラウンドで生成しています。動画タブは完了後に自動更新されます。"
+_VIDEO_POLL_TIMEOUT_MESSAGE = (
+    "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"
+)
+
+
+def _build_video_poll_completion_events(video_url: str | None, *, background_update: bool = False) -> list[dict]:
+    """動画ジョブのポーリング結果を保存用イベントへ正規化する。"""
+
+    def _build_text_event(content: str, content_type: str) -> dict:
+        data = {
+            "content": content,
+            "agent": "video-gen-agent",
+            "content_type": content_type,
+        }
+        if background_update:
+            data["background_update"] = True
+        return {"event": SSEEventType.TEXT.value, "data": data}
+
+    if video_url and video_url.startswith("https://"):
+        return [_build_text_event(video_url, "video")]
+
+    if video_url:
+        logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
+
+    return [_build_text_event(_VIDEO_POLL_TIMEOUT_MESSAGE, "text")]
 
 
 class WorkflowSettings(TypedDict):
@@ -2452,7 +2479,7 @@ async def _post_approval_events(
         yield format_sse(
             SSEEventType.TEXT,
             {
-                "content": "販促動画をバックグラウンドで生成しています。動画タブは完了後に自動更新されます。",
+                "content": _VIDEO_BACKGROUND_PENDING_MESSAGE,
                 "agent": "video-gen-agent",
                 "content_type": "text",
             },
@@ -2475,18 +2502,11 @@ async def _post_approval_events(
         if video_job_id:
             from src.agents.video_gen import poll_video_job
 
-            video_url = await poll_video_job(video_job_id, max_wait=120)
-            if video_url and video_url.startswith("https://"):
-                yield format_sse(
-                    SSEEventType.TEXT,
-                    {
-                        "content": video_url,
-                        "agent": "video-gen-agent",
-                        "content_type": "video",
-                    },
-                )
-            elif video_url:
-                logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
+            video_events = _build_video_poll_completion_events(
+                await poll_video_job(video_job_id, max_wait=_VIDEO_POLL_MAX_WAIT_SECONDS)
+            )
+            for event_dict in video_events:
+                yield format_sse(event_dict["event"], event_dict["data"])
 
         for event in await _maybe_run_quality_review(review_input):
             yield event
@@ -2540,21 +2560,12 @@ async def _append_post_completion_updates(
     if video_job_id:
         from src.agents.video_gen import poll_video_job
 
-        video_url = await poll_video_job(video_job_id, max_wait=120)
-        if video_url and video_url.startswith("https://"):
-            appended_events.append(
-                {
-                    "event": SSEEventType.TEXT.value,
-                    "data": {
-                        "content": video_url,
-                        "agent": "video-gen-agent",
-                        "content_type": "video",
-                        "background_update": True,
-                    },
-                }
+        appended_events.extend(
+            _build_video_poll_completion_events(
+                await poll_video_job(video_job_id, max_wait=_VIDEO_POLL_MAX_WAIT_SECONDS),
+                background_update=True,
             )
-        elif video_url:
-            logger.warning("Photo Avatar: 無効な background video_url を無視: %s", video_url[:100])
+        )
 
     review_input = _sanitize_optional_text(update_context.get("review_input"))
     if review_input:

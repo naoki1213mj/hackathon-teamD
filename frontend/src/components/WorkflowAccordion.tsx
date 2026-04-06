@@ -1,6 +1,7 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
+import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
 import { ErrorRetry } from './ErrorRetry'
 import { MarkdownView } from './MarkdownView'
@@ -279,13 +280,14 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                   <p className="text-sm text-[var(--text-secondary)]">{t('workflow.brochure.ready')}</p>
                   <p className="text-xs text-[var(--text-muted)]">{t('workflow.brochure.preview_hint')}</p>
                   {(() => {
-                    const videoContent = roundContents.find(c => c.content_type === 'video')
-                    const videoProgress = roundContents.find(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')
+                    const videoContent = extractVideoUrl(roundContents)
+                    const videoStatusMessage = extractVideoStatusMessage(roundContents)
                     if (videoContent) {
                       return <p className="text-sm text-[var(--text-secondary)]">{t('workflow.video.ready')}</p>
                     }
-                    if (videoProgress) {
-                      return <p className="text-sm text-[var(--text-muted)]">{t('workflow.video.running')}</p>
+                    if (videoStatusMessage) {
+                      const isIssueMessage = videoStatusMessage.startsWith('⚠️') || videoStatusMessage.startsWith('❌')
+                      return <p className={`text-sm ${isIssueMessage ? 'text-[var(--warning-text)]' : 'text-[var(--text-muted)]'}`}>{videoStatusMessage}</p>
                     }
                     return null
                   })()}

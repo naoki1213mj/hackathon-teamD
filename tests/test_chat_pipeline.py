@@ -1272,6 +1272,116 @@ async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypa
     assert popped_video_conversation_ids == ["conv-revised"]
 
 
+def test_build_video_poll_completion_events_returns_timeout_message_for_missing_video() -> None:
+    """動画 URL を回収できない場合は明示的な warning メッセージを返す"""
+
+    events = chat_module._build_video_poll_completion_events(None, background_update=True)
+
+    assert events == [
+        {
+            "event": "text",
+            "data": {
+                "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
+                "agent": "video-gen-agent",
+                "content_type": "text",
+                "background_update": True,
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_approval_emits_video_timeout_message_when_polling_times_out(monkeypatch) -> None:
+    """動画 polling が完了しない場合でも、永続化用の warning を SSE に流す"""
+
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
+    )
+
+    async def fake_load_pending(_conversation_id):
+        return {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "旧企画書",
+            "model_settings": {"temperature": 0.3},
+        }
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, total_steps, include_done
+        payload_by_agent = {
+            "regulation-check-agent": "規制チェック結果",
+            "plan-revision-agent": "修正版企画書",
+            "brochure-gen-agent": "```html\n<html><body>brochure</body></html>\n```",
+            "video-gen-agent": '{"status": "submitted", "message": "🎬 動画生成ジョブを送信しました"}',
+        }
+        text = payload_by_agent[agent_name]
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": text, "agent": agent_name},
+                )
+            ],
+            "text": text,
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 10,
+        }
+
+    poll_waits: list[int] = []
+
+    async def fake_poll_video_job(job_id: str, max_wait: int = 0):
+        assert job_id == "video-job-123"
+        poll_waits.append(max_wait)
+        return None
+
+    async def fake_quality_review(review_input: str):
+        assert "修正版企画書" in review_input
+        return []
+
+    async def fake_trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_html: str):
+        assert conversation_id == "conv-video-timeout"
+        assert plan_markdown == "修正版企画書"
+        assert brochure_html == "<html><body>brochure</body></html>"
+
+    def fake_pop_pending_video_job(conversation_id: str):
+        assert conversation_id == "conv-video-timeout"
+        return {"job_id": "video-job-123", "status": "submitted"}
+
+    monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "_maybe_run_quality_review", fake_quality_review)
+    monkeypatch.setattr(chat_module, "_trigger_logic_app", fake_trigger_logic_app)
+    monkeypatch.setattr("src.agents.video_gen.pop_pending_video_job", fake_pop_pending_video_job)
+    monkeypatch.setattr("src.agents.video_gen.poll_video_job", fake_poll_video_job)
+
+    parsed_events = [
+        _parse_sse(event)
+        for event in [event async for event in chat_module._post_approval_events("承認", "conv-video-timeout")]
+    ]
+
+    assert poll_waits == [420]
+    assert (
+        "text",
+        {
+            "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
+            "agent": "video-gen-agent",
+            "content_type": "text",
+        },
+    ) in parsed_events
+
+
 # --- _get_reference_brochure_path テスト ---
 
 

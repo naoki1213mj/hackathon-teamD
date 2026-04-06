@@ -125,6 +125,10 @@ export interface PipelineState {
 
 export type SendMessageOptions = ChatRequestOptions
 
+export interface RestoreConversationOptions {
+  passive?: boolean
+}
+
 const initialState: PipelineState = {
   status: 'idle',
   conversationId: null,
@@ -652,6 +656,7 @@ export function useSSE() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const stateRef = useRef<PipelineState>(initialState)
   const activeRequestIdRef = useRef(0)
+  const activeRestoreRequestIdRef = useRef(0)
   const localEvaluationCacheRef = useRef<Record<string, EvaluationRecord[]>>({})
 
   const cacheEvaluationRecord = useCallback((conversationId: string | null | undefined, record: EvaluationRecord) => {
@@ -949,11 +954,22 @@ export function useSSE() {
   }, [cacheEvaluationRecord])
 
   /** 保存済み会話を復元する（新規推論を実行しない） */
-  const restoreConversation = useCallback(async (conversationId: string) => {
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    const requestId = activeRequestIdRef.current + 1
-    activeRequestIdRef.current = requestId
+  const restoreConversation = useCallback(async (conversationId: string, options?: RestoreConversationOptions) => {
+    const passive = options?.passive === true
+    const foregroundRequestId = activeRequestIdRef.current
+
+    if (passive && abortControllerRef.current) {
+      return
+    }
+
+    if (!passive) {
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
+      activeRequestIdRef.current += 1
+    }
+
+    const restoreRequestId = activeRestoreRequestIdRef.current + 1
+    activeRestoreRequestIdRef.current = restoreRequestId
 
     try {
       const restoreUrl = new URL(`/api/conversations/${conversationId}`, window.location.origin)
@@ -969,6 +985,8 @@ export function useSSE() {
         headers,
       })
       if (resp.status === 304) {
+        if (restoreRequestId !== activeRestoreRequestIdRef.current) return
+        if (passive && activeRequestIdRef.current !== foregroundRequestId) return
         conversationIdRef.current = conversationId
         return
       }
@@ -980,7 +998,9 @@ export function useSSE() {
         delete conversationEtagsRef.current[conversationId]
       }
       const doc = await resp.json() as ConversationDocument
-      if (requestId !== activeRequestIdRef.current) return
+      if (restoreRequestId !== activeRestoreRequestIdRef.current) return
+      if (passive && activeRequestIdRef.current !== foregroundRequestId) return
+      if (passive && abortControllerRef.current) return
 
       const restoredState = mergeCachedEvaluationsIntoState(
         buildRestoredPipelineState(doc, conversationId, stateRef.current.settings),
