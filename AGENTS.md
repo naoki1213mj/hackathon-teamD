@@ -32,7 +32,7 @@
 
 | 層 | 技術 | バージョン |
 |---|------|----------|
-| フロントエンド | React + TypeScript + Vite + Tailwind CSS | React 19, Vite 8 |
+| フロントエンド | React + TypeScript + Vite + Tailwind CSS | React 19.2 / Vite 8 / Tailwind CSS 4.2 / TypeScript 5.9 |
 | バックエンド | FastAPI + uvicorn | Python 3.14 |
 | パッケージ管理 | uv | 最新 |
 | 推論モデル | gpt-5.4-mini | GA (2026-03-17~) |
@@ -264,6 +264,19 @@ travel-marketing-agents/
 ├── azure.yaml                    # azd 設定
 └── .github/workflows/            # CI + Deploy + Security
 ```
+
+## 実装メトリクス (2026-04-07 時点)
+
+| 項目 | 値 |
+|------|------|
+| バックエンド Python | 24 ファイル · 6,657 行 |
+| フロントエンド TSX/TS | 56 ファイル · 9,113 行 |
+| インフラ Bicep | 16 ファイル · 1,227 行 |
+| テストコード | 18 ファイル · 3,845 行 |
+| テスト結果 | pytest 275 passed / vitest 74 passed |
+| カバレッジ | 68% (src/) |
+| UI コンポーネント | 33 個 |
+| CI/CD ワークフロー | CI + Deploy + Security (3 本) |
 
 ## Quick Commands
 

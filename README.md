@@ -143,19 +143,35 @@ docs/                Architecture, API reference, deployment guides
 | [docs/api-reference.md](docs/api-reference.md) | REST API and SSE event specification |
 | [docs/deployment-guide.md](docs/deployment-guide.md) | Local, Docker, CI/CD, and Azure deployment |
 | [docs/azure-setup.md](docs/azure-setup.md) | Post-provision setup and troubleshooting |
+| [docs/presentation.md](docs/presentation.md) | 15-min presentation script and demo checklist |
 | [AGENTS.md](AGENTS.md) | Agent details and tech stack reference |
+
+## Implementation Status
+
+| Metric | Value |
+| --- | --- |
+| Backend Python | 24 files · 6,657 lines |
+| Frontend React/TS | 56 files · 9,113 lines (37 TSX + 19 TS) |
+| Infrastructure (Bicep) | 16 files · 1,227 lines |
+| Test Coverage | 68% (275 pytest · 74 vitest) |
+| Test Code | 18 files · 3,845 lines |
+| UI Components | 33 components |
+| SSE Event Types | 7 (agent_progress, tool_event, text, image, approval_request, error, done) |
+| Agents | 7 (data-search, marketing-plan, regulation-check, plan-revision, brochure-gen, video-gen, quality-review) |
+| CI/CD Workflows | 3 (CI · Deploy · Security) |
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19 · TypeScript · Vite · Tailwind CSS |
+| Frontend | React 19 · TypeScript · Vite 8 · Tailwind CSS 4 |
 | Backend | Python 3.14 · FastAPI · uvicorn |
 | AI Models | gpt-5.4-mini · GPT Image 1.5 · MAI-Image-2 |
 | Agent Framework | Microsoft Agent Framework 1.0.0 (GA) |
-| Data | Fabric Lakehouse · Delta Parquet + SQL |
+| Data | Fabric Lakehouse · Fabric Data Agent · Delta Parquet + SQL |
 | Knowledge | Foundry IQ · Azure AI Search |
 | Video | Speech / Photo Avatar |
+| Evaluation | Foundry Evaluations (built-in + custom) |
 | Infrastructure | Container Apps · APIM · Cosmos DB · Key Vault · VNet |
 | CI/CD | GitHub Actions · azd · Bicep |
 
