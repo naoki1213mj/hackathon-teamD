@@ -12,4 +12,3 @@ data/*.csv
 .playwright-mcp/
 .coverage
 images/
-docs/presentation.md
