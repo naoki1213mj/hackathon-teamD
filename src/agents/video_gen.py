@@ -133,7 +133,14 @@ def _split_sentences(summary_text: str) -> list[str]:
 
 
 def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
-    """Photo Avatar 用の高品質な SSML を構築する。"""
+    """Photo Avatar 用の高品質な SSML を構築する。
+
+    ナレーション構成:
+    1. 導入（wave ジェスチャー + 明るいトーン）
+    2. メインの見出し（強調 + テンポアップ）
+    3. 詳細説明（ジェスチャー付き、落ち着いたトーン）
+    4. 締め（hand-gesture + 少し声量を上げて案内）
+    """
     source_sentences = _split_sentences(summary_text)
     if not source_sentences:
         source_sentences = ["おすすめの旅行プランをご紹介します。"]
@@ -147,25 +154,44 @@ def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
         "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' ",
         "xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='ja-JP'>",
         f"<voice name='{escape(voice_name)}' parameters='temperature=0.72'>",
+        # 1. 導入: wave ジェスチャー + cheerful トーン
         "<bookmark mark='gesture.wave-left-1'/>",
-        f"<prosody rate='+4.0%' pitch='+1Hz'>{escape(intro)}</prosody>",
-        "<break time='450ms'/>",
-        f"<prosody rate='+6.0%' pitch='+2Hz'>{escape(headline)}</prosody>",
+        "<mstts:express-as style='cheerful'>",
+        f"<prosody rate='+4.0%' pitch='+2Hz'>{escape(intro)}</prosody>",
+        "</mstts:express-as>",
+        "<break time='500ms'/>",
+        # 2. メイン見出し: 強調 + テンポアップ
+        "<bookmark mark='gesture.explain-left-1'/>",
+        "<mstts:express-as style='friendly'>",
+        "<prosody rate='+6.0%' pitch='+3Hz'>",
+        f"<emphasis level='moderate'>{escape(headline)}</emphasis>",
+        "</prosody>",
+        "</mstts:express-as>",
     ]
 
-    for sentence in detail_sentences:
+    # 3. 詳細説明: ジェスチャーを交互に + 落ち着いたトーン
+    detail_gestures = ["gesture.explain-right-1", "gesture.point-left-1"]
+    for i, sentence in enumerate(detail_sentences):
+        gesture = detail_gestures[i % len(detail_gestures)]
         ssml_parts.extend(
             [
-                "<break time='320ms'/>",
-                f"<prosody rate='+2.0%'>{escape(sentence)}</prosody>",
+                "<break time='400ms'/>",
+                f"<bookmark mark='{gesture}'/>",
+                f"<prosody rate='+2.0%' pitch='+1Hz'>{escape(sentence)}</prosody>",
             ]
         )
 
+    # 4. 締め: 息継ぎ + hand-gesture + 声量アップ
     ssml_parts.extend(
         [
-            "<break time='380ms'/>",
+            "<break time='500ms'/>",
             "<mstts:paralinguistic type='breathing'/>",
-            f"<prosody rate='+5.0%' pitch='+1Hz'>{escape(closing)}</prosody>",
+            "<bookmark mark='gesture.hand-gesture-right-1'/>",
+            "<mstts:express-as style='cheerful'>",
+            "<prosody rate='+5.0%' pitch='+2Hz' volume='+5%'>",
+            f"<emphasis level='moderate'>{escape(closing)}</emphasis>",
+            "</prosody>",
+            "</mstts:express-as>",
             "</voice>",
             "</speak>",
         ]
