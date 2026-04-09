@@ -228,6 +228,39 @@ function mergeCachedEvaluationsIntoState(state: PipelineState, records: Evaluati
   return records.reduce((currentState, record) => applyEvaluationRecord(currentState, record), state)
 }
 
+function preserveViewedCommittedVersion(
+  previousState: PipelineState,
+  restoredState: PipelineState,
+  passive: boolean,
+): PipelineState {
+  if (!passive || previousState.conversationId !== restoredState.conversationId) {
+    return restoredState
+  }
+
+  if (previousState.pendingVersion) {
+    return restoredState
+  }
+
+  if (previousState.currentVersion < 1 || previousState.currentVersion >= previousState.versions.length) {
+    return restoredState
+  }
+
+  const preservedVersion = Math.min(previousState.currentVersion, restoredState.versions.length)
+  const snapshot = restoredState.versions[preservedVersion - 1]
+  if (!snapshot || preservedVersion === restoredState.versions.length) {
+    return restoredState
+  }
+
+  return {
+    ...restoredState,
+    textContents: cloneTextContents(snapshot.textContents),
+    images: cloneImages(snapshot.images),
+    toolEvents: cloneToolEvents(snapshot.toolEvents),
+    metrics: snapshot.metrics ? { ...snapshot.metrics } : null,
+    currentVersion: preservedVersion,
+  }
+}
+
 function buildEvaluationRecord(data: Record<string, unknown>, fallbackVersion: number): EvaluationRecord | null {
   const version = Number(data.version || fallbackVersion)
   const round = Number(data.round || 1)
@@ -840,6 +873,7 @@ export function useSSE() {
     abortControllerRef.current = controller
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
+    activeRestoreRequestIdRef.current += 1
     const existingConversationId = conversationIdRef.current
     setState(prev => ({
       ...(() => {
@@ -893,6 +927,7 @@ export function useSSE() {
     abortControllerRef.current = controller
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
+    activeRestoreRequestIdRef.current += 1
     setState(prev => ({
       ...prev,
       status: 'running',
@@ -919,6 +954,7 @@ export function useSSE() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     activeRequestIdRef.current += 1
+    activeRestoreRequestIdRef.current += 1
     setState(initialState)
     conversationIdRef.current = null
     conversationEtagsRef.current = {}
@@ -957,6 +993,7 @@ export function useSSE() {
   const restoreConversation = useCallback(async (conversationId: string, options?: RestoreConversationOptions) => {
     const passive = options?.passive === true
     const foregroundRequestId = activeRequestIdRef.current
+    const previousState = stateRef.current
     const isCurrentConversation = stateRef.current.conversationId === conversationId
 
     if (passive && abortControllerRef.current) {
@@ -1008,7 +1045,7 @@ export function useSSE() {
         getCachedEvaluationRecords(conversationId),
       )
 
-      setState(restoredState)
+      setState(preserveViewedCommittedVersion(previousState, restoredState, passive))
 
       conversationIdRef.current = conversationId
     } catch (err) {

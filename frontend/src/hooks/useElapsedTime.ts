@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number {
   const [elapsed, setElapsed] = useState(0)
@@ -10,13 +10,24 @@ export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number
       clearInterval(timerRef.current)
       timerRef.current = null
     }
-    if (isRunning) {
-      startRef.current = Date.now()
-      timerRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
-      }, 1000)
+    if (!isRunning) {
+      startRef.current = 0
+      setElapsed(0)
+      return () => undefined
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+
+    startRef.current = Date.now()
+    setElapsed(0)
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+    }, 1000)
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }
   }, [isRunning, resetKey])
 
   return isRunning ? elapsed : 0

@@ -92,9 +92,20 @@ interface Props {
   onRetry: () => void
   t: (key: string) => string
   locale: string
+  conversationKey?: string
 }
 
-export function WorkflowAccordion({ agentProgress, textContents, toolEvents, metrics, error, onRetry, t, locale }: Props) {
+export function WorkflowAccordion({
+  agentProgress,
+  textContents,
+  toolEvents,
+  metrics,
+  error,
+  onRetry,
+  t,
+  locale,
+  conversationKey = 'default',
+}: Props) {
   const activeRef = useRef<HTMLDivElement>(null)
 
   const currentStep = agentProgress?.step ?? 0
@@ -144,6 +155,10 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
   // 手動トグル用の state（ユーザー操作のみ）
   const [userToggled, setUserToggled] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    setUserToggled({})
+  }, [conversationKey])
 
   const isSectionCollapsed = (sectionKey: string, fallback: boolean): boolean => {
     if (sectionKey in userToggled) return userToggled[sectionKey]

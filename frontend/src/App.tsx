@@ -411,6 +411,7 @@ function App() {
               onRetry={handleReset}
               t={t}
               locale={locale}
+              conversationKey={state.conversationId ?? 'draft'}
             />
           </div>
 

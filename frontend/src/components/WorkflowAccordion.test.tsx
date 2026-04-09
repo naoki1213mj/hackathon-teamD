@@ -57,6 +57,45 @@ const toolEvents: ToolEvent[] = [
 ]
 
 describe('WorkflowAccordion', () => {
+  it('clears manual section toggles when the conversation changes', () => {
+    const singleRoundContents: TextContent[] = textContents.slice(0, 4)
+    const singleRoundToolEvents: ToolEvent[] = toolEvents.filter(event => event.version === 1)
+
+    const { rerender } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={singleRoundContents}
+        toolEvents={singleRoundToolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+        conversationKey="conv-a"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /施策生成/ }))
+
+    expect(screen.getByText('初版企画書')).toBeInTheDocument()
+
+    rerender(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={singleRoundContents}
+        toolEvents={singleRoundToolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+        conversationKey="conv-b"
+      />,
+    )
+
+    expect(screen.queryByText('初版企画書')).toBeNull()
+  })
+
   it('allows opening a completed past round and reading its content', () => {
     render(
       <WorkflowAccordion

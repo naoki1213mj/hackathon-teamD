@@ -67,6 +67,35 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const [useVoiceLive, setUseVoiceLive] = useState<boolean | null>(null)
   const clientRef = useRef<VoiceLiveClient | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  const activeSessionIdRef = useRef(0)
+  const idleResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearIdleResetTimeout = useCallback(() => {
+    if (idleResetTimeoutRef.current) {
+      clearTimeout(idleResetTimeoutRef.current)
+      idleResetTimeoutRef.current = null
+    }
+  }, [])
+
+  const beginSession = useCallback(() => {
+    clearIdleResetTimeout()
+    const nextSessionId = activeSessionIdRef.current + 1
+    activeSessionIdRef.current = nextSessionId
+    return nextSessionId
+  }, [clearIdleResetTimeout])
+
+  const isActiveSession = useCallback((sessionId: number) => activeSessionIdRef.current === sessionId, [])
+
+  const scheduleIdleReset = useCallback((sessionId: number) => {
+    clearIdleResetTimeout()
+    idleResetTimeoutRef.current = setTimeout(() => {
+      if (!isActiveSession(sessionId)) {
+        return
+      }
+      idleResetTimeoutRef.current = null
+      setState('idle')
+    }, 3000)
+  }, [clearIdleResetTimeout, isActiveSession])
 
   // Voice Live 利用可能性チェック — MSAL.js トークン取得を試みる
   useEffect(() => {
@@ -90,12 +119,17 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       setState('error')
       return
     }
+
+    const sessionId = beginSession()
     const recognition = new SpeechRecognitionClass()
     recognition.lang = 'ja-JP'
     recognition.continuous = false
     recognition.interimResults = true
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      if (!isActiveSession(sessionId) || recognitionRef.current !== recognition) {
+        return
+      }
       let finalText = ''
       let interim = ''
       for (let i = 0; i < event.results.length; i++) {
@@ -113,19 +147,28 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       }
     }
     recognition.onerror = (e: { error: string }) => {
+      if (!isActiveSession(sessionId) || recognitionRef.current !== recognition) {
+        return
+      }
       console.warn('Web Speech error:', e.error)
+      recognitionRef.current = null
       setState('idle')
     }
     recognition.onend = () => {
+      if (!isActiveSession(sessionId) || recognitionRef.current !== recognition) {
+        return
+      }
+      recognitionRef.current = null
       setState('idle')
     }
 
     recognition.start()
     recognitionRef.current = recognition
     setState('listening')
-  }, [onTranscript])
+  }, [beginSession, isActiveSession, onTranscript])
 
   const startVoiceLive = useCallback(async () => {
+    const sessionId = beginSession()
     setState('connecting')
     try {
       // Voice Live 設定を取得（client_id, tenant_id, endpoint 等）
@@ -159,6 +202,9 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
 
       const client = new VoiceLiveClient(config, {
         onTranscript: (text, isFinal) => {
+          if (!isActiveSession(sessionId)) {
+            return
+          }
           setTranscript(text)
           if (isFinal) {
             onTranscript(text)
@@ -169,12 +215,17 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
           // エージェント応答テキスト — 将来の UI 表示用
         },
         onError: (error) => {
+          if (!isActiveSession(sessionId)) {
+            return
+          }
           console.warn('Voice Live error:', error)
           setState('error')
-          // 3秒後にアイドルに戻す
-          setTimeout(() => setState('idle'), 3000)
+          scheduleIdleReset(sessionId)
         },
         onStateChange: (s) => {
+          if (!isActiveSession(sessionId)) {
+            return
+          }
           if (s === 'listening') setState('listening')
           else if (s === 'processing') setState('processing')
           else if (s === 'speaking') setState('speaking')
@@ -185,17 +236,26 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       })
 
       await client.connect()
+      if (!isActiveSession(sessionId)) {
+        client.disconnect()
+        return
+      }
       clientRef.current = client
     } catch (err) {
+      if (!isActiveSession(sessionId)) {
+        return
+      }
       console.warn('Voice Live 接続失敗、Web Speech API にフォールバック:', err)
       sessionStorage.setItem('voiceLiveFailed', 'true')
       setState('idle')
       setUseVoiceLive(false)
       startWebSpeech()
     }
-  }, [onTranscript, startWebSpeech])
+  }, [beginSession, isActiveSession, onTranscript, scheduleIdleReset, startWebSpeech])
 
   const stop = useCallback(() => {
+    activeSessionIdRef.current += 1
+    clearIdleResetTimeout()
     clientRef.current?.disconnect()
     clientRef.current = null
     if (recognitionRef.current) {
@@ -204,7 +264,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
     }
     setState('idle')
     setTranscript('')
-  }, [])
+  }, [clearIdleResetTimeout])
 
   const toggle = useCallback(() => {
     if (state !== 'idle') {

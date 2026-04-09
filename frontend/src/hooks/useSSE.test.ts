@@ -823,6 +823,92 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.textContents.at(-1)?.content).toBe('new plan')
   })
 
+  it('ignores a stale manual restore once a new live request has started', async () => {
+    let resolveRestore: ((response: Response) => void) | null = null
+    vi.mocked(globalThis.fetch).mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      resolveRestore = resolve
+    }))
+
+    const { result } = renderHook(() => useSSE())
+
+    let restorePromise: Promise<void>
+    act(() => {
+      restorePromise = result.current.restoreConversation('conv-stale-restore')
+    })
+
+    act(() => {
+      void result.current.sendMessage('新しい依頼を優先して')
+    })
+
+    await act(async () => {
+      resolveRestore?.(new Response(JSON.stringify({
+        status: 'completed',
+        input: '古い履歴',
+        messages: [
+          { event: 'text', data: { content: 'stale plan', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-stale-restore', metrics: { latency_seconds: 12, tool_calls: 1, total_tokens: 120 } } },
+        ],
+      })))
+      await restorePromise
+    })
+
+    expect(result.current.state.status).toBe('running')
+    expect(result.current.state.userMessages).toEqual(['新しい依頼を優先して'])
+    expect(result.current.state.textContents).toEqual([])
+    expect(result.current.state.conversationId).toBeNull()
+  })
+
+  it('keeps the selected committed version during passive polling updates', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'completed',
+        input: '改善版を確認したい',
+        metadata: {
+          background_updates_pending: true,
+        },
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-passive-history', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'text', data: { content: '# Plan v2', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-passive-history', metrics: { latency_seconds: 12, tool_calls: 2, total_tokens: 150 } } },
+        ],
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'completed',
+        input: '改善版を確認したい',
+        metadata: {
+          background_updates_pending: true,
+        },
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-passive-history', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'text', data: { content: '# Plan v2 updated', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-passive-history', metrics: { latency_seconds: 14, tool_calls: 2, total_tokens: 170 } } },
+        ],
+      })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-passive-history')
+    })
+
+    act(() => {
+      result.current.restoreVersion(1)
+    })
+
+    expect(result.current.state.currentVersion).toBe(1)
+    expect(result.current.state.textContents.at(-1)?.content).toBe('# Plan v1')
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-passive-history', { passive: true })
+    })
+
+    expect(result.current.state.currentVersion).toBe(1)
+    expect(result.current.state.textContents.at(-1)?.content).toBe('# Plan v1')
+    expect(result.current.state.versions[1].textContents.at(-1)?.content).toBe('# Plan v2 updated')
+  })
+
   it('keeps refinement prompts after restore polling completes', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',
