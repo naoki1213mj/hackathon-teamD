@@ -59,8 +59,8 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for detailed Azure 
 | **Video Generation** | Photo Avatar with SSML narration, HD voice, MP4/H.264 |
 | **Quality Evaluation** | Built-in + custom business metrics with side-by-side version comparison |
 | **Evaluation-Driven Refinement** | Feed results back via APIM-fronted Azure Functions MCP |
-| **Real-Time Streaming** | SSE with per-agent step tracking |
-| **Conversation History** | Cosmos DB persistence, instant restore without re-inference |
+| **Real-Time Streaming** | SSE with per-agent step tracking (15-min timeout) |
+| **Conversation History** | Cosmos DB persistence, instant restore, new-conversation button |
 | **Voice Input** | Voice Live API (MSAL.js) + Web Speech API fallback |
 | **Multilingual UI** | Japanese / English / Chinese, dark/light mode (WCAG AA) |
 | **Enterprise Integration** | Logic Apps post-approval actions, optional Teams/email notification |
@@ -145,16 +145,16 @@ docs/                Architecture, API reference, deployment guides
 | [docs/azure-setup.md](docs/azure-setup.md) | Post-provision setup and troubleshooting |
 | [AGENTS.md](AGENTS.md) | Agent details and tech stack reference |
 
-## Implementation Status
+## Implementation Status (2026-04-10)
 
 | Metric | Value |
 | --- | --- |
-| Backend Python | 24 files · 6,657 lines |
-| Frontend React/TS | 56 files · 9,113 lines (37 TSX + 19 TS) |
+| Backend Python | 24 files · 6,764 lines |
+| Frontend React/TS | 44 files · 6,764 lines (30 TSX + 14 TS) |
 | Infrastructure (Bicep) | 16 files · 1,227 lines |
-| Test Coverage | 68% (275 pytest · 74 vitest) |
-| Test Code | 18 files · 3,845 lines |
-| UI Components | 33 components |
+| Test Coverage | 68% (277 pytest · 83 vitest) |
+| Test Code | 32 files · 6,890 lines |
+| UI Components | 28 components |
 | SSE Event Types | 7 (agent_progress, tool_event, text, image, approval_request, error, done) |
 | Agents | 7 (data-search, marketing-plan, regulation-check, plan-revision, brochure-gen, video-gen, quality-review) |
 | CI/CD Workflows | 3 (CI · Deploy · Security) |

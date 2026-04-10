@@ -265,17 +265,17 @@ travel-marketing-agents/
 └── .github/workflows/            # CI + Deploy + Security
 ```
 
-## 実装メトリクス (2026-04-07 時点)
+## 実装メトリクス (2026-04-10 時点)
 
 | 項目 | 値 |
 |------|------|
-| バックエンド Python | 24 ファイル · 6,657 行 |
-| フロントエンド TSX/TS | 56 ファイル · 9,113 行 |
+| バックエンド Python | 24 ファイル · 6,764 行 |
+| フロントエンド TSX/TS | 44 ファイル · 6,764 行 (30 TSX + 14 TS) |
 | インフラ Bicep | 16 ファイル · 1,227 行 |
-| テストコード | 18 ファイル · 3,845 行 |
-| テスト結果 | pytest 275 passed / vitest 74 passed |
+| テストコード | 32 ファイル · 6,890 行 (18 pytest + 14 vitest) |
+| テスト結果 | pytest 277 passed / vitest 83 passed |
 | カバレッジ | 68% (src/) |
-| UI コンポーネント | 33 個 |
+| UI コンポーネント | 28 個 |
 | CI/CD ワークフロー | CI + Deploy + Security (3 本) |
 
 ## Quick Commands

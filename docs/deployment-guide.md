@@ -147,7 +147,7 @@ curl https://<your-app>/api/ready
 
 ### CI (`ci.yml`)
 
-Ruff lint → pytest (275 tests) → npm lint → tsc → npm build
+Ruff lint → pytest (277 tests) → npm lint → tsc → npm build
 
 ### Deploy (`deploy.yml`)
 
