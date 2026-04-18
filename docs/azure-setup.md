@@ -174,7 +174,7 @@ rebuilt `workiq-dev` tenant では、次までは完了済みです。
 - Teams connection `teams-1`: **Connected**
 - manager approval workflow: `logic-manager-approval-wmbvhdhcsuyb2`
 - post-approval workflow: `logic-wmbvhdhcsuyb2`
-- `MANAGER_APPROVAL_TRIGGER_URL` / `LOGIC_APP_CALLBACK_URL`: Container App に反映済み
+- `MANAGER_APPROVAL_TRIGGER_URL` / `LOGIC_APP_CALLBACK_URL`: Container App に反映済み（manager approval 側は `deploy.yml` が workflow から full signed URL を再同期）
 
 現在の残件は **SharePoint 保存経路** だけです。優先方針は **Graph + Logic App managed identity + `Sites.Selected`** で、site permission grant が済めば combined branch をそのまま使えます。fallback として `sharepointonline` connector を tenant 側で再認証しても構いません。
 
@@ -183,7 +183,7 @@ rebuilt `workiq-dev` tenant では、次までは完了済みです。
 1. Logic Apps designer で Microsoft Teams / SharePoint コネクタを開き、新 tenant のアカウントで接続を作り直す
 2. 通知先の Team / channel と保存先の SharePoint site / document library を選び直す
 3. SharePoint 保存は、site permission を Logic App managed identity に付与するか、`sharepointonline` connector を再認証する
-4. HTTP trigger URL や connection reference が変わった場合は `LOGIC_APP_CALLBACK_URL` / `MANAGER_APPROVAL_TRIGGER_URL` を更新する
+4. HTTP trigger URL や connection reference が変わった場合は `LOGIC_APP_CALLBACK_URL` / `MANAGER_APPROVAL_TRIGGER_URL` を更新する。GitHub Actions deploy は manager approval workflow の signed URL を自動再同期するが、ローカル実行や `azd up` 用の `azd env` は手で更新が必要
 
 なお、現在のアーキテクチャでは Foundry から Teams へ直接 publish する構成ではなく、FastAPI → Logic Apps の通知 / 保存フローを前提にしています。
 

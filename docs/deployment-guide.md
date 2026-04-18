@@ -146,7 +146,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
-| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 10） |
+| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 30） |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
@@ -158,6 +158,8 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 全項目は [.env.example](../.env.example) を参照してください。
 
 > Logic App の signed trigger URL は `&sp=...&sv=...&sig=...` を含みます。Container App secret や `azd env` へ反映するときは **URL 全体を 1 つの値として引用**し、途中で切れないようにしてください。
+>
+> `deploy.yml` は manager approval workflow の signed trigger URL を Azure から毎回引き直して Container App secret へ同期します。GitHub Actions 側で `MANAGER_APPROVAL_TRIGGER_URL` を別 secret として持つ必要はありません。
 
 ## 7. デプロイ後の確認
 
@@ -194,7 +196,7 @@ Trivy, Gitleaks, npm audit, pip-audit
 | `gpt-4.1` / `gpt-5.4` が使えない | Azure 側の deployment 名が UI 値と一致しているか確認 (`gpt-4.1`, `gpt-4-1-mini`, `gpt-5.4`) |
 | 画像が透明 PNG | `IMAGE_PROJECT_ENDPOINT_MAI` と別 East US MAI account の RBAC を確認。`MAI-Image-2` quota が無い subscription では `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認 |
-| 上司承認通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認。未設定でも承認ページ自体は動作 |
+| 上司承認通知が飛ばない | `logic-manager-approval-*` の run history と Container App secret `manager-approval-trigger-url` に `&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確認。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、対象 Team / channel を確認 |
 | SharePoint に保存されない | target site への permission grant か `sharepointonline` connector の認証状態を確認 |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |

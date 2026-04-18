@@ -15,7 +15,7 @@ from src.work_iq_session import WorkIQSourceMetadata
 logger = logging.getLogger(__name__)
 
 _GRAPH_CONVERSATIONS_URL = "https://graph.microsoft.com/beta/copilot/conversations"
-_DEFAULT_TIMEOUT_SECONDS = 10.0
+_DEFAULT_TIMEOUT_SECONDS = 30.0
 _MAX_BRIEF_CHARS = 1200
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"</?[^>]+>")
@@ -240,6 +240,7 @@ async def generate_workplace_context_brief(
 
     headers = _build_headers(access_token)
     timeout_seconds = _resolve_timeout_seconds()
+    stage = "conversation_create"
 
     try:
         create_response = await get_http_client().post(
@@ -256,6 +257,7 @@ async def generate_workplace_context_brief(
         if not conversation_id:
             raise ValueError("graph conversation id was missing")
 
+        stage = "chat"
         chat_response = await get_http_client().post(
             f"{_GRAPH_CONVERSATIONS_URL}/{conversation_id}/chat",
             json=_build_chat_payload(user_input, source_scope, user_time_zone),
@@ -265,6 +267,7 @@ async def generate_workplace_context_brief(
         chat_response.raise_for_status()
         assistant_message = _extract_assistant_message(chat_response.json())
     except httpx.TimeoutException:
+        logger.warning("work iq graph call timed out during %s after %.1fs", stage, timeout_seconds)
         return _failure_result("timeout")
     except httpx.HTTPStatusError as exc:
         logger.warning("work iq graph call failed: %s", exc)

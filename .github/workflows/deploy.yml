@@ -27,7 +27,6 @@ jobs:
     env:
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
-      MANAGER_APPROVAL_TRIGGER_URL: ${{ secrets.MANAGER_APPROVAL_TRIGGER_URL }}
 
     steps:
       - uses: actions/checkout@v6
@@ -79,18 +78,85 @@ jobs:
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
 
-      - name: Configure optional manager approval trigger
-        if: ${{ env.MANAGER_APPROVAL_TRIGGER_URL != '' }}
+      - name: Sync manager approval trigger URL
         run: |
-          az containerapp secret set \
+          MANAGER_WORKFLOW_NAME=$(az resource list \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --resource-type Microsoft.Logic/workflows \
+            --query "[?starts_with(name, 'logic-manager-approval-')].name | [0]" -o tsv)
+
+          if [ -z "$MANAGER_WORKFLOW_NAME" ]; then
+            echo "No manager approval workflow found; skipping trigger sync."
+            exit 0
+          fi
+
+          CALLBACK_URL=$(az rest \
+            --method post \
+            --url "https://management.azure.com/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ vars.RESOURCE_GROUP }}/providers/Microsoft.Logic/workflows/${MANAGER_WORKFLOW_NAME}/triggers/manual/listCallbackUrl?api-version=2019-05-01" \
+            --query value -o tsv)
+
+          if [ -z "$CALLBACK_URL" ]; then
+            echo "Failed to resolve manager approval trigger URL"
+            exit 1
+          fi
+
+          CURRENT_SECRETS=$(az containerapp secret list \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --secrets manager-approval-trigger-url="${MANAGER_APPROVAL_TRIGGER_URL}"
+            --show-values \
+            -o json)
+
+          PATCH_BODY=$(CURRENT_SECRETS="$CURRENT_SECRETS" CALLBACK_URL="$CALLBACK_URL" python - <<'PY'
+import json
+import os
+
+raw_secrets = os.environ.get("CURRENT_SECRETS", "")
+callback_url = os.environ["CALLBACK_URL"]
+secrets = json.loads(raw_secrets) if raw_secrets else []
+updated_secrets: list[dict[str, str]] = []
+manager_secret_updated = False
+
+for secret in secrets:
+    name = secret.get("name", "")
+    if not name:
+        continue
+    if name == "manager-approval-trigger-url":
+        updated_secrets.append({"name": name, "value": callback_url})
+        manager_secret_updated = True
+        continue
+    copied_secret = {"name": name}
+    if "value" in secret:
+        copied_secret["value"] = secret["value"]
+    if "keyVaultUrl" in secret:
+        copied_secret["keyVaultUrl"] = secret["keyVaultUrl"]
+    if "identity" in secret:
+        copied_secret["identity"] = secret["identity"]
+    updated_secrets.append(copied_secret)
+
+if not manager_secret_updated:
+    updated_secrets.append({"name": "manager-approval-trigger-url", "value": callback_url})
+
+print(json.dumps({"properties": {"configuration": {"secrets": updated_secrets}}}))
+PY
+)
+
+          CONTAINER_APP_ID=$(az containerapp show \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query id -o tsv)
+
+          az rest \
+            --method patch \
+            --url "https://management.azure.com${CONTAINER_APP_ID}?api-version=2024-03-01" \
+            --headers "Content-Type=application/json" \
+            --body "$PATCH_BODY" >/dev/null
 
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=secretref:manager-approval-trigger-url
+            --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=secretref:manager-approval-trigger-url >/dev/null
+
+          echo "Synced manager approval trigger URL from ${MANAGER_WORKFLOW_NAME}"
 
       - name: Bootstrap optional MAI RBAC
         if: ${{ env.MAI_RESOURCE_NAME != '' }}

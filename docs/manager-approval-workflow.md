@@ -171,7 +171,7 @@ workflow の HTTP trigger URL を Container App に渡します。
 azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval-workflow-url>
 ```
 
-GitHub Actions から本番へ流す場合は、同じ値を repository または environment secret の `MANAGER_APPROVAL_TRIGGER_URL` に登録してください。
+ローカル実行や `azd up` ではこの値を `azd env` に入れてください。GitHub Actions の `deploy.yml` は Azure 上の `logic-manager-approval-*` workflow から signed trigger URL を都度取得して Container App secret へ同期するため、repository / environment secret に同じ URL を重ねて持つ必要はありません。
 
 ## 7.3 新しい tenant で Teams 接続を作り直す場合
 
