@@ -15,7 +15,7 @@ from src.work_iq_session import WorkIQSourceMetadata
 logger = logging.getLogger(__name__)
 
 _GRAPH_CONVERSATIONS_URL = "https://graph.microsoft.com/beta/copilot/conversations"
-_DEFAULT_TIMEOUT_SECONDS = 30.0
+_DEFAULT_TIMEOUT_SECONDS = 60.0
 _MAX_BRIEF_CHARS = 1200
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"</?[^>]+>")

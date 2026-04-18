@@ -86,13 +86,13 @@ def test_improvement_mcp_header_default(monkeypatch):
 
 
 def test_work_iq_timeout_default(monkeypatch):
-    """Work IQ timeout は 30 秒を既定値にする"""
+    """Work IQ timeout は 60 秒を既定値にする"""
     _disable_azd_env(monkeypatch)
     monkeypatch.delenv("WORK_IQ_TIMEOUT_SECONDS", raising=False)
 
     settings = get_settings()
 
-    assert settings["work_iq_timeout_seconds"] == "30"
+    assert settings["work_iq_timeout_seconds"] == "60"
 
 
 def test_foundry_env_aliases(monkeypatch):
