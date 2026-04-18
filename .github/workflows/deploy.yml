@@ -100,56 +100,10 @@ jobs:
             exit 1
           fi
 
-          CURRENT_SECRETS=$(az containerapp secret list \
+          az containerapp secret set \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --show-values \
-            -o json)
-
-          PATCH_BODY=$(CURRENT_SECRETS="$CURRENT_SECRETS" CALLBACK_URL="$CALLBACK_URL" python - <<'PY'
-          import json
-          import os
-
-          raw_secrets = os.environ.get("CURRENT_SECRETS", "")
-          callback_url = os.environ["CALLBACK_URL"]
-          secrets = json.loads(raw_secrets) if raw_secrets else []
-          updated_secrets: list[dict[str, str]] = []
-          manager_secret_updated = False
-
-          for secret in secrets:
-              name = secret.get("name", "")
-              if not name:
-                  continue
-              if name == "manager-approval-trigger-url":
-                  updated_secrets.append({"name": name, "value": callback_url})
-                  manager_secret_updated = True
-                  continue
-              copied_secret = {"name": name}
-              if "value" in secret:
-                  copied_secret["value"] = secret["value"]
-              if "keyVaultUrl" in secret:
-                  copied_secret["keyVaultUrl"] = secret["keyVaultUrl"]
-              if "identity" in secret:
-                  copied_secret["identity"] = secret["identity"]
-              updated_secrets.append(copied_secret)
-
-          if not manager_secret_updated:
-              updated_secrets.append({"name": "manager-approval-trigger-url", "value": callback_url})
-
-          print(json.dumps({"properties": {"configuration": {"secrets": updated_secrets}}}))
-          PY
-          )
-
-          CONTAINER_APP_ID=$(az containerapp show \
-            --name ${{ vars.CONTAINER_APP_NAME }} \
-            --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --query id -o tsv)
-
-          az rest \
-            --method patch \
-            --url "https://management.azure.com${CONTAINER_APP_ID}?api-version=2024-03-01" \
-            --headers "Content-Type=application/json" \
-            --body "$PATCH_BODY" >/dev/null
+            --secrets "manager-approval-trigger-url=${CALLBACK_URL}" >/dev/null
 
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
