@@ -24,7 +24,12 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from src.config import get_settings
-from src.conversations import append_conversation_events, get_conversation, save_conversation
+from src.conversations import (
+    append_conversation_events,
+    get_conversation,
+    replace_conversation_metadata,
+    save_conversation,
+)
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
 from src.request_identity import extract_request_identity, request_has_bearer_token
@@ -2882,12 +2887,14 @@ async def _append_post_completion_updates(
         conversation_id=conversation_id,
         user_input=existing_conversation.get("input", ""),
         new_events=appended_events,
-        metrics=_build_conversation_metadata_for_save(
-            conversation_id,
-            existing_conversation,
-            conversation_status,
-            background_updates_pending=False,
-            owner_id=owner_id,
+        metrics=replace_conversation_metadata(
+            _build_conversation_metadata_for_save(
+                conversation_id,
+                existing_conversation,
+                conversation_status,
+                background_updates_pending=False,
+                owner_id=owner_id,
+            )
         ),
         status=conversation_status,
         owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
@@ -2916,12 +2923,14 @@ async def _append_post_completion_updates_safe(
             conversation_id=conversation_id,
             user_input=existing_conversation.get("input", ""),
             new_events=[],
-            metrics=_build_conversation_metadata_for_save(
-                conversation_id,
-                existing_conversation,
-                str(existing_conversation.get("status", "completed")),
-                background_updates_pending=False,
-                owner_id=owner_id,
+            metrics=replace_conversation_metadata(
+                _build_conversation_metadata_for_save(
+                    conversation_id,
+                    existing_conversation,
+                    str(existing_conversation.get("status", "completed")),
+                    background_updates_pending=False,
+                    owner_id=owner_id,
+                )
             ),
             status=str(existing_conversation.get("status", "completed")),
             owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
@@ -3051,11 +3060,13 @@ async def _continue_after_manager_approval_safe(
             conversation_id=conversation_id,
             user_input=existing_conversation.get("input", ""),
             new_events=error_events,
-            metrics=_build_conversation_metadata_for_save(
-                conversation_id,
-                existing_conversation,
-                conversation_status,
-                owner_id=owner_id,
+            metrics=replace_conversation_metadata(
+                _build_conversation_metadata_for_save(
+                    conversation_id,
+                    existing_conversation,
+                    conversation_status,
+                    owner_id=owner_id,
+                )
             ),
             status=conversation_status,
             owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
@@ -3100,12 +3111,14 @@ async def _run_manager_approval_continuation(
         conversation_id=conversation_id,
         user_input=existing_conversation.get("input", ""),
         new_events=collected_events,
-        metrics=_build_conversation_metadata_for_save(
-            conversation_id,
-            existing_conversation,
-            conversation_status,
-            background_updates_pending=bool(background_update_jobs),
-            owner_id=owner_id,
+        metrics=replace_conversation_metadata(
+            _build_conversation_metadata_for_save(
+                conversation_id,
+                existing_conversation,
+                conversation_status,
+                background_updates_pending=bool(background_update_jobs),
+                owner_id=owner_id,
+            )
         ),
         status=conversation_status,
         owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
@@ -3364,14 +3377,16 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 conversation_id,
                 current_conversation.get("input", body.message) if current_conversation else body.message,
                 merged_messages,
-                metrics=_build_conversation_metadata_for_save(
-                    conversation_id,
-                    current_conversation,
-                    conversation_status,
-                    user_messages=user_messages,
-                    owner_id=caller_identity["user_id"],
-                    conversation_settings=effective_conversation_settings,
-                    work_iq_session=effective_work_iq_session,
+                metrics=replace_conversation_metadata(
+                    _build_conversation_metadata_for_save(
+                        conversation_id,
+                        current_conversation,
+                        conversation_status,
+                        user_messages=user_messages,
+                        owner_id=caller_identity["user_id"],
+                        conversation_settings=effective_conversation_settings,
+                        work_iq_session=effective_work_iq_session,
+                    )
                 ),
                 status=conversation_status,
                 owner_id=caller_identity["user_id"],
@@ -3481,13 +3496,15 @@ async def approve(
                 if existing_conversation
                 else body.response,
                 events=merged_messages,
-                metrics=_build_conversation_metadata_for_save(
-                    thread_id,
-                    existing_conversation,
-                    conversation_status,
-                    background_updates_pending=bool(background_update_jobs),
-                    user_messages=user_messages,
-                    owner_id=caller_identity["user_id"],
+                metrics=replace_conversation_metadata(
+                    _build_conversation_metadata_for_save(
+                        thread_id,
+                        existing_conversation,
+                        conversation_status,
+                        background_updates_pending=bool(background_update_jobs),
+                        user_messages=user_messages,
+                        owner_id=caller_identity["user_id"],
+                    )
                 ),
                 status=conversation_status,
                 owner_id=caller_identity["user_id"],
@@ -3596,11 +3613,13 @@ async def manager_approval_callback(
                 conversation_id=thread_id,
                 user_input=existing_conversation.get("input", context.get("user_input", "")),
                 events=existing_conversation.get("messages", []),
-                metrics=_build_conversation_metadata_for_save(
-                    thread_id,
-                    existing_conversation,
-                    "running",
-                    owner_id=context_owner_id,
+                metrics=replace_conversation_metadata(
+                    _build_conversation_metadata_for_save(
+                        thread_id,
+                        existing_conversation,
+                        "running",
+                        owner_id=context_owner_id,
+                    )
                 ),
                 status="running",
                 owner_id=context_owner_id or _get_conversation_owner_id(existing_conversation),
@@ -3650,11 +3669,13 @@ async def manager_approval_callback(
         if existing_conversation
         else context["user_input"],
         events=merged_messages,
-        metrics=_build_conversation_metadata_for_save(
-            thread_id,
-            existing_conversation,
-            conversation_status,
-            owner_id=context_owner_id,
+        metrics=replace_conversation_metadata(
+            _build_conversation_metadata_for_save(
+                thread_id,
+                existing_conversation,
+                conversation_status,
+                owner_id=context_owner_id,
+            )
         ),
         status=conversation_status,
         owner_id=context_owner_id or _get_conversation_owner_id(existing_conversation),

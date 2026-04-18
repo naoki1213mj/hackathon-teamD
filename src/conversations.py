@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 _memory_store: dict[str, dict] = {}
 _conversation_locks: dict[str, asyncio.Lock] = {}
 _DEFAULT_OWNER_ID = "anonymous"
+_REPLACE_METADATA_FLAG = "__replace_metadata__"
 
 # Cosmos DB クライアントのシングルトン（接続プーリングを再利用するため）
 _cosmos_client = None
@@ -33,6 +34,13 @@ def _get_owner_id_from_document(doc: dict | None) -> str:
     if not isinstance(doc, dict):
         return _DEFAULT_OWNER_ID
     return _normalize_owner_id(str(doc.get("user_id", "")))
+
+
+def replace_conversation_metadata(metadata: dict | None) -> dict | None:
+    """既存 metadata を置換する保存指示付き payload を返す。"""
+    if metadata is None:
+        return None
+    return {_REPLACE_METADATA_FLAG: True, **metadata}
 
 
 def _get_conversation_lock(conversation_id: str, owner_id: str) -> asyncio.Lock:
@@ -188,7 +196,12 @@ def _build_conversation_doc(
     existing_metadata = existing.get("metadata", {}) if existing else {}
     if not isinstance(existing_metadata, dict):
         existing_metadata = {}
-    merged_metadata = {**existing_metadata, **(metrics or {})}
+    if isinstance(metrics, dict) and metrics.get(_REPLACE_METADATA_FLAG) is True:
+        merged_metadata = {
+            key: value for key, value in metrics.items() if key != _REPLACE_METADATA_FLAG
+        }
+    else:
+        merged_metadata = {**existing_metadata, **(metrics or {})}
 
     return {
         "id": conversation_id,

@@ -612,7 +612,8 @@ def test_manager_approval_callback_reopens_conversation(monkeypatch):
     assert response.json()["status"] == "reopened"
     assert saved["status"] == "awaiting_approval"
     assert saved["events"][-1]["data"]["manager_comment"] == "価格表現をもう少し抑えてください"
-    assert saved["metrics"] == {"conversation_settings": {"work_iq_enabled": False, "source_scope": []}}
+    assert saved["metrics"]["conversation_settings"] == {"work_iq_enabled": False, "source_scope": []}
+    assert saved["metrics"]["__replace_metadata__"] is True
     assert lookup["owner_id"] is None
     assert lookup["allow_cross_owner"] is False
 

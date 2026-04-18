@@ -15,6 +15,7 @@ from src.conversations import (
     get_conversation,
     get_replay_data,
     list_conversations,
+    replace_conversation_metadata,
     save_conversation,
     save_replay_data,
 )
@@ -103,6 +104,31 @@ async def test_append_conversation_events_preserves_existing_messages():
     assert [event["event"] for event in doc["messages"]] == ["text", "evaluation_result"]
     assert doc["metadata"]["user_messages"] == ["初回入力"]
     assert doc["metadata"]["background_updates_pending"] is False
+
+
+async def test_append_conversation_events_replaces_metadata_when_requested():
+    """明示 replace 時は消したい metadata キーを残さない"""
+    await save_conversation(
+        conversation_id="test-conv-metadata-replace",
+        user_input="初回入力",
+        events=[{"event": "text", "data": {"content": "# Plan v1"}}],
+        metrics={
+            "user_messages": ["初回入力"],
+            "background_updates_pending": True,
+            "manager_approval_callback_token": "secret-token",
+        },
+    )
+
+    await append_conversation_events(
+        conversation_id="test-conv-metadata-replace",
+        user_input=None,
+        new_events=[],
+        metrics=replace_conversation_metadata({"user_messages": ["初回入力"]}),
+        status="completed",
+    )
+
+    doc = _memory_store[_build_memory_key("anonymous", "test-conv-metadata-replace")]
+    assert doc["metadata"] == {"user_messages": ["初回入力"]}
 
 
 async def test_get_conversation_from_memory():
