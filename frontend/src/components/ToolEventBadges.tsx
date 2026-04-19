@@ -1,6 +1,6 @@
 import { AlertTriangle, BookOpen, Building2, Check, Database, FileSearch, Globe, Image, Loader2, Scale, Search, Sparkles, Star, Target, Video, Wand2, Wrench } from 'lucide-react'
 import type { ToolEvent } from '../hooks/useSSE'
-import { isToolAttentionStatus, resolveToolProvider } from '../lib/tool-events'
+import { collapseToolEvents, isToolAttentionStatus, resolveToolProvider } from '../lib/tool-events'
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   query_data_agent: <Database className="h-3.5 w-3.5" />,
@@ -48,11 +48,12 @@ interface ToolEventBadgesProps {
 }
 
 export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
-  if (events.length === 0) return null
+  const collapsedEvents = collapseToolEvents(events)
+  if (collapsedEvents.length === 0) return null
 
   return (
     <div className="flex flex-wrap gap-2 py-2">
-      {events.map((event, i) => {
+      {collapsedEvents.map((event, i) => {
         const source = event.source || (event.agent === 'improvement-mcp' ? 'mcp' : undefined)
         const provider = resolveToolProvider(event)
         const isCompleted = event.status === 'completed' || event.status === 'ok'

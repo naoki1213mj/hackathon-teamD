@@ -233,4 +233,34 @@ describe('WorkflowAccordion', () => {
     expect(screen.getByText('⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。')).toBeInTheDocument()
     expect(screen.queryByText('アバター動画を生成中…')).toBeNull()
   })
+
+  it('collapses duplicate running/completed tool events and shows the latest count', () => {
+    const duplicatedToolEvents: ToolEvent[] = [
+      { tool: 'check_ng_expressions', status: 'running', agent: 'regulation-check-agent', version: 1, started_at: '2026-04-19T05:00:00Z' },
+      { tool: 'check_ng_expressions', status: 'completed', agent: 'regulation-check-agent', version: 1, started_at: '2026-04-19T05:00:00Z', finished_at: '2026-04-19T05:00:01Z' },
+      { tool: 'check_travel_law_compliance', status: 'running', agent: 'regulation-check-agent', version: 1, started_at: '2026-04-19T05:00:02Z' },
+      { tool: 'check_travel_law_compliance', status: 'completed', agent: 'regulation-check-agent', version: 1, started_at: '2026-04-19T05:00:02Z', finished_at: '2026-04-19T05:00:03Z' },
+    ]
+
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={textContents.slice(0, 4)}
+        toolEvents={duplicatedToolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /規制チェック/ }))
+
+    expect(screen.getByText('ツール 2件')).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-tool-name="check_ng_expressions"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-tool-name="check_travel_law_compliance"]')).toHaveLength(1)
+    expect(container.querySelector('[data-tool-name="check_ng_expressions"][data-tool-status="completed"]')).not.toBeNull()
+    expect(container.querySelector('[data-tool-name="check_travel_law_compliance"][data-tool-status="completed"]')).not.toBeNull()
+  })
 })

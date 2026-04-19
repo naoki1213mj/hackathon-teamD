@@ -90,6 +90,87 @@ export function isToolAttentionStatus(status: string): boolean {
   ]).has(status)
 }
 
+function toolStatusRank(status: string): number {
+  if (isToolAttentionStatus(status)) return 4
+  if (status === 'completed' || status === 'ok') return 3
+  if (status === 'running') return 2
+  if (status === 'pending' || status === 'queued') return 1
+  return 0
+}
+
+function compareToolEvents(a: ToolEvent, b: ToolEvent): number {
+  const rankDiff = toolStatusRank(b.status) - toolStatusRank(a.status)
+  if (rankDiff !== 0) return rankDiff
+
+  const finishedA = Date.parse(a.finished_at || '')
+  const finishedB = Date.parse(b.finished_at || '')
+  if (Number.isFinite(finishedA) && Number.isFinite(finishedB) && finishedA !== finishedB) {
+    return finishedB - finishedA
+  }
+
+  const startedA = Date.parse(a.started_at || '')
+  const startedB = Date.parse(b.started_at || '')
+  if (Number.isFinite(startedA) && Number.isFinite(startedB) && startedA !== startedB) {
+    return startedB - startedA
+  }
+
+  return 0
+}
+
+function buildToolEventKey(event: ToolEvent): string {
+  return [
+    event.version || '',
+    event.round || '',
+    event.step_key || '',
+    event.agent || '',
+    event.tool || '',
+    resolveToolProvider(event),
+    event.source || '',
+    event.display_name || '',
+    event.phase || '',
+    event.background_update ? 'background' : 'foreground',
+  ].join('::')
+}
+
+export function collapseToolEvents(events: ToolEvent[]): ToolEvent[] {
+  const grouped = new Map<string, ToolEvent[]>()
+
+  for (const event of events) {
+    const key = buildToolEventKey(event)
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.push(event)
+    } else {
+      grouped.set(key, [event])
+    }
+  }
+
+  return Array.from(grouped.values(), (group) => {
+    const [winner, ...rest] = [...group].sort(compareToolEvents)
+    const mergedScopes = Array.from(
+      new Set(group.flatMap((event) => event.source_scope ?? [])),
+    )
+
+    return {
+      ...rest.reduce<ToolEvent>(
+        (acc, event) => ({
+          ...acc,
+          event_id: acc.event_id ?? event.event_id,
+          display_name: acc.display_name ?? event.display_name,
+          fallback: acc.fallback ?? event.fallback,
+          started_at: acc.started_at ?? event.started_at,
+          finished_at: acc.finished_at ?? event.finished_at,
+          duration_ms: acc.duration_ms ?? event.duration_ms,
+          error_code: acc.error_code ?? event.error_code,
+          error_message: acc.error_message ?? event.error_message,
+        }),
+        { ...winner },
+      ),
+      source_scope: mergedScopes.length > 0 ? mergedScopes : winner.source_scope,
+    }
+  })
+}
+
 export function normalizeToolEventData(
   data: Record<string, unknown>,
   options: {

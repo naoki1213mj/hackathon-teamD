@@ -53,4 +53,29 @@ describe('ToolEventBadges', () => {
     expect(screen.getByText('Meeting notes')).toBeInTheDocument()
     expect(screen.getByText('Emails')).toBeInTheDocument()
   })
+
+  it('collapses running and completed events for the same tool into one completed badge', () => {
+    const events: ToolEvent[] = [
+      {
+        tool: 'fetch_workplace_context',
+        status: 'running',
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        started_at: '2026-04-19T05:00:00Z',
+      },
+      {
+        tool: 'fetch_workplace_context',
+        status: 'completed',
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        started_at: '2026-04-19T05:00:00Z',
+        finished_at: '2026-04-19T05:00:02Z',
+      },
+    ]
+
+    const { container } = render(<ToolEventBadges events={events} t={t} />)
+
+    expect(container.querySelectorAll('[data-tool-name="fetch_workplace_context"]')).toHaveLength(1)
+    expect(container.querySelector('[data-tool-name="fetch_workplace_context"][data-tool-status="completed"]')).not.toBeNull()
+  })
 })

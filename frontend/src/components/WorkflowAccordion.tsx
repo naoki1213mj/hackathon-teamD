@@ -1,7 +1,7 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
-import { resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
+import { collapseToolEvents, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
 import { ErrorRetry } from './ErrorRetry'
@@ -207,9 +207,9 @@ export function WorkflowAccordion({
     return 'pending'
   }
 
-  const getToolEvents = (agentKey: string, roundNumber: number) => toolEvents.filter(
+  const getToolEvents = (agentKey: string, roundNumber: number) => collapseToolEvents(toolEvents.filter(
     event => isStepToolEvent(event, agentKey, roundNumber),
-  )
+  ))
 
   /** 1 つのステップ（アコーディオン項目）を描画する */
   const renderStep = (
@@ -404,9 +404,9 @@ export function WorkflowAccordion({
 
       {(() => {
         const renderedStepKeys = new Set(ALL_STEPS.map(step => step.key))
-        const extraToolEvents = toolEvents.filter(
+        const extraToolEvents = collapseToolEvents(toolEvents.filter(
           event => !renderedStepKeys.has(resolveToolStepKey(event.agent, event.step_key)),
-        )
+        ))
         if (extraToolEvents.length === 0) return null
 
         return (
