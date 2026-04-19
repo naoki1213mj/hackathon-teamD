@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from collections import Counter
+from collections.abc import AsyncIterator
 from typing import Any, NotRequired, TypedDict
 
 import httpx
@@ -15,7 +16,9 @@ from src.work_iq_session import WorkIQSourceMetadata
 logger = logging.getLogger(__name__)
 
 _GRAPH_CONVERSATIONS_URL = "https://graph.microsoft.com/beta/copilot/conversations"
-_DEFAULT_TIMEOUT_SECONDS = 60.0
+_GRAPH_STREAM_SUFFIX = "chatOverStream"
+_GRAPH_SYNC_SUFFIX = "chat"
+_DEFAULT_TIMEOUT_SECONDS = 120.0
 _MAX_BRIEF_CHARS = 1200
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"</?[^>]+>")
@@ -67,7 +70,7 @@ def _build_headers(access_token: str) -> dict[str, str]:
     """Graph API 呼び出しヘッダーを構築する。"""
     return {
         "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json",
+        "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
     }
 
@@ -212,6 +215,95 @@ def _build_source_metadata(attributions: object, source_scope: list[str]) -> lis
     return metadata
 
 
+def _parse_sse_json_blocks(buffer: str) -> tuple[list[dict[str, Any]], str]:
+    """SSE バッファから JSON payload 群を取り出し、未処理の末尾だけ返す。"""
+    blocks = buffer.split("\n\n")
+    remainder = blocks.pop() if blocks else ""
+    payloads: list[dict[str, Any]] = []
+
+    for block in blocks:
+        data_lines: list[str] = []
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                value = line[5:].lstrip()
+                if value == "[DONE]":
+                    continue
+                data_lines.append(value)
+        if not data_lines:
+            continue
+        try:
+            parsed = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+
+    return payloads, remainder
+
+
+async def _iter_stream_payloads(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+    """Graph SSE レスポンスから conversation payload を順に取り出す。"""
+    buffer = ""
+    async for chunk in response.aiter_text():
+        buffer += chunk.replace("\r\n", "\n").replace("\r", "\n")
+        payloads, buffer = _parse_sse_json_blocks(buffer)
+        for payload in payloads:
+            yield payload
+
+    trailing_payloads, _ = _parse_sse_json_blocks(f"{buffer}\n\n")
+    for payload in trailing_payloads:
+        yield payload
+
+
+async def _chat_over_stream(
+    conversation_id: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """streaming endpoint を使って assistant message を取得する。"""
+    stream_url = f"{_GRAPH_CONVERSATIONS_URL}/{conversation_id}/{_GRAPH_STREAM_SUFFIX}"
+    latest_message: dict[str, Any] | None = None
+
+    async with get_http_client().stream(
+        "POST",
+        stream_url,
+        json=payload,
+        headers=headers,
+        timeout=timeout_seconds,
+    ) as response:
+        response.raise_for_status()
+        async for stream_payload in _iter_stream_payloads(response):
+            try:
+                latest_message = _extract_assistant_message(stream_payload)
+            except ValueError:
+                continue
+
+    if latest_message is None:
+        raise ValueError("assistant message was missing from streamed graph response")
+    return latest_message
+
+
+async def _chat_synchronously(
+    conversation_id: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """同期 endpoint を使って assistant message を取得する。"""
+    chat_response = await get_http_client().post(
+        f"{_GRAPH_CONVERSATIONS_URL}/{conversation_id}/{_GRAPH_SYNC_SUFFIX}",
+        json=payload,
+        headers=headers,
+        timeout=timeout_seconds,
+    )
+    chat_response.raise_for_status()
+    return _extract_assistant_message(chat_response.json())
+
+
 def _map_http_error(exc: httpx.HTTPStatusError) -> str:
     """HTTP エラーを UI 向け status へ写像する。"""
     status_code = exc.response.status_code
@@ -241,6 +333,7 @@ async def generate_workplace_context_brief(
     headers = _build_headers(access_token)
     timeout_seconds = _resolve_timeout_seconds()
     stage = "conversation_create"
+    chat_payload = _build_chat_payload(user_input, source_scope, user_time_zone)
 
     try:
         create_response = await get_http_client().post(
@@ -257,15 +350,26 @@ async def generate_workplace_context_brief(
         if not conversation_id:
             raise ValueError("graph conversation id was missing")
 
-        stage = "chat"
-        chat_response = await get_http_client().post(
-            f"{_GRAPH_CONVERSATIONS_URL}/{conversation_id}/chat",
-            json=_build_chat_payload(user_input, source_scope, user_time_zone),
-            headers=headers,
-            timeout=timeout_seconds,
-        )
-        chat_response.raise_for_status()
-        assistant_message = _extract_assistant_message(chat_response.json())
+        stage = "chat_stream"
+        try:
+            assistant_message = await _chat_over_stream(
+                conversation_id=conversation_id,
+                payload=chat_payload,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {404, 405, 406, 415, 501}:
+                logger.info("work iq stream endpoint unavailable; falling back to synchronous chat")
+                stage = "chat"
+                assistant_message = await _chat_synchronously(
+                    conversation_id=conversation_id,
+                    payload=chat_payload,
+                    headers=headers,
+                    timeout_seconds=timeout_seconds,
+                )
+            else:
+                raise
     except httpx.TimeoutException:
         logger.warning("work iq graph call timed out during %s after %.1fs", stage, timeout_seconds)
         return _failure_result("timeout")

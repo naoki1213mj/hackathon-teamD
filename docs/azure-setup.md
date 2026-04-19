@@ -29,12 +29,12 @@
 
 | 領域 | 状態 | 補足 |
 | --- | --- | --- |
-| Work IQ | 完了 | SPA redirect URI、Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了 |
+| Work IQ | 完了 | SPA redirect URI、Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。tenant 内アカウントでの実ブラウザ検証では `completed` まで到達済みで、runtime は `chatOverStream` を優先し既定 `WORK_IQ_TIMEOUT_SECONDS=120` で運用します |
 | Search / Foundry IQ | 完了 | Azure AI Search は **East US** に作成。`regulations-index`、`regulations-ks`、`regulations-kb` を投入済み |
 | 追加モデル | 完了 | メイン East US 2 Foundry account に `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み |
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
 | Fabric | 完了 | Fabric capacity `fcdemojapaneast001` を resume し、workspace `ws-MG-pod2` に `Travel_Lakehouse` と `sales_results` / `customer_reviews` を再投入済み。`FABRIC_DATA_AGENT_URL` / `FABRIC_SQL_ENDPOINT` も Container App へ反映済み |
-| Logic Apps / Teams / SharePoint | 部分完了 | Teams connection `teams-1` は Connected。`logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live で、post-approval の Teams channel 通知は動作確認済み。残件は SharePoint 保存経路（site permission grant または connector 再認証） |
+| Logic Apps / Teams / SharePoint | 部分完了 | Teams connection `teams-1` は Connected。`logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live で、post-approval の Teams channel 通知は動作確認済みです。manager approval の signed trigger URL 同期も live で再確認済みで、Container App secret は現在の Logic App callback URL と一致しています。残件は SharePoint 保存経路（site permission grant または connector 再認証） |
 
 ## 4. 手動設定が必要な項目（新しい tenant を一から立てる場合）
 
@@ -113,6 +113,8 @@ az containerapp update --name <app> --resource-group <rg> \
 
 rebuilt `workiq-dev` tenant ではこの 2 つの URL はすでに live workflow に配線済みです。別 tenant で trigger URL が変わった場合だけ更新してください。
 
+GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger URL を Azure から毎回引き直して Container App secret へ同期します。ローカルの `azd env` は自動同期されないため、`azd up` や手動テストに使う値だけは自分で更新してください。
+
 詳細は [manager-approval-workflow.md](manager-approval-workflow.md) を参照してください。
 
 ### 4.6 Work IQ app の admin consent（新テナント必須）
@@ -124,10 +126,12 @@ rebuilt `workiq-dev` tenant ではこの 2 つの URL はすでに live workflow
 1. 新テナントの Global Administrator または Cloud Application Administrator で Entra admin center にサインインする
 2. SPA アプリ登録に Microsoft Graph delegated permissions を追加する: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`
 3. Work IQ / Microsoft 365 Copilot 用の enterprise app / app registration を開き、上記権限に **Grant admin consent** を実行する
-4. ランタイムは専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chat`）を per-user delegated で呼び出す。追加の Work IQ endpoint 環境変数は不要
+4. ランタイムは専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出す。追加の Work IQ endpoint 環境変数は不要
 5. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、Work IQ の状態が `consent_required` から `ready` / `enabled` へ変わることを確認する
 
 tenant-wide consent はユーザー個人の delegated sign-in では代替できないため、この部分だけは外部手順として残ります。
+
+> サインイン確認は **tenant member / guest として参加している Microsoft 365 アカウント**で行ってください。rebuilt tenant に所属しないアカウントは、SPA redirect 後のサインイン自体が拒否されます。
 
 公式ドキュメント:
 
@@ -220,7 +224,7 @@ curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
 | Voice Live | `/api/voice-config` が MSAL 設定を返す |
 | Fabric | Agent1 が Fabric Data Agent または Fabric SQL endpoint を使い、CSV フォールバックにならない |
 | 承認後 Teams 通知 | `logic-wmbvhdhcsuyb2` の run history が success で、対象 Team / channel に投稿される |
-| 評価 | `/api/evaluate` が `builtin` + `marketing_quality` を返す |
+| 評価 | `/api/evaluate` が `builtin`、`plan_quality`、`asset_quality`、`regression_guard` を返す |
 
 ## 7. トラブルシューティング
 
@@ -232,6 +236,8 @@ curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
 | 画像が透明 PNG | 画像モデル配備を確認。MAI は別 East US account + RBAC が必要。`MAI-Image-2` quota が無い場合は `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP 改善が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認。新 tenant では Function App が managed identity storage に切り替わっているかも確認する |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |
-| 上司通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認。未設定でも承認ページ自体は動作 |
+| Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
+| Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
+| 上司通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認し、Container App secret に `?api-version=...&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確かめる。`deploy.yml` の signed URL 再同期が成功しているかも確認する。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、Team / channel ID を確認 |
 | SharePoint へ保存されない | target site への permission grant（preferred）または `sharepointonline` connector の認証状態を確認 |

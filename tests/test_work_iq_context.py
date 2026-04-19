@@ -28,11 +28,41 @@ class _MockClient:
         self.calls: list[dict[str, object]] = []
 
     async def post(self, url: str, **kwargs):
-        self.calls.append({"url": url, **kwargs})
+        self.calls.append({"method": "post", "url": url, **kwargs})
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return response
+
+    def stream(self, method: str, url: str, **kwargs):
+        self.calls.append({"method": "stream", "http_method": method, "url": url, **kwargs})
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class _MockStreamResponse:
+    def __init__(self, chunks: list[str], status_code: int = 200, text: str = "") -> None:
+        self.chunks = chunks
+        self.status_code = status_code
+        self.text = text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            request = httpx.Request("POST", "https://graph.microsoft.com/beta/copilot/conversations/conv-123/chatOverStream")
+            response = httpx.Response(self.status_code, text=self.text, request=request)
+            raise httpx.HTTPStatusError("graph call failed", request=request, response=response)
+
+    async def aiter_text(self):
+        for chunk in self.chunks:
+            yield chunk
 
 
 def test_parse_brief_summary_prefers_json_payload_and_sanitizes_html() -> None:
@@ -73,24 +103,17 @@ async def test_generate_workplace_context_brief_returns_summary_and_sources(monk
     client = _MockClient(
         [
             _MockResponse({"id": "conv-123"}),
-            _MockResponse(
-                {
-                    "messages": [
-                        {
-                            "text": '{"brief_summary":"営業メールでは春休みの家族旅行需要を重視していました。"}',
-                            "attributions": [
-                                {
-                                    "seeMoreWebUrl": "https://outlook.office.com/mail/inbox",
-                                    "providerDisplayName": "Mail",
-                                },
-                                {
-                                    "seeMoreWebUrl": "https://contoso.sharepoint.com/sites/team/briefing.pdf",
-                                    "providerDisplayName": "SharePoint",
-                                },
-                            ],
-                        }
-                    ]
-                }
+            _MockStreamResponse(
+                [
+                    (
+                        "data: {\"messages\":[{\"text\":\""
+                        "{\\\"brief_summary\\\":\\\"営業メールでは春休みの家族旅行需要を重視していました。\\\"}\","
+                        "\"attributions\":[{\"seeMoreWebUrl\":\"https://outlook.office.com/mail/inbox\","
+                        "\"providerDisplayName\":\"Mail\"},{\"seeMoreWebUrl\":"
+                        "\"https://contoso.sharepoint.com/sites/team/briefing.pdf\","
+                        "\"providerDisplayName\":\"SharePoint\"}]}]}\n\n"
+                    )
+                ]
             ),
         ]
     )
@@ -113,6 +136,7 @@ async def test_generate_workplace_context_brief_returns_summary_and_sources(monk
         "status": "completed",
     }
     assert client.calls[0]["json"] == {}
+    assert client.calls[1]["method"] == "stream"
     assert client.calls[1]["headers"]["Authorization"] == "Bearer graph-token"
     assert client.calls[1]["json"]["contextualResources"]["webContext"]["isWebEnabled"] is False
     assert client.calls[1]["json"]["locationHint"]["timeZone"] == "Asia/Tokyo"
@@ -123,7 +147,7 @@ async def test_generate_workplace_context_brief_maps_consent_errors(monkeypatch)
     client = _MockClient(
         [
             _MockResponse({"id": "conv-123"}),
-            _MockResponse({}, status_code=403, text="Admin consent required for this request"),
+            _MockStreamResponse([], status_code=403, text="Admin consent required for this request"),
         ]
     )
     monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
@@ -164,7 +188,7 @@ async def test_generate_workplace_context_brief_requires_access_token(monkeypatc
 
 @pytest.mark.asyncio
 async def test_generate_workplace_context_brief_maps_timeout(monkeypatch) -> None:
-    client = _MockClient([httpx.TimeoutException("timed out")])
+    client = _MockClient([_MockResponse({"id": "conv-123"}), httpx.TimeoutException("timed out")])
     monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
 
     result = await work_iq_context.generate_workplace_context_brief(
@@ -179,3 +203,46 @@ async def test_generate_workplace_context_brief_maps_timeout(monkeypatch) -> Non
         "status": "timeout",
         "warning_code": "timeout",
     }
+
+
+@pytest.mark.asyncio
+async def test_generate_workplace_context_brief_falls_back_to_sync_when_stream_is_unavailable(monkeypatch) -> None:
+    client = _MockClient(
+        [
+            _MockResponse({"id": "conv-123"}),
+            _MockStreamResponse([], status_code=405, text="Method not allowed"),
+            _MockResponse(
+                {
+                    "messages": [
+                        {
+                            "text": '{"brief_summary":"会議メモでは価格訴求より春の家族体験を重視していました。"}',
+                            "attributions": [
+                                {
+                                    "seeMoreWebUrl": "https://teams.microsoft.com/l/chat/0/0",
+                                    "providerDisplayName": "Chat",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
+
+    result = await work_iq_context.generate_workplace_context_brief(
+        "北海道の春プラン",
+        ["teams_chats"],
+        "graph-token",
+    )
+
+    assert result == {
+        "brief_summary": "会議メモでは価格訴求より春の家族体験を重視していました。",
+        "brief_source_metadata": [
+            {"source": "teams_chats", "count": 1, "label": "Teams チャット"},
+        ],
+        "status": "completed",
+    }
+    assert client.calls[1]["method"] == "stream"
+    assert client.calls[2]["method"] == "post"
+    assert client.calls[2]["url"].endswith("/chat")

@@ -103,17 +103,20 @@ azd auth login
 azd up                                    # provision + build + deploy
 ```
 
-`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and remaining manual steps.
+`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and the remaining follow-up items.
 
 ### Current Azure status (`workiq-dev` tenant)
 
 | Area | Current state |
 | --- | --- |
 | Work IQ delegated auth | SPA redirect URIs, Microsoft Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
+| Work IQ runtime | Live browser validation reaches Work IQ `completed` with a tenant member account. The app now prefers Microsoft Graph Copilot Chat API `chatOverStream` and raises the default `WORK_IQ_TIMEOUT_SECONDS` to `120` to absorb slower tenant responses. Accounts outside the tenant/guest list are rejected during sign-in |
 | Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
 | Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` |
 | MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
-| Remaining manual work | Fabric capacity / Lakehouse / SQL endpoint rebuild, plus Teams / SharePoint connections and the manager-approval workflow |
+| Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored. The live app now uses both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` |
+| Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` and `logic-wmbvhdhcsuyb2` are live. Manager approval notification and post-approval Teams channel delivery were revalidated, and `deploy.yml` now resyncs the full signed manager trigger URL into the Container App secret |
+| Remaining manual work | Only the SharePoint save path remains as manual follow-up; Fabric, manager approval, and Teams notification are already live |
 
 ## Environment Variables
 

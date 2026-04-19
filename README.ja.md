@@ -103,17 +103,20 @@ azd auth login
 azd up                                    # プロビジョニング + ビルド + デプロイ
 ```
 
-`scripts/postprovision.py` が APIM AI Gateway、MCP Function App、Voice Agent、Entra SPA 登録を自動構成します。現在の tenant 状態と残りの手動設定は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
+`scripts/postprovision.py` が APIM AI Gateway、MCP Function App、Voice Agent、Entra SPA 登録を自動構成します。現在の tenant 状態と残るフォローアップ項目は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
 
 ### 現在の Azure 状態（`workiq-dev` tenant）
 
 | 領域 | 現在の状態 |
 | --- | --- |
 | Work IQ delegated auth | SPA redirect URI、Microsoft Graph delegated permissions、tenant-wide admin consent、Microsoft 365 Copilot ライセンス確認まで完了 |
+| Work IQ runtime | tenant 内アカウントでの実ブラウザ検証で Work IQ `completed` まで到達済みです。アプリは Microsoft Graph Copilot Chat API `chatOverStream` を優先し、遅い tenant 応答に備えて既定 `WORK_IQ_TIMEOUT_SECONDS` を `120` へ引き上げました。tenant member / guest ではないアカウントはサインイン時に弾かれます |
 | Search / Foundry IQ | `regulations-index`、`regulations-ks`、`regulations-kb` を **East US** の Azure AI Search に作成済み。アプリには `SEARCH_ENDPOINT` + `SEARCH_API_KEY` で配線済み |
 | モデル配備 | メインの East US 2 Foundry account には `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み |
 | MAI 画像経路 | `IMAGE_PROJECT_ENDPOINT_MAI` は別の East US AI Services account を指す。現在は subscription に `MAI-Image-2` quota が無いため、`MAI-Image-2` deployment 名を **MAI-Image-2e** の alias として運用 |
-| 残る手動作業 | Fabric capacity / Lakehouse / SQL endpoint の再構築、および Teams / SharePoint 接続と manager-approval workflow |
+| Fabric | Fabric capacity `fcdemojapaneast001`、workspace `ws-MG-pod2`、lakehouse `Travel_Lakehouse`、`sales_results` / `customer_reviews` テーブルは復旧済みです。live アプリには `FABRIC_DATA_AGENT_URL` と `FABRIC_SQL_ENDPOINT` の両方を反映しています |
+| Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live です。上司承認通知と承認後 Teams channel 通知を再確認済みで、`deploy.yml` は full signed manager trigger URL を Container App secret へ毎回再同期します |
+| 残る手動作業 | 現状の残件は SharePoint 保存経路が中心です。Fabric、manager approval、Teams 通知は live で復旧・確認済みです |
 
 ## 環境変数
 

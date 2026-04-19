@@ -117,10 +117,11 @@ Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Gra
 | --- | --- |
 | Search / Foundry IQ | Azure AI Search was created in **East US** (East US 2 had no capacity), and `regulations-index`, `regulations-ks`, and `regulations-kb` are already wired into the Container App |
 | Work IQ | SPA redirect URIs, Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
+| Work IQ runtime | Live browser validation reaches Work IQ `completed` with a tenant member account. The backend now prefers Microsoft Graph Copilot Chat API `chatOverStream` and keeps `WORK_IQ_TIMEOUT_SECONDS=120` by default so slower tenant responses do not fail closed too early. Accounts outside the tenant/guest list are rejected during sign-in |
 | Text models | `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` exist on the main East US 2 Foundry account |
 | MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
 | Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored, and both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` are wired into the Container App |
-| Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel |
+| Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel. The signed manager trigger URL sync in `deploy.yml` has also been revalidated against the live Container App secret |
 | Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback |
 
 ### Improvement MCP の追加デプロイ
@@ -146,7 +147,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
-| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 60） |
+| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 120） |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
@@ -159,7 +160,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 
 > Logic App の signed trigger URL は `&sp=...&sv=...&sig=...` を含みます。Container App secret や `azd env` へ反映するときは **URL 全体を 1 つの値として引用**し、途中で切れないようにしてください。
 >
-> `deploy.yml` は manager approval workflow の signed trigger URL を Azure から毎回引き直して Container App secret へ同期します。GitHub Actions 側で `MANAGER_APPROVAL_TRIGGER_URL` を別 secret として持つ必要はありません。
+> `deploy.yml` は manager approval workflow の signed trigger URL を Azure から毎回引き直して Container App secret へ同期します。GitHub Actions 側で `MANAGER_APPROVAL_TRIGGER_URL` を別 secret として持つ必要はありません。この同期経路は live 環境でも再確認済みです。
 
 ## 7. デプロイ後の確認
 
@@ -174,7 +175,7 @@ curl https://<your-app>/api/ready
 
 ### CI (`ci.yml`)
 
-Ruff lint → pytest (277 tests) → npm lint → tsc → npm build
+Ruff lint → pytest → frontend lint → TypeScript check → frontend build
 
 ### Deploy (`deploy.yml`)
 
@@ -185,7 +186,7 @@ Ruff lint → pytest (277 tests) → npm lint → tsc → npm build
 
 ### Security (`security.yml`)
 
-Trivy, Gitleaks, npm audit, pip-audit
+Trivy, Gitleaks, npm audit, pip-audit, bandit
 
 ## 9. トラブルシューティング
 
@@ -196,7 +197,9 @@ Trivy, Gitleaks, npm audit, pip-audit
 | `gpt-4.1` / `gpt-5.4` が使えない | Azure 側の deployment 名が UI 値と一致しているか確認 (`gpt-4.1`, `gpt-4-1-mini`, `gpt-5.4`) |
 | 画像が透明 PNG | `IMAGE_PROJECT_ENDPOINT_MAI` と別 East US MAI account の RBAC を確認。`MAI-Image-2` quota が無い subscription では `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認 |
-| 上司承認通知が飛ばない | `logic-manager-approval-*` の run history と Container App secret `manager-approval-trigger-url` に `&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確認。未設定でも承認ページ自体は動作 |
+| Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
+| Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
+| 上司承認通知が飛ばない | `logic-manager-approval-*` の run history と Container App secret `manager-approval-trigger-url` に `&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確認。`deploy.yml` の signed URL 再同期が成功しているかも確認する。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、対象 Team / channel を確認 |
 | SharePoint に保存されない | target site への permission grant か `sharepointonline` connector の認証状態を確認 |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |

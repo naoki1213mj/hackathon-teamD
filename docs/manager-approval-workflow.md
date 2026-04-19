@@ -6,7 +6,7 @@
 
 現在の組み込み上司承認ページは、今回承認対象の企画書と、直前までの確定済み企画書を横並びで比較表示できます。通知 workflow 側は `manager_approval_url` を上司へ届ければ十分で、比較 UI 自体はアプリ側が担当します。
 
-2026-04-18 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。rebuilt `workiq-dev` tenant では `teams-1` が Connected で、`logic-manager-approval-wmbvhdhcsuyb2` が live です。
+2026-04-18 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。rebuilt `workiq-dev` tenant では `teams-1` が Connected で、`logic-manager-approval-wmbvhdhcsuyb2` が live です。`deploy.yml` による signed trigger URL の再同期も live で検証済みで、Container App secret は現在の Logic App callback URL と一致しています。
 
 ## 1. FastAPI から workflow へ送る request
 
@@ -165,13 +165,13 @@ az deployment group create \
 
 ### 7.2 trigger URL をアプリへ渡す
 
-workflow の HTTP trigger URL を Container App に渡します。
+workflow の HTTP trigger の **full signed URL**（`?api-version=...&sp=...&sv=...&sig=...` を含む値）を Container App に渡します。
 
 ```bash
 azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval-workflow-url>
 ```
 
-ローカル実行や `azd up` ではこの値を `azd env` に入れてください。GitHub Actions の `deploy.yml` は Azure 上の `logic-manager-approval-*` workflow から signed trigger URL を都度取得して Container App secret へ同期するため、repository / environment secret に同じ URL を重ねて持つ必要はありません。
+ローカル実行や `azd up` ではこの値を `azd env` に入れてください。GitHub Actions の `deploy.yml` は Azure 上の `logic-manager-approval-*` workflow から signed trigger URL を都度取得して Container App secret へ同期するため、repository / environment secret に同じ URL を重ねて持つ必要はありません。この同期経路は live 環境でも再確認済みです。
 
 ## 7.3 新しい tenant で Teams 接続を作り直す場合
 

@@ -32,6 +32,7 @@ REST API と SSE イベントの仕様です。
 | `GET` | `/api/voice-token` | Voice Live 用 AAD トークン取得 |
 | `GET` | `/api/voice-config` | Voice Live MSAL 設定取得 |
 | `POST` | `/api/evaluate` | 品質評価の実行 |
+| `POST` | `/api/upload-pdf` | 既存パンフレット PDF のアップロード |
 
 ## ヘルスチェック
 
@@ -114,8 +115,8 @@ REST API と SSE イベントの仕様です。
 
 | ヘッダ | 必須 | 用途 |
 | --- | --- | --- |
-| `Authorization: Bearer <Graph token>` | Work IQ を有効化した会話で必須 | Microsoft Graph Copilot Chat API を per-user delegated で呼ぶための本人トークン |
-| `X-User-Timezone` | 任意 | Work IQ brief 取得時の `locationHint.timeZone` に使用 |
+| `Authorization: Bearer <Graph token>` | 任意 | Work IQ を有効化した **新規会話** で Microsoft Graph Copilot Chat API を per-user delegated で呼ぶときに使う本人トークン。無い場合でも会話自体は fail-closed で継続し、`tool_event.status=auth_required` などを返す |
+| `X-User-Timezone` | 任意 | Work IQ brief 取得時の `locationHint.timeZone` に使用（未指定時は `UTC`） |
 
 ### `/api/chat` 現行挙動
 
@@ -130,7 +131,8 @@ REST API と SSE イベントの仕様です。
 ### `/api/chat` 注意
 
 - Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
-- `conversation_settings.work_iq_enabled=true` の新規会話では、Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得し、Agent2 prompt にだけ注入します。
+- `conversation_settings.work_iq_enabled=true` の新規会話では、Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。既定 timeout は `120` 秒です。
+- Work IQ の brief 取得が `auth_required` / `identity_mismatch` / `consent_required` / `timeout` / `unavailable` になっても、会話本体は止めずに **brief なしで継続** します。SSE には `tool_event.source="workiq"` の status だけが流れます。
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。
 - manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
@@ -239,8 +241,8 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 
 | 条件 | 挙動 |
 | --- | --- |
-| `approved=true` | バックグラウンドで Agent4 → Agent5 と post approval actions を再開 |
-| `approved=false` | 担当者向け `approval_request` を会話履歴へ追記し、差し戻しコメントを UI に戻す |
+| `approved=true` | バックグラウンドで Agent4 → Agent5 と post approval actions を再開し、HTTP レスポンスは `{"status":"accepted","conversation_id":"..."}` を返す |
+| `approved=false` | 担当者向け `approval_request` を会話履歴へ追記し、差し戻しコメントを UI に戻す。HTTP レスポンスは `{"status":"reopened","conversation_id":"..."}` を返す |
 
 ### `manager-approval-callback` 注意
 
@@ -248,6 +250,7 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 - 代わりに `X-Manager-Approval-Token` ヘッダで送っても受け付けます。
 - 組み込みの上司承認ページもこの endpoint をそのまま利用します。
 - token がない、または一致しない callback は `403 invalid manager approval token` で拒否されます。
+- callback に Bearer token を付ける場合、会話 owner と一致しない呼び出しは `403 conversation owner mismatch` で拒否されます。
 
 ## 会話 API
 
@@ -255,7 +258,7 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 
 会話一覧を返します。Cosmos DB が未設定ならインメモリから返します。
 
-- Work IQ 会話を含めて一覧取得したい場合は、フロントエンドが保持している delegated Bearer token を同じく付与します。トークンがない場合は匿名会話だけが見えることがあります。
+- `/api/conversations`、`/api/conversations/{id}`、`/api/replay/{id}` はすべて owner-bound です。delegated Bearer token がある場合はその owner に属する会話だけが返り、トークンがない場合は匿名/fallback owner の会話だけが見えることがあります。
 
 クエリ:
 
@@ -292,9 +295,18 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
   "status": "completed",
   "input": "沖縄のファミリー向け春キャンペーン",
   "messages": [],
-  "artifacts": {},
+  "artifacts": [
+    {
+      "version": 1,
+      "created_at": "2026-03-20T10:31:05+00:00"
+    }
+  ],
   "metadata": {
     "background_updates_pending": false,
+    "conversation_settings": {
+      "work_iq_enabled": true,
+      "source_scope": ["emails"]
+    },
     "work_iq_session": {
       "enabled": true,
       "source_scope": ["emails"],
@@ -357,7 +369,9 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 {
   "query": "沖縄のファミリー向け春キャンペーンを企画してください",
   "response": "# 春の沖縄ファミリープラン\n\n...",
-  "html": "<!DOCTYPE html><html lang=\"ja\">...</html>"
+  "html": "<!DOCTYPE html><html lang=\"ja\">...</html>",
+  "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "artifact_version": 2
 }
 ```
 
@@ -365,7 +379,9 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 | --- | --- | --- | --- |
 | `query` | `string` | 必須 | 元のユーザー依頼 |
 | `response` | `string` | 必須 | 企画書 Markdown |
-| `html` | `string` | 任意 | ブローシャ HTML。空文字可。未指定時のコンバージョン期待度判定は `response` を代用 |
+| `html` | `string` | 任意 | ブローシャ HTML。空文字可 |
+| `conversation_id` | `string \| null` | 任意 | 評価結果を保存する会話 ID。指定すると owner-bound conversation に `evaluation_result` イベントとして追記される |
+| `artifact_version` | `int \| null` | 任意 | 評価対象の成果物バージョン。`conversation_id` と併用した場合に評価履歴と悪化検知の比較対象を決める |
 
 ### レスポンス例
 
@@ -408,7 +424,36 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
     "overall": 4,
     "reason": "訴求は強いが差別化の具体性に改善余地があります"
   },
-  "foundry_portal_url": "https://ai.azure.com/..."
+  "plan_quality": {
+    "overall": 4.05,
+    "summary": "優先補強ポイント: 差別化、KPI 根拠の明確さ",
+    "focus_areas": ["差別化", "KPI 根拠の明確さ"],
+    "metrics": {
+      "relevance": { "label": "依頼適合性", "score": 4.0, "reason": "依頼に沿っています" }
+    }
+  },
+  "asset_quality": {
+    "overall": 3.8,
+    "summary": "優先補強ポイント: 予約導線の明確さ",
+    "focus_areas": ["予約導線の明確さ"],
+    "metrics": {
+      "cta_visibility": { "label": "予約導線の明確さ", "score": 3.5, "reason": "CTA の配置が弱いです" }
+    }
+  },
+  "regression_guard": {
+    "summary": "前 version と比較して大きな悪化はありません。",
+    "has_regressions": false,
+    "degraded_metrics": [],
+    "improved_metrics": [],
+    "plan_overall_delta": 0.0,
+    "asset_overall_delta": 0.0
+  },
+  "legacy_overall": 3.93,
+  "evaluation_meta": {
+    "version": 2,
+    "round": 1,
+    "created_at": "2026-03-20T10:40:00+00:00"
+  }
 }
 ```
 
@@ -417,7 +462,41 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 | `custom` | `object` | code-based カスタム評価。現在は `travel_law_compliance` と `conversion_potential` |
 | `builtin` | `object` | `azure-ai-evaluation` による Built-in 指標。現行フロントエンドの主要表示対象は `relevance` / `coherence` / `fluency` で、`task_adherence` が含まれていても UI 比較と総合集計からは除外される |
 | `marketing_quality` | `object` | prompt-based LLM ジャッジ。`appeal` / `differentiation` / `kpi_validity` / `brand_tone` / `overall` |
-| `foundry_portal_url` | `string?` | Foundry への評価ログに成功した場合のみ返るポータル URL |
+| `plan_quality` | `object` | 企画書向けの集約カテゴリ。`overall` / `summary` / `focus_areas` / `metrics` を返す |
+| `asset_quality` | `object` | ブローシャ/成果物向けの集約カテゴリ。`overall` / `summary` / `focus_areas` / `metrics` を返す |
+| `regression_guard` | `object` | 前 version 比の悪化/改善検知。`has_regressions`、`degraded_metrics`、`improved_metrics`、overall delta を返す |
+| `legacy_overall` | `number` | 旧 UI 互換の総合スコア |
+| `evaluation_meta` | `object \| null` | 保存成功時の version / round / created_at。`conversation_id` と `artifact_version` を送らない場合は `null` |
+
+## `POST /api/upload-pdf`
+
+既存パンフレット PDF をアップロードし、`data/` 配下へ保存します。Agent4 の既存パンフレット解析（Content Understanding 前処理）用です。
+
+- レート制限: 5 リクエスト / 分
+- リクエストは `multipart/form-data`
+- サイズ上限: `10MB`
+- 拡張子と PDF ヘッダ（`%PDF-`）の両方を検証します
+
+### リクエスト
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `file` | `UploadFile` | 必須 | `.pdf` ファイル |
+
+### レスポンス例
+
+```json
+{
+  "filename": "existing-brochure.pdf",
+  "size": 245760
+}
+```
+
+### 主なエラー
+
+- `400` `PDF ファイルのみアップロード可能です`
+- `400` `有効な PDF ファイルではありません`
+- `413` `ファイルサイズが上限（10MB）を超えています`
 
 ## SSE 形式
 
@@ -461,6 +540,18 @@ data: <json>
 }
 ```
 
+Work IQ を有効化した新規会話では、次のような status イベントも返ります。
+
+```json
+{
+  "tool": "generate_workplace_context_brief",
+  "status": "auth_required",
+  "agent": "marketing-plan-agent",
+  "source": "workiq",
+  "source_scope": ["emails", "teams_chats"]
+}
+```
+
 改善ブリーフ MCP が設定済みで失敗した場合は、次のような fallback イベントも返ります。
 
 ```json
@@ -476,6 +567,7 @@ data: <json>
 主な `tool` 値:
 
 - `generate_improvement_brief`
+- `generate_workplace_context_brief`
 - `query_data_agent`
 - `search_sales_history`
 - `search_customer_reviews`
@@ -488,6 +580,16 @@ data: <json>
 - `generate_hero_image`
 - `generate_banner_image`
 - `generate_promo_video`
+
+Work IQ の主な `status` 値:
+
+- `running`
+- `completed`
+- `auth_required`
+- `identity_mismatch`
+- `consent_required`
+- `timeout`
+- `unavailable`
 
 注: Azure の主フローでも `_TOOL_EVENT_HINTS` に基づく `tool_event` が送出されます。実際に呼ばれた外部サービス数と 1:1 ではなく、UI 表示用の補助イベントです。
 
