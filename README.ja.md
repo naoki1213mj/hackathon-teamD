@@ -110,7 +110,7 @@ azd up                                    # プロビジョニング + ビルド
 | 領域 | 現在の状態 |
 | --- | --- |
 | Work IQ delegated auth | SPA redirect URI、Microsoft Graph delegated permissions、tenant-wide admin consent、Microsoft 365 Copilot ライセンス確認まで完了 |
-| Work IQ runtime | tenant 内アカウントでの実ブラウザ検証で Work IQ `completed` まで到達済みです。アプリは Microsoft Graph Copilot Chat API `chatOverStream` を優先し、遅い tenant 応答に備えて既定 `WORK_IQ_TIMEOUT_SECONDS` を `120` へ引き上げました。tenant member / guest ではないアカウントはサインイン時に弾かれます |
+| Work IQ runtime | 既定値は `WORKIQ_RUNTIME=foundry_tool` と `MARKETING_PLAN_RUNTIME=foundry_prompt` の組み合わせです。Agent2 は Foundry Prompt Agent として動作し、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入します。`graph_prefetch` は rollback 用の経路として残っており、Microsoft Graph Copilot Chat API（`chatOverStream` 優先、必要時 `/chat`、既定 `WORK_IQ_TIMEOUT_SECONDS=120`）で短い brief を先読みします。フロントエンドの auth preflight は `auth_required` / `consent_required` / `redirecting` を出し分け、バックエンドは `work_iq_session` の status を永続化するため復元後の UI 状態も一致します。tenant member / guest ではないアカウントはサインイン時に弾かれます |
 | Search / Foundry IQ | `regulations-index`、`regulations-ks`、`regulations-kb` を **East US** の Azure AI Search に作成済み。アプリには `SEARCH_ENDPOINT` + `SEARCH_API_KEY` で配線済み |
 | モデル配備 | メインの East US 2 Foundry account には `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み |
 | MAI 画像経路 | `IMAGE_PROJECT_ENDPOINT_MAI` は別の East US AI Services account を指す。現在は subscription に `MAI-Image-2` quota が無いため、`MAI-Image-2` deployment 名を **MAI-Image-2e** の alias として運用 |
@@ -129,6 +129,9 @@ azd up                                    # プロビジョニング + ビルド
 | `SEARCH_ENDPOINT` | 任意 | Foundry IQ / 直接 KB 検索で使う Azure AI Search endpoint |
 | `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー（live tenant では Container Apps secret で保持） |
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
+| `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan の runtime 切替（既定: `foundry_prompt`、`legacy` は rollback / 検証用） |
+| `WORKIQ_RUNTIME` | 任意 | Work IQ runtime 切替（既定: `foundry_tool`、`graph_prefetch` は rollback 用）。`foundry_tool` は `MARKETING_PLAN_RUNTIME=foundry_prompt` が前提 |
+| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | `graph_prefetch` rollback 経路で Microsoft Graph Copilot Chat API から短い Work IQ brief を取得するときの timeout（既定: `120`） |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | 評価改善用 APIM MCP ルート |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI 対応の別 AI Services endpoint |

@@ -18,6 +18,13 @@ export interface MsalConfig {
   tenantId: string
 }
 
+export type DelegatedAuthStatus = 'ok' | 'auth_required' | 'consent_required' | 'redirecting' | 'unavailable'
+
+export interface DelegatedTokenResult {
+  token: string | null
+  status: DelegatedAuthStatus
+}
+
 const VOICE_LIVE_SCOPES = ['https://cognitiveservices.azure.com/user_impersonation']
 const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/Sites.Read.All',
@@ -57,9 +64,9 @@ async function acquireDelegatedToken(
   config: MsalConfig,
   scopes: string[],
   interactive: boolean,
-): Promise<string | null> {
+): Promise<DelegatedTokenResult> {
   await initMsal(config)
-  if (!msalInstance) return null
+  if (!msalInstance) return { token: null, status: 'unavailable' }
 
   const accounts = msalInstance.getAllAccounts()
 
@@ -70,37 +77,51 @@ async function acquireDelegatedToken(
         account: accounts[0],
       }
       const response = await msalInstance.acquireTokenSilent(request)
-      return response.accessToken
+      return { token: response.accessToken, status: 'ok' }
     } catch (err) {
       if (interactive && err instanceof InteractionRequiredAuthError) {
         // サイレント失敗 → redirect で再認証
         await msalInstance.acquireTokenRedirect({ scopes })
-        return null // redirect するため、ここには戻らない
+        return { token: null, status: 'redirecting' } // redirect するため、ここには戻らない
+      }
+      if (err instanceof InteractionRequiredAuthError) {
+        const errorCode = String(err.errorCode || '').trim().toLowerCase()
+        const subError = String(err.subError || '').trim().toLowerCase()
+        return {
+          token: null,
+          status: errorCode === 'consent_required' || subError === 'consent_required'
+            ? 'consent_required'
+            : 'auth_required',
+        }
       }
       console.warn('MSAL silent token failed:', err)
-      return null
+      return { token: null, status: 'unavailable' }
     }
   }
 
   if (!interactive) {
-    return null
+    return { token: null, status: 'auth_required' }
   }
 
   // 未ログイン → redirect でログイン
   try {
     await msalInstance.acquireTokenRedirect({ scopes })
     // redirect するため、ここには戻らない
-    return null
+    return { token: null, status: 'redirecting' }
   } catch (err) {
     console.warn('MSAL token acquisition failed:', err)
-    return null
+    return { token: null, status: 'unavailable' }
   }
 }
 
 export async function getVoiceLiveToken(config: MsalConfig): Promise<string | null> {
-  return acquireDelegatedToken(config, VOICE_LIVE_SCOPES, true)
+  return (await acquireDelegatedToken(config, VOICE_LIVE_SCOPES, true)).token
 }
 
 export async function getWorkIqGraphToken(config: MsalConfig, interactive = false): Promise<string | null> {
+  return (await acquireDelegatedToken(config, WORK_IQ_GRAPH_SCOPES, interactive)).token
+}
+
+export async function getWorkIqGraphAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
   return acquireDelegatedToken(config, WORK_IQ_GRAPH_SCOPES, interactive)
 }

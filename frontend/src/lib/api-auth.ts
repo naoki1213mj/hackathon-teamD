@@ -1,4 +1,4 @@
-import { getWorkIqGraphToken, type MsalConfig } from './msal-auth'
+import { getWorkIqGraphAuth, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
 
 let cachedMsalConfigPromise: Promise<MsalConfig | null> | null = null
 
@@ -29,14 +29,26 @@ async function getMsalConfig(): Promise<MsalConfig | null> {
   return cachedMsalConfigPromise
 }
 
-export async function getDelegatedApiHeaders(options?: { interactive?: boolean }): Promise<Record<string, string>> {
+export interface DelegatedApiAuthResult {
+  headers: Record<string, string>
+  status: DelegatedAuthStatus
+}
+
+export async function getDelegatedApiAuth(options?: { interactive?: boolean }): Promise<DelegatedApiAuthResult> {
   const config = await getMsalConfig()
-  if (!config) return {}
+  if (!config) {
+    return { headers: {}, status: 'unavailable' }
+  }
 
-  const token = await getWorkIqGraphToken(config, options?.interactive === true)
-  if (!token) return {}
+  const result = await getWorkIqGraphAuth(config, options?.interactive === true)
+  return {
+    headers: result.token ? { Authorization: `Bearer ${result.token}` } : {},
+    status: result.status,
+  }
+}
 
-  return { Authorization: `Bearer ${token}` }
+export async function getDelegatedApiHeaders(options?: { interactive?: boolean }): Promise<Record<string, string>> {
+  return (await getDelegatedApiAuth(options)).headers
 }
 
 export function resetDelegatedApiAuthCache(): void {

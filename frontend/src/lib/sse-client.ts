@@ -3,7 +3,7 @@
  */
 
 import type { ConversationSettings, ModelSettings } from '../components/SettingsPanel'
-import { getDelegatedApiHeaders } from './api-auth'
+import { getDelegatedApiAuth, getDelegatedApiHeaders } from './api-auth'
 
 /** SSE タイムアウト（15 分 — 画像生成と動画待機を考慮） */
 const SSE_TIMEOUT_MS = 900_000
@@ -125,6 +125,7 @@ export async function connectSSE(
       manager_approval_enabled: settings.managerApprovalEnabled,
       manager_email: trimmedManagerEmail,
       marketing_plan_runtime: settings.marketingPlanRuntime,
+      ...(settings.workIqRuntime ? { work_iq_runtime: settings.workIqRuntime } : {}),
     }
   }
   if (conversationSettings && !conversationId) {
@@ -137,11 +138,23 @@ export async function connectSSE(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (conversationSettings?.workIqEnabled) {
-    Object.assign(
-      headers,
-      await getDelegatedApiHeaders({ interactive: !conversationId }),
-    )
+    const delegatedAuth = await getDelegatedApiAuth({ interactive: !conversationId })
+    Object.assign(headers, delegatedAuth.headers)
     headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    if (delegatedAuth.status !== 'ok' && delegatedAuth.status !== 'redirecting') {
+      headers['X-Work-IQ-Auth-Status'] = delegatedAuth.status
+      handlers.tool_event?.({
+        tool: 'generate_workplace_context_brief',
+        status: delegatedAuth.status,
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        provider: 'workiq',
+        source_scope: conversationSettings.workIqSourceScope,
+      })
+    }
+    if (delegatedAuth.status === 'redirecting') {
+      return
+    }
   }
 
   let response: Response

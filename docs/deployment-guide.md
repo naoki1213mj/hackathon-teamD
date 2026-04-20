@@ -107,7 +107,7 @@ azd deploy
 - SharePoint 保存経路の復旧（preferred: site permission grant to Logic App MI、fallback: SharePoint connector 再認証）
 - Logic Apps の Teams / SharePoint connector や trigger URL が変わる場合の再接続 / 再設定
 
-Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API** を per-user delegated token で呼び出します。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
+Work IQ は既定で **`WORKIQ_RUNTIME=foundry_tool`** を使い、`MARKETING_PLAN_RUNTIME=foundry_prompt` の Foundry Prompt Agent に `source_scope` ベースの read-only Microsoft 365 connector を動的注入します。**`graph_prefetch` は rollback 用**で、この場合のみ Microsoft Graph Copilot Chat API を per-user delegated token で呼び出して短い brief を先読みします。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
 
@@ -117,7 +117,7 @@ Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Gra
 | --- | --- |
 | Search / Foundry IQ | Azure AI Search was created in **East US** (East US 2 had no capacity), and `regulations-index`, `regulations-ks`, and `regulations-kb` are already wired into the Container App |
 | Work IQ | SPA redirect URIs, Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
-| Work IQ runtime | Live browser validation reaches Work IQ `completed` with a tenant member account. The backend now prefers Microsoft Graph Copilot Chat API `chatOverStream` and keeps `WORK_IQ_TIMEOUT_SECONDS=120` by default so slower tenant responses do not fail closed too early. Accounts outside the tenant/guest list are rejected during sign-in |
+| Work IQ runtime | The default runtime is `WORKIQ_RUNTIME=foundry_tool` with `MARKETING_PLAN_RUNTIME=foundry_prompt`. Agent2 injects read-only Microsoft 365 connectors dynamically from `source_scope`; `graph_prefetch` remains the rollback path for a Graph Copilot Chat API brief (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120`). Frontend preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same Work IQ UI state. Accounts outside the tenant/guest list are rejected during sign-in |
 | Text models | `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` exist on the main East US 2 Foundry account |
 | MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
 | Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored, and both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` are wired into the Container App |
@@ -147,6 +147,8 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
+| `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan runtime（既定: `foundry_prompt`） |
+| `WORKIQ_RUNTIME` | 任意 | Work IQ runtime（既定: `foundry_tool`、`graph_prefetch` は rollback 用）。`foundry_tool` は `MARKETING_PLAN_RUNTIME=foundry_prompt` が前提 |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 120） |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
@@ -198,6 +200,7 @@ Trivy, Gitleaks, npm audit, pip-audit, bandit
 | 画像が透明 PNG | `IMAGE_PROJECT_ENDPOINT_MAI` と別 East US MAI account の RBAC を確認。`MAI-Image-2` quota が無い subscription では `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認 |
 | Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
+| `work_iq_runtime=foundry_tool` が失敗する | `MARKETING_PLAN_RUNTIME=foundry_prompt` になっているか確認する。`graph_prefetch` は rollback 用の別経路 |
 | Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
 | 上司承認通知が飛ばない | `logic-manager-approval-*` の run history と Container App secret `manager-approval-trigger-url` に `&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確認。`deploy.yml` の signed URL 再同期が成功しているかも確認する。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、対象 Team / channel を確認 |

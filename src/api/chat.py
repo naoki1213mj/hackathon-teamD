@@ -171,9 +171,11 @@ class WorkflowSettings(TypedDict):
     manager_approval_enabled: bool
     manager_email: str
     marketing_plan_runtime: NotRequired[str]
+    work_iq_runtime: NotRequired[str]
 
 
 MarketingPlanRuntime = Literal["legacy", "foundry_prompt"]
+WorkIQRuntime = Literal["graph_prefetch", "foundry_tool"]
 
 
 class PendingApprovalContext(TypedDict):
@@ -750,6 +752,18 @@ def _sanitize_marketing_plan_runtime(value: object) -> MarketingPlanRuntime | No
     return None
 
 
+def _sanitize_work_iq_runtime(value: object) -> WorkIQRuntime | None:
+    """Work IQ sourcing runtime を正規化する。"""
+    if not isinstance(value, str):
+        return None
+    normalized = _sanitize_optional_text(value).lower().replace("-", "_")
+    if normalized in {"graph_prefetch", "foundry_tool"}:
+        return normalized
+    if normalized:
+        raise ValueError("work_iq_runtime は graph_prefetch または foundry_tool を指定してください")
+    return None
+
+
 def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) -> MarketingPlanRuntime:
     """request override と環境変数から marketing-plan-agent runtime を解決する。"""
     if workflow_settings:
@@ -759,13 +773,27 @@ def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) 
     return _sanitize_marketing_plan_runtime(get_settings()["marketing_plan_runtime"]) or "legacy"
 
 
+def _resolve_work_iq_runtime(workflow_settings: WorkflowSettings | None) -> WorkIQRuntime:
+    """request override と環境変数から Work IQ runtime を解決する。"""
+    if workflow_settings:
+        runtime_override = _sanitize_work_iq_runtime(workflow_settings.get("work_iq_runtime"))
+        if runtime_override is not None:
+            return runtime_override
+    return _sanitize_work_iq_runtime(get_settings()["work_iq_runtime"]) or "graph_prefetch"
+
+
 def _build_effective_workflow_settings(workflow_settings: WorkflowSettings | None) -> WorkflowSettings:
     """実行時に使う完全な workflow settings を構築する。"""
     source = workflow_settings or {}
+    marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings)
+    work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
+    if marketing_plan_runtime != "foundry_prompt" and work_iq_runtime == "foundry_tool":
+        raise ValueError("work_iq_runtime=foundry_tool は marketing_plan_runtime=foundry_prompt と組み合わせてください")
     return {
         "manager_approval_enabled": _to_bool(source.get("manager_approval_enabled")),
         "manager_email": _sanitize_optional_text(source.get("manager_email")),
-        "marketing_plan_runtime": _resolve_marketing_plan_runtime(workflow_settings),
+        "marketing_plan_runtime": marketing_plan_runtime,
+        "work_iq_runtime": work_iq_runtime,
     }
 
 
@@ -780,6 +808,9 @@ def _parse_saved_workflow_settings(raw_settings: dict | None) -> WorkflowSetting
     runtime = _sanitize_optional_text(raw_settings.get("marketing_plan_runtime"))
     if runtime:
         parsed["marketing_plan_runtime"] = runtime
+    work_iq_runtime = _sanitize_optional_text(raw_settings.get("work_iq_runtime"))
+    if work_iq_runtime:
+        parsed["work_iq_runtime"] = work_iq_runtime
     return parsed
 
 
@@ -825,12 +856,14 @@ def _normalize_workflow_settings(
         runtime = _sanitize_marketing_plan_runtime(
             source.get("marketing_plan_runtime") or source.get("marketingPlanRuntime")
         )
+        work_iq_runtime = _sanitize_work_iq_runtime(source.get("work_iq_runtime") or source.get("workIqRuntime"))
     else:
         runtime = None
+        work_iq_runtime = None
 
     if enabled and not email:
         raise ValueError("上司承認を有効化する場合は上司メールアドレスが必要です")
-    if not enabled and not email and runtime is None:
+    if not enabled and not email and runtime is None and work_iq_runtime is None:
         return None
 
     workflow_settings: WorkflowSettings = {
@@ -839,6 +872,8 @@ def _normalize_workflow_settings(
     }
     if runtime is not None:
         workflow_settings["marketing_plan_runtime"] = runtime
+    if work_iq_runtime is not None:
+        workflow_settings["work_iq_runtime"] = work_iq_runtime
     return workflow_settings
 
 
@@ -1209,6 +1244,7 @@ def _build_marketing_plan_prompt(
     user_input: str,
     analysis_markdown: str,
     work_iq_session: WorkIQSessionMetadata | None = None,
+    work_iq_runtime: WorkIQRuntime = "graph_prefetch",
 ) -> str:
     """Agent2 に渡す企画書生成プロンプトを組み立てる。"""
     prompt = (
@@ -1217,12 +1253,28 @@ def _build_marketing_plan_prompt(
         f"## Agent1 の分析結果\n{analysis_markdown}\n"
     )
     work_iq_brief = _format_work_iq_brief_for_prompt(work_iq_session)
-    if not work_iq_brief:
+    if work_iq_brief:
+        return (
+            f"{prompt}\n"
+            f"{work_iq_brief}\n\n"
+            "上記の職場コンテキストは補助情報として扱い、確認できない内容を断定しないでください。\n"
+        )
+
+    if work_iq_runtime != "foundry_tool" or not isinstance(work_iq_session, dict) or not work_iq_session.get("enabled"):
+        return prompt
+    source_scope = work_iq_session.get("source_scope")
+    if not isinstance(source_scope, list) or not source_scope:
+        return prompt
+    labels = [_WORK_IQ_SOURCE_LABELS.get(_sanitize_optional_text(source), _sanitize_optional_text(source)) for source in source_scope]
+    labels = [label for label in labels if label]
+    if not labels:
         return prompt
     return (
-        f"{prompt}\n"
-        f"{work_iq_brief}\n\n"
-        "上記の職場コンテキストは補助情報として扱い、確認できない内容を断定しないでください。\n"
+        f"{prompt}\n\n"
+        "## Work IQ / Microsoft 365 参照ガイド\n"
+        f"- 必要な場合のみ、次の社内ソースを read-only connector で参照してかまいません: {', '.join(labels)}\n"
+        "- 取得した社内情報は要約のみを反映し、原文や過度に具体的な個人情報は出力しないでください。\n"
+        "- 社内情報で裏付けできない内容を断定しないでください。\n"
     )
 
 
@@ -1632,6 +1684,8 @@ async def _execute_agent(
     conversation_id: str,
     model_settings: dict | None = None,
     workflow_settings: WorkflowSettings | None = None,
+    work_iq_session: WorkIQSessionMetadata | None = None,
+    work_iq_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
 ) -> AgentExecutionOutcome:
@@ -1704,7 +1758,20 @@ async def _execute_agent(
             if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
                 from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
 
-                result = await asyncio.to_thread(run_marketing_plan_prompt_agent, user_input, model_settings)
+                result = await asyncio.to_thread(
+                    run_marketing_plan_prompt_agent,
+                    user_input,
+                    model_settings,
+                    work_iq={
+                        "enabled": bool(
+                            work_iq_session
+                            and work_iq_session.get("enabled")
+                            and _resolve_work_iq_runtime(workflow_settings) == "foundry_tool"
+                        ),
+                        "source_scope": list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                    },
+                    work_iq_access_token=work_iq_access_token,
+                )
                 attempt_tool_events.append(
                     _build_agent_tool_event(
                         "foundry_prompt_agent",
@@ -1951,6 +2018,8 @@ async def _execute_agent_with_runtime(
     conversation_id: str,
     model_settings: dict | None = None,
     workflow_settings: WorkflowSettings | None = None,
+    work_iq_session: WorkIQSessionMetadata | None = None,
+    work_iq_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
 ) -> AgentExecutionOutcome:
@@ -1962,11 +2031,17 @@ async def _execute_agent_with_runtime(
         "conversation_id": conversation_id,
         "model_settings": model_settings,
         "workflow_settings": workflow_settings,
+        "work_iq_session": work_iq_session,
+        "work_iq_access_token": work_iq_access_token,
         "total_steps": total_steps,
         "include_done": include_done,
     }
     if "workflow_settings" not in inspect.signature(_execute_agent).parameters:
         kwargs.pop("workflow_settings")
+    if "work_iq_session" not in inspect.signature(_execute_agent).parameters:
+        kwargs.pop("work_iq_session")
+    if "work_iq_access_token" not in inspect.signature(_execute_agent).parameters:
+        kwargs.pop("work_iq_access_token")
     return await _execute_agent(**kwargs)
 
 
@@ -3387,6 +3462,7 @@ async def workflow_event_generator(
     user_time_zone: str = "UTC",
 ):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
+    work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
     analysis_outcome = await _execute_agent_with_runtime(
         agent_name="data-search-agent",
         agent_step=1,
@@ -3416,40 +3492,50 @@ async def workflow_event_generator(
                     SSEEventType.TOOL_EVENT,
                     _build_work_iq_tool_event_data(work_iq_session, "running"),
                 )
-                work_iq_result = await generate_workplace_context_brief(
-                    user_input=user_input,
-                    source_scope=list(work_iq_session.get("source_scope", [])),
-                    access_token=work_iq_access_token,
-                    user_time_zone=user_time_zone,
-                )
-                brief_summary = _sanitize_optional_text(work_iq_result.get("brief_summary"))
-                brief_status = _sanitize_optional_text(work_iq_result.get("status")) or "completed"
-                warning_code = _sanitize_optional_text(work_iq_result.get("warning_code"))
-
-                if brief_summary:
-                    shield_result = await check_tool_response(brief_summary)
-                    if shield_result.is_safe:
-                        work_iq_session["brief_summary"] = brief_summary
-                        raw_source_metadata = work_iq_result.get("brief_source_metadata")
-                        if isinstance(raw_source_metadata, list) and raw_source_metadata:
-                            work_iq_session["brief_source_metadata"] = raw_source_metadata
-                        else:
-                            work_iq_session.pop("brief_source_metadata", None)
-                        work_iq_session["status"] = "completed"
+                if work_iq_runtime == "foundry_tool":
+                    work_iq_session.pop("brief_summary", None)
+                    work_iq_session.pop("brief_source_metadata", None)
+                    if work_iq_access_token:
+                        work_iq_session["status"] = "running"
                         work_iq_session.pop("warning_code", None)
+                    else:
+                        work_iq_session["status"] = "auth_required"
+                        work_iq_session["warning_code"] = "auth_required"
+                else:
+                    work_iq_result = await generate_workplace_context_brief(
+                        user_input=user_input,
+                        source_scope=list(work_iq_session.get("source_scope", [])),
+                        access_token=work_iq_access_token,
+                        user_time_zone=user_time_zone,
+                    )
+                    brief_summary = _sanitize_optional_text(work_iq_result.get("brief_summary"))
+                    brief_status = _sanitize_optional_text(work_iq_result.get("status")) or "completed"
+                    warning_code = _sanitize_optional_text(work_iq_result.get("warning_code"))
+
+                    if brief_summary:
+                        shield_result = await check_tool_response(brief_summary)
+                        if shield_result.is_safe:
+                            work_iq_session["brief_summary"] = brief_summary
+                            raw_source_metadata = work_iq_result.get("brief_source_metadata")
+                            if isinstance(raw_source_metadata, list) and raw_source_metadata:
+                                work_iq_session["brief_source_metadata"] = raw_source_metadata
+                            else:
+                                work_iq_session.pop("brief_source_metadata", None)
+                            work_iq_session["status"] = "completed"
+                            work_iq_session.pop("warning_code", None)
+                        else:
+                            work_iq_session.pop("brief_summary", None)
+                            work_iq_session.pop("brief_source_metadata", None)
+                            work_iq_session["status"] = "unavailable"
+                            work_iq_session["warning_code"] = "unavailable"
                     else:
                         work_iq_session.pop("brief_summary", None)
                         work_iq_session.pop("brief_source_metadata", None)
-                        work_iq_session["status"] = "unavailable"
-                        work_iq_session["warning_code"] = "unavailable"
-                else:
-                    work_iq_session.pop("brief_summary", None)
-                    work_iq_session.pop("brief_source_metadata", None)
-                    work_iq_session["status"] = brief_status
-                    if warning_code:
-                        work_iq_session["warning_code"] = warning_code
-                    else:
-                        work_iq_session.pop("warning_code", None)
+                        work_iq_session["status"] = brief_status
+                        if warning_code:
+                            work_iq_session["warning_code"] = warning_code
+                        else:
+                            work_iq_session.pop("warning_code", None)
 
                 yield format_sse(
                     SSEEventType.TOOL_EVENT,
@@ -3462,15 +3548,29 @@ async def workflow_event_generator(
     plan_outcome = await _execute_agent_with_runtime(
         agent_name="marketing-plan-agent",
         agent_step=2,
-        user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session),
+        user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session, work_iq_runtime),
         conversation_id=conversation_id,
         model_settings=model_settings,
         workflow_settings=workflow_settings,
+        work_iq_session=work_iq_session,
+        work_iq_access_token=work_iq_access_token,
     )
     for event in plan_outcome["events"]:
         yield event
     if not plan_outcome["success"]:
         return
+
+    if (
+        work_iq_session
+        and work_iq_session.get("enabled")
+        and work_iq_runtime == "foundry_tool"
+        and _sanitize_optional_text(work_iq_session.get("status")) == "running"
+    ):
+        work_iq_session["status"] = "completed"
+        yield format_sse(
+            SSEEventType.TOOL_EVENT,
+            _build_work_iq_tool_event_data(work_iq_session, "completed"),
+        )
 
     _store_pending_approval_context(
         conversation_id,
@@ -3515,6 +3615,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     caller_identity = extract_request_identity(request, expected_tenant_id=settings["entra_tenant_id"])
     authorization = _sanitize_optional_text(request.headers.get("authorization"))
     work_iq_access_token = authorization.split(" ", 1)[1] if authorization.lower().startswith("bearer ") else ""
+    work_iq_auth_status = _sanitize_optional_text(request.headers.get("x-work-iq-auth-status")).lower()
     user_time_zone = _sanitize_optional_text(request.headers.get("x-user-timezone")) or "UTC"
     raw_user_settings = _resolve_raw_user_settings(body.user_settings, body.settings)
     explicit_conversation_settings = has_work_iq_overrides(body.conversation_settings, body.settings)
@@ -3553,6 +3654,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             effective_conversation_settings,
             caller_identity,
             existing_session=effective_work_iq_session,
+            preflight_status=work_iq_auth_status,
         )
 
     project_endpoint_available = bool(settings["project_endpoint"])

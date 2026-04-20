@@ -6,11 +6,13 @@ import { DEFAULT_CONVERSATION_SETTINGS } from '../../components/SettingsPanel'
 import { connectSSE, sendApproval, type SSEHandlers } from '../sse-client'
 
 const originalFetch = global.fetch
-const { getDelegatedApiHeaders } = vi.hoisted(() => ({
+const { getDelegatedApiAuth, getDelegatedApiHeaders } = vi.hoisted(() => ({
+  getDelegatedApiAuth: vi.fn(async () => ({ headers: {}, status: 'ok' })),
   getDelegatedApiHeaders: vi.fn(async () => ({})),
 }))
 
 vi.mock('../api-auth', () => ({
+  getDelegatedApiAuth,
   getDelegatedApiHeaders,
 }))
 
@@ -34,6 +36,8 @@ describe('connectSSE', () => {
   beforeEach(() => {
     global.fetch = mockFetch
     mockFetch.mockReset()
+    getDelegatedApiAuth.mockReset()
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'ok' })
     getDelegatedApiHeaders.mockReset()
     getDelegatedApiHeaders.mockResolvedValue({})
   })
@@ -90,6 +94,39 @@ describe('connectSSE', () => {
     })
   })
 
+  it('includes work iq runtime in workflow settings when present', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_prompt',
+        workIqRuntime: 'foundry_tool',
+      },
+    )
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.workflow_settings).toMatchObject({
+      work_iq_runtime: 'foundry_tool',
+    })
+  })
+
   it('sends conversation settings when starting a new conversation', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
@@ -108,7 +145,7 @@ describe('connectSSE', () => {
   })
 
   it('adds delegated auth headers when Work IQ is enabled', async () => {
-    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    getDelegatedApiAuth.mockResolvedValue({ headers: { Authorization: 'Bearer delegated-token' }, status: 'ok' })
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await connectSSE('hello', {}, undefined, undefined, undefined, {
@@ -116,10 +153,40 @@ describe('connectSSE', () => {
       workIqSourceScope: ['emails'],
     })
 
-    expect(getDelegatedApiHeaders).toHaveBeenCalledWith({ interactive: true })
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true })
     const [, options] = mockFetch.mock.calls[0]
     expect(options.headers.Authorization).toBe('Bearer delegated-token')
     expect(options.headers['X-User-Timezone']).toBeTruthy()
+  })
+
+  it('emits a local Work IQ tool event when consent is required', async () => {
+    const toolHandler = vi.fn()
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'consent_required' })
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE('hello', { tool_event: toolHandler }, undefined, undefined, undefined, {
+      workIqEnabled: true,
+      workIqSourceScope: ['emails'],
+    })
+
+    expect(toolHandler).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'workiq',
+      status: 'consent_required',
+      source_scope: ['emails'],
+    }))
+    const [, options] = mockFetch.mock.calls[0]
+    expect(options.headers['X-Work-IQ-Auth-Status']).toBe('consent_required')
+  })
+
+  it('does not send the request after starting interactive redirect', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'redirecting' })
+
+    await connectSSE('hello', {}, undefined, undefined, undefined, {
+      workIqEnabled: true,
+      workIqSourceScope: ['emails'],
+    })
+
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('omits conversation settings when continuing an existing conversation', async () => {

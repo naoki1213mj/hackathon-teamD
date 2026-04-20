@@ -2,9 +2,10 @@
 
 import logging
 import re
+from typing import TypedDict
 
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import PromptAgentDefinition, WebSearchTool
+from azure.ai.projects.models import MCPTool, MCPToolFilter, PromptAgentDefinition, WebSearchTool
 from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
@@ -14,6 +15,22 @@ from src.config import get_settings
 logger = logging.getLogger(__name__)
 
 _AGENT_NAME_SANITIZER = re.compile(r"[^a-z0-9-]+")
+_CONNECTOR_SPECS = {
+    "meeting_notes": [
+        ("connector_microsoftteams", "workiq-teams"),
+        ("connector_outlookcalendar", "workiq-calendar"),
+    ],
+    "emails": [("connector_outlookemail", "workiq-email")],
+    "teams_chats": [("connector_microsoftteams", "workiq-teams")],
+    "documents_notes": [("connector_sharepoint", "workiq-sharepoint")],
+}
+
+
+class WorkIQPromptConfig(TypedDict):
+    """Prompt Agent に渡す Work IQ tool 構成。"""
+
+    enabled: bool
+    source_scope: list[str]
 
 
 def _normalize_agent_name_token(value: str) -> str:
@@ -53,7 +70,37 @@ def _ensure_marketing_plan_agent(project_client: AIProjectClient, model_name: st
     )
 
 
-def run_marketing_plan_prompt_agent(user_input: str, model_settings: dict | None = None) -> object:
+def _build_work_iq_tools(config: WorkIQPromptConfig, access_token: str) -> list[MCPTool]:
+    """Work IQ source_scope から read-only MCP connector 群を組み立てる。"""
+    if not config["enabled"] or not access_token.strip():
+        return []
+
+    seen_connectors: set[str] = set()
+    tools: list[MCPTool] = []
+    for scope in config["source_scope"]:
+        for connector_id, server_label in _CONNECTOR_SPECS.get(scope, []):
+            if connector_id in seen_connectors:
+                continue
+            seen_connectors.add(connector_id)
+            tools.append(
+                MCPTool(
+                    connector_id=connector_id,
+                    server_label=server_label,
+                    authorization=access_token,
+                    allowed_tools=MCPToolFilter(read_only=True),
+                    require_approval="always",
+                )
+            )
+    return tools
+
+
+def run_marketing_plan_prompt_agent(
+    user_input: str,
+    model_settings: dict | None = None,
+    *,
+    work_iq: WorkIQPromptConfig | None = None,
+    work_iq_access_token: str = "",
+) -> object:
     """Foundry Prompt Agent として marketing-plan-agent を実行する。"""
     settings = get_settings()
     project_endpoint = settings["project_endpoint"].strip()
@@ -69,9 +116,18 @@ def run_marketing_plan_prompt_agent(user_input: str, model_settings: dict | None
     openai_client = project_client.get_openai_client()
     try:
         agent = _ensure_marketing_plan_agent(project_client, model_name)
+        response_kwargs: dict[str, object] = {
+            "input": user_input,
+            "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+        }
+        work_iq_tools = _build_work_iq_tools(
+            work_iq or {"enabled": False, "source_scope": []},
+            work_iq_access_token,
+        )
+        if work_iq_tools:
+            response_kwargs["tools"] = work_iq_tools
         return openai_client.responses.create(
-            input=user_input,
-            extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+            **response_kwargs,
         )
     finally:
         close_openai = getattr(openai_client, "close", None)

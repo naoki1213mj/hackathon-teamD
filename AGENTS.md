@@ -88,13 +88,19 @@
 ### Agent2: marketing-plan-agent（施策生成）
 
 **ファイル**: `src/agents/marketing_plan.py`
-**役割**: Agent1 の分析結果をもとにマーケティング企画書を作成する。景品表示法違反表現を回避。
+**役割**: Agent1 の分析結果をもとにマーケティング企画書を作成する。景品表示法違反表現を回避。既定では `marketing_plan_runtime=foundry_prompt` で Foundry Prompt Agent として実行され、Work IQ が有効な新規会話では `WORKIQ_RUNTIME=foundry_tool` により `source_scope` ベースの Microsoft 365 read-only connector を動的注入する。`graph_prefetch` は rollback 用の旧経路として残す。
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|
 | `search_market_trends(query)` | 最新の旅行市場トレンド・競合情報を検索 | ✅ Foundry Agent Service (Bing grounding / Web Search) | ハードコードトレンドデータ |
 
 **出力形式**: Markdown（タイトル / キャッチコピー 3 案 / ターゲットペルソナ / プラン概要 / 差別化ポイント / 改善ポイント / 販促チャネル / KPI の 8 セクション）
+
+**Work IQ ランタイム補足**:
+
+- 既定: `WORKIQ_RUNTIME=foundry_tool`（`MARKETING_PLAN_RUNTIME=foundry_prompt` 必須）
+- connector 対応: `meeting_notes` → Teams + Outlook Calendar、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint
+- rollback: `WORKIQ_RUNTIME=graph_prefetch` を指定すると Microsoft Graph Copilot Chat API で短い brief を先読みする
 
 ---
 

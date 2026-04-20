@@ -14,7 +14,8 @@ flowchart TD
 
     api --> flow[FastAPI Orchestration]
     api -.-> apimMcp[APIM improvement-mcp]
-    flow -. Work IQ brief .-> workiq[Microsoft Graph Copilot Chat API]
+    flow -. default: connector tools .-> m365[Microsoft 365 Connectors]
+    flow -. rollback only .-> workiq[Microsoft Graph Copilot Chat API]
     apimMcp --> mcpFunc[Azure Functions MCP]
     mcpFunc --> mcpTool[generate_improvement_brief]
 
@@ -67,6 +68,17 @@ flowchart TD
     api -.-> postLogic[Logic App: post-approval actions]
     api -.-> cosmos[Cosmos DB]
 ```
+
+### Work IQ runtime split
+
+| Runtime | 既定 | 実装 |
+| --- | --- | --- |
+| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせて Agent2 を Foundry Prompt Agent として実行し、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入する |
+| `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
+
+- `source_scope` ごとの connector は `meeting_notes` → Teams + Outlook Calendar、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint です。
+- フロントエンドは Work IQ 有効化時の auth preflight で `auth_required` / `consent_required` / `redirecting` を先に反映します。
+- バックエンドは `work_iq_session` の status / source scope / sanitized brief metadata を会話 metadata に保存するため、会話復元後も Work IQ UI 状態が一致します。
 
 ## 2. Azure リソース構成
 
@@ -150,7 +162,7 @@ flowchart TD
 | 実行主体 | 認証方式 | 用途 |
 | --- | --- | --- |
 | Container App | `DefaultAzureCredential` | Foundry, Fabric, Cosmos DB, AI Search |
-| ブラウザ利用者 | delegated Microsoft Graph token | Work IQ brief 取得、owner-bound 会話 API、評価保存 |
+| ブラウザ利用者 | delegated Microsoft Graph token | Work IQ connector auth / rollback brief 取得、owner-bound 会話 API、評価保存 |
 | APIM | Managed Identity | Foundry バックエンド接続 |
 | AI Search bootstrap | Foundry connection or API key | 初期インデックス投入 |
 

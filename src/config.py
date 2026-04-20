@@ -37,6 +37,7 @@ class AppSettings(TypedDict):
     image_project_endpoint_mai: str
     marketing_plan_runtime: str
     marketing_plan_prompt_agent_name: str
+    work_iq_runtime: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -63,6 +64,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
     "marketing_plan_runtime": ("MARKETING_PLAN_RUNTIME",),
     "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
+    "work_iq_runtime": ("WORKIQ_RUNTIME",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -74,6 +76,7 @@ _DEFAULTS: dict[str, str] = {
     "allowed_origins": "http://localhost:5173",
     "marketing_plan_runtime": "foundry_prompt",
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+    "work_iq_runtime": "foundry_tool",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

@@ -226,6 +226,7 @@ def build_work_iq_session_metadata(
     conversation_settings: ConversationSettings,
     identity: RequestIdentity,
     existing_session: object = None,
+    preflight_status: str = "",
 ) -> WorkIQSessionMetadata:
     """新規会話向けの sanitized Work IQ session metadata を構築する。"""
     session = sanitize_work_iq_session_for_storage(existing_session) or {
@@ -249,7 +250,9 @@ def build_work_iq_session_metadata(
     )
 
     if conversation_settings["work_iq_enabled"] and identity["auth_mode"] != "delegated":
-        session["warning_code"] = "identity_mismatch" if identity["auth_error"] == "identity_mismatch" else "auth_required"
+        session["warning_code"] = preflight_status or (
+            "identity_mismatch" if identity["auth_error"] == "identity_mismatch" else "auth_required"
+        )
         session["status"] = session["warning_code"]
     else:
         session.pop("warning_code", None)

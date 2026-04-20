@@ -8,6 +8,7 @@ import { useState } from 'react'
 export interface ModelSettings {
   model: string
   marketingPlanRuntime: 'legacy' | 'foundry_prompt'
+  workIqRuntime?: 'graph_prefetch' | 'foundry_tool'
   temperature: number
   maxTokens: number
   topP: number

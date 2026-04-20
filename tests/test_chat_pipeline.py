@@ -153,7 +153,11 @@ class TestMarketingPlanRuntimeSettings:
         )
 
     def test_build_effective_workflow_settings_includes_runtime(self, monkeypatch) -> None:
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        monkeypatch.setattr(
+            chat_module,
+            "get_settings",
+            lambda: {"marketing_plan_runtime": "foundry_prompt", "work_iq_runtime": "foundry_tool"},
+        )
         assert chat_module._build_effective_workflow_settings(
             {
                 "manager_approval_enabled": True,
@@ -163,6 +167,7 @@ class TestMarketingPlanRuntimeSettings:
             "manager_approval_enabled": True,
             "manager_email": "manager@example.com",
             "marketing_plan_runtime": "foundry_prompt",
+            "work_iq_runtime": "foundry_tool",
         }
 
     def test_parse_saved_workflow_settings_keeps_backward_compatibility(self) -> None:
@@ -175,6 +180,24 @@ class TestMarketingPlanRuntimeSettings:
             "manager_approval_enabled": True,
             "manager_email": "manager@example.com",
         }
+
+    def test_resolve_work_iq_runtime_defaults_to_foundry_tool(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "foundry_tool"})
+        assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
+
+    def test_build_effective_workflow_settings_rejects_legacy_foundry_tool_combo(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            chat_module,
+            "get_settings",
+            lambda: {"marketing_plan_runtime": "legacy", "work_iq_runtime": "foundry_tool"},
+        )
+        with pytest.raises(ValueError, match="work_iq_runtime=foundry_tool"):
+            chat_module._build_effective_workflow_settings(
+                {
+                    "manager_approval_enabled": False,
+                    "manager_email": "",
+                }
+            )
 
 
 # --- _extract_inline_images テスト ---
@@ -351,6 +374,24 @@ class TestBuildMarketingPlanPrompt:
         assert "Work IQ の職場コンテキスト" in result
         assert "家族向け訴求" in result
         assert "メール: 2 件" in result
+
+    def test_includes_work_iq_tool_guidance_for_foundry_tool(self):
+        result = chat_module._build_marketing_plan_prompt(
+            "沖縄プラン",
+            "売上データ分析",
+            {
+                "enabled": True,
+                "source_scope": ["emails", "teams_chats"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            "foundry_tool",
+        )
+        assert "Microsoft 365 参照ガイド" in result
+        assert "メール" in result
+        assert "Teams チャット" in result
 
 
 # --- _build_revision_prompt テスト ---
@@ -712,6 +753,25 @@ def test_build_conversation_metadata_for_save_sanitizes_work_iq_session():
         "owner_upn": "user@example.com",
         "brief_summary": "安全な要約",
     }
+
+
+def test_build_work_iq_session_metadata_uses_preflight_status():
+    """frontend preflight の auth status を新規 Work IQ session に反映する"""
+    session = chat_module.build_work_iq_session_metadata(
+        {"work_iq_enabled": True, "source_scope": ["emails"]},
+        {
+            "user_id": "anon-123",
+            "auth_mode": "anonymous",
+            "oid": "",
+            "tid": "",
+            "upn": "",
+            "auth_error": "missing_token",
+        },
+        preflight_status="consent_required",
+    )
+
+    assert session["status"] == "consent_required"
+    assert session["warning_code"] == "consent_required"
 
 
 @pytest.mark.asyncio
@@ -1090,6 +1150,7 @@ async def test_workflow_event_generator_injects_work_iq_brief_and_emits_tool_eve
             "沖縄プラン",
             "conv-workiq",
             {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "graph_prefetch"},
             conversation_settings={"work_iq_enabled": True, "source_scope": ["emails"]},
             work_iq_session={
                 "enabled": True,
