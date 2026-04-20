@@ -33,6 +33,14 @@ class WorkIQPromptConfig(TypedDict):
     source_scope: list[str]
 
 
+def _build_marketing_plan_web_search_tool() -> WebSearchTool:
+    """marketing-plan で使う Web Search tool を生成する。"""
+    return WebSearchTool(
+        user_location={"country": "JP", "region": "Tokyo"},
+        search_context_size="medium",
+    )
+
+
 def _normalize_agent_name_token(value: str) -> str:
     """Prompt Agent 名に使えるトークンへ正規化する。"""
     lowered = value.strip().lower().replace(".", "-").replace("_", "-")
@@ -60,12 +68,7 @@ def _ensure_marketing_plan_agent(project_client: AIProjectClient, model_name: st
         definition=PromptAgentDefinition(
             model=model_name,
             instructions=MARKETING_PLAN_INSTRUCTIONS,
-            tools=[
-                WebSearchTool(
-                    user_location={"country": "JP", "region": "Tokyo"},
-                    search_context_size="medium",
-                )
-            ],
+            tools=[_build_marketing_plan_web_search_tool()],
         ),
     )
 
@@ -115,17 +118,23 @@ def run_marketing_plan_prompt_agent(
     project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)
     openai_client = project_client.get_openai_client()
     try:
-        agent = _ensure_marketing_plan_agent(project_client, model_name)
-        response_kwargs: dict[str, object] = {
-            "input": user_input,
-            "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-        }
         work_iq_tools = _build_work_iq_tools(
             work_iq or {"enabled": False, "source_scope": []},
             work_iq_access_token,
         )
         if work_iq_tools:
-            response_kwargs["tools"] = work_iq_tools
+            response_kwargs: dict[str, object] = {
+                "model": model_name,
+                "instructions": MARKETING_PLAN_INSTRUCTIONS,
+                "input": user_input,
+                "tools": [_build_marketing_plan_web_search_tool(), *work_iq_tools],
+            }
+        else:
+            agent = _ensure_marketing_plan_agent(project_client, model_name)
+            response_kwargs = {
+                "input": user_input,
+                "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+            }
         return openai_client.responses.create(
             **response_kwargs,
         )
