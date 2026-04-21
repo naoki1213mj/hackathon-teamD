@@ -236,6 +236,63 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
     }
 
 
+def test_setup_improvement_mcp_returns_false_when_deploy_fails(monkeypatch) -> None:
+    """配備が失敗した場合は APIM 登録を行わず失敗として返す"""
+    configure_called = False
+
+    def fake_configure_improvement_mcp(*args, **kwargs) -> bool:
+        nonlocal configure_called
+        del args, kwargs
+        configure_called = True
+        return True
+
+    monkeypatch.setattr(postprovision_module, "deploy_improvement_mcp_function", lambda **kwargs: False)
+    monkeypatch.setattr(postprovision_module, "configure_improvement_mcp", fake_configure_improvement_mcp)
+    monkeypatch.setattr(
+        postprovision_module, "_get_token", lambda scope="https://management.azure.com/.default": "prefetched-token"
+    )
+    monkeypatch.setattr(
+        postprovision_module, "_resolve_resource_group_location", lambda rg, configured_location="": "eastus2"
+    )
+
+    result = postprovision_module.setup_improvement_mcp(
+        subscription_id="sub-id",
+        rg="rg-dev",
+        apim_name="apim-test",
+        env={"AZURE_CONTAINER_APP_NAME": "ca-abc123"},
+    )
+
+    assert result is False
+    assert configure_called is False
+
+
+def test_ensure_storage_account_updates_existing_storage_network_settings(monkeypatch) -> None:
+    """既存 storage account でも Flex 用のネットワーク設定へ揃える"""
+    commands: list[list[str]] = []
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        if command[:4] == ["az", "storage", "account", "show"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"name": "stfnabc123"}), stderr="")
+        if command[:4] == ["az", "storage", "account", "update"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"name": "stfnabc123"}), stderr="")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+
+    result = postprovision_module.ensure_storage_account(
+        resource_group="rg-dev",
+        location="eastus2",
+        storage_account_name="stfnabc123",
+    )
+
+    assert result is True
+    assert any(
+        command[:4] == ["az", "storage", "account", "update"] and "Enabled" in command for command in commands
+    )
+
+
 def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_identity(monkeypatch) -> None:
     """Function App の storage 認証を system assigned managed identity へ切り替える"""
     commands: list[list[str]] = []
@@ -269,6 +326,8 @@ def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_iden
             return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
         if command[:4] == ["az", "functionapp", "deployment", "config"] and "set" in command:
             return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"ok": True}), stderr="")
+        if command[:3] == ["az", "functionapp", "restart"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         raise AssertionError(f"unexpected command: {command}")
 
@@ -287,7 +346,18 @@ def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_iden
         for command in commands
     )
     assert any(
-        command[:4] == ["az", "role", "assignment", "create"] and postprovision_module._STORAGE_BLOB_DATA_OWNER_ROLE in command
+        command[:4] == ["az", "role", "assignment", "create"]
+        and postprovision_module._STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE in command
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["az", "role", "assignment", "create"]
+        and postprovision_module._STORAGE_QUEUE_DATA_CONTRIBUTOR_ROLE in command
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["az", "role", "assignment", "create"]
+        and postprovision_module._STORAGE_QUEUE_DATA_MESSAGE_PROCESSOR_ROLE in command
         for command in commands
     )
     assert any(
@@ -298,6 +368,7 @@ def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_iden
         command[:4] == ["az", "functionapp", "config", "appsettings"] and "AzureWebJobsStorage__accountName=stfnabc123" in command
         for command in commands
     )
+    assert any(command[:3] == ["az", "functionapp", "restart"] for command in commands)
 
 
 def test_create_voice_agent_creates_agent_when_missing(monkeypatch) -> None:

@@ -342,7 +342,9 @@ _IMPROVEMENT_MCP_NAMED_VALUE = "func-mcp-extension-key"
 _IMPROVEMENT_MCP_READY_ATTEMPTS = 6
 _IMPROVEMENT_MCP_READY_DELAY_SECONDS = 10
 _IMPROVEMENT_MCP_RBAC_WAIT_SECONDS = 30
-_STORAGE_BLOB_DATA_OWNER_ROLE = "Storage Blob Data Owner"
+_STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE = "Storage Blob Data Contributor"
+_STORAGE_QUEUE_DATA_CONTRIBUTOR_ROLE = "Storage Queue Data Contributor"
+_STORAGE_QUEUE_DATA_MESSAGE_PROCESSOR_ROLE = "Storage Queue Data Message Processor"
 _IMPROVEMENT_MCP_POLICY_XML = """\
 <policies>
   <inbound>
@@ -398,38 +400,66 @@ def ensure_storage_account(resource_group: str, location: str, storage_account_n
     )
     if show_result.returncode == 0:
         logger.info("MCP storage account 既存: %s", storage_account_name)
-        return True
+    else:
+        create_result = _run_cli(
+            [
+                "az",
+                "storage",
+                "account",
+                "create",
+                "--name",
+                storage_account_name,
+                "--resource-group",
+                resource_group,
+                "--location",
+                location,
+                "--sku",
+                "Standard_LRS",
+                "--kind",
+                "StorageV2",
+                "--allow-shared-key-access",
+                "false",
+                "--allow-blob-public-access",
+                "false",
+                "--min-tls-version",
+                "TLS1_2",
+                "--public-network-access",
+                "Enabled",
+            ],
+            capture_output=True,
+        )
+        if create_result.returncode == 0:
+            logger.info("MCP storage account を作成しました: %s", storage_account_name)
+        else:
+            logger.warning("MCP storage account の作成に失敗しました: %s", create_result.stderr.strip())
+            return False
 
-    create_result = _run_cli(
+    update_result = _run_cli(
         [
             "az",
             "storage",
             "account",
-            "create",
+            "update",
             "--name",
             storage_account_name,
             "--resource-group",
             resource_group,
-            "--location",
-            location,
-            "--sku",
-            "Standard_LRS",
-            "--kind",
-            "StorageV2",
             "--allow-shared-key-access",
             "false",
             "--allow-blob-public-access",
             "false",
             "--min-tls-version",
             "TLS1_2",
+            "--public-network-access",
+            "Enabled",
         ],
         capture_output=True,
     )
-    if create_result.returncode == 0:
-        logger.info("MCP storage account を作成しました: %s", storage_account_name)
+    if update_result.returncode == 0:
+        logger.info("MCP storage account のネットワーク/認証設定を更新しました: %s", storage_account_name)
         return True
 
-    logger.warning("MCP storage account の作成に失敗しました: %s", create_result.stderr.strip())
+    logger.warning("MCP storage account の設定更新に失敗しました: %s", update_result.stderr.strip())
     return False
 
 
@@ -654,8 +684,14 @@ def ensure_improvement_mcp_managed_identity_storage(
     if not storage_account_id:
         return False
 
-    if not _ensure_storage_role_assignment(storage_account_id, principal_id, _STORAGE_BLOB_DATA_OWNER_ROLE):
-        return False
+    required_roles = (
+        _STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE,
+        _STORAGE_QUEUE_DATA_CONTRIBUTOR_ROLE,
+        _STORAGE_QUEUE_DATA_MESSAGE_PROCESSOR_ROLE,
+    )
+    for role_name in required_roles:
+        if not _ensure_storage_role_assignment(storage_account_id, principal_id, role_name):
+            return False
 
     deployment_container_name = _get_deployment_storage_container_name(function_app_name, resource_group)
     if not deployment_container_name:
@@ -730,6 +766,22 @@ def ensure_improvement_mcp_managed_identity_storage(
     )
     if deployment_config_result.returncode != 0:
         logger.warning("Function App の deployment storage 設定更新に失敗しました: %s", deployment_config_result.stderr.strip())
+        return False
+
+    restart_result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "restart",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+        ],
+        capture_output=True,
+    )
+    if restart_result.returncode != 0:
+        logger.warning("Function App の再起動に失敗しました: %s", restart_result.stderr.strip())
         return False
 
     logger.info(
@@ -827,8 +879,10 @@ def setup_improvement_mcp(subscription_id: str, rg: str, apim_name: str, env: di
             function_app_name=function_app_name,
             storage_account_name=storage_account_name,
         )
-        if deployed:
-            _sync_improvement_mcp_env(function_app_name, function_app_rg, storage_account_name)
+        if not deployed:
+            logger.warning("improvement-mcp の自動配備に失敗したため APIM 登録を中断します")
+            return False
+        _sync_improvement_mcp_env(function_app_name, function_app_rg, storage_account_name)
     else:
         logger.info(
             "improvement-mcp の自動配備をスキップします (location=%s, storage=%s)",
