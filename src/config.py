@@ -76,7 +76,7 @@ _DEFAULTS: dict[str, str] = {
     "allowed_origins": "http://localhost:5173",
     "marketing_plan_runtime": "foundry_prompt",
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
-    "work_iq_runtime": "foundry_tool",
+    "work_iq_runtime": "graph_prefetch",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

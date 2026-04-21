@@ -34,6 +34,7 @@ export interface ConversationSettings {
 export const DEFAULT_SETTINGS: ModelSettings = {
   model: 'gpt-5-4-mini',
   marketingPlanRuntime: 'foundry_prompt',
+  workIqRuntime: 'graph_prefetch',
   temperature: 0.7,
   maxTokens: 16384,
   topP: 1.0,

@@ -63,4 +63,17 @@ describe('getDelegatedApiAuth', () => {
       status: 'ok',
     })
   })
+
+  it('defaults to graph auth when runtime is omitted', async () => {
+    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
+
+    const result = await getDelegatedApiAuth({ interactive: false })
+
+    expect(getWorkIqFoundryAuth).not.toHaveBeenCalled()
+    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
+    expect(result).toEqual({
+      headers: { Authorization: 'Bearer graph-token' },
+      status: 'ok',
+    })
+  })
 })

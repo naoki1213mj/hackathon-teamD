@@ -181,9 +181,35 @@ class TestMarketingPlanRuntimeSettings:
             "manager_email": "manager@example.com",
         }
 
-    def test_resolve_work_iq_runtime_defaults_to_foundry_tool(self, monkeypatch) -> None:
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "foundry_tool"})
-        assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
+    def test_resolve_work_iq_runtime_defaults_to_graph_prefetch(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "graph_prefetch"})
+        assert chat_module._resolve_work_iq_runtime(None) == "graph_prefetch"
+
+    def test_should_fallback_work_iq_foundry_tool_on_timeout(self) -> None:
+        outcome = {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TOOL_EVENT,
+                    {
+                        "tool": "foundry_prompt_agent",
+                        "status": "failed",
+                        "agent": "marketing-plan-agent",
+                        "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
+                        "error_message": "Foundry Work IQ connector timed out after 120s",
+                    },
+                )
+            ],
+            "text": "",
+            "success": False,
+            "latency_seconds": 120.0,
+            "tool_calls": 0,
+        }
+        assert chat_module._should_fallback_work_iq_foundry_tool(
+            outcome,
+            "foundry_tool",
+            {"enabled": True, "source_scope": ["emails"], "auth_mode": "delegated", "owner_oid": "", "owner_tid": "", "owner_upn": ""},
+            "graph-token",
+        )
 
     def test_build_effective_workflow_settings_rejects_legacy_foundry_tool_combo(self, monkeypatch) -> None:
         monkeypatch.setattr(

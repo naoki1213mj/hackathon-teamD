@@ -707,7 +707,10 @@ def _should_fallback_work_iq_foundry_tool(
 
     event_blob = "\n".join(plan_outcome["events"])
     return "PROMPT_AGENT_RUNTIME_FAILED" in event_blob and (
-        "Error code: 500" in event_blob or "server_error" in event_blob
+        "Error code: 500" in event_blob
+        or "server_error" in event_blob
+        or "timed out" in event_blob.lower()
+        or "timeout" in event_blob.lower()
     )
 
 
@@ -823,6 +826,16 @@ def _sanitize_work_iq_runtime(value: object) -> WorkIQRuntime | None:
     if normalized:
         raise ValueError("work_iq_runtime は graph_prefetch または foundry_tool を指定してください")
     return None
+
+
+def _resolve_work_iq_timeout_seconds() -> float:
+    """Work IQ 関連経路のタイムアウトを返す。"""
+    raw_timeout = _sanitize_optional_text(get_settings().get("work_iq_timeout_seconds"))
+    try:
+        timeout_seconds = float(raw_timeout)
+    except ValueError:
+        return 120.0
+    return timeout_seconds if timeout_seconds > 0 else 120.0
 
 
 def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) -> MarketingPlanRuntime:
@@ -1838,20 +1851,31 @@ async def _execute_agent(
             if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
                 from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
 
-                result = await asyncio.to_thread(
+                work_iq_enabled_for_prompt = bool(
+                    work_iq_session
+                    and work_iq_session.get("enabled")
+                    and _resolve_work_iq_runtime(workflow_settings) == "foundry_tool"
+                )
+                run_prompt_agent = asyncio.to_thread(
                     run_marketing_plan_prompt_agent,
                     user_input,
                     model_settings,
                     work_iq={
-                        "enabled": bool(
-                            work_iq_session
-                            and work_iq_session.get("enabled")
-                            and _resolve_work_iq_runtime(workflow_settings) == "foundry_tool"
-                        ),
+                        "enabled": work_iq_enabled_for_prompt,
                         "source_scope": list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
                     },
                     work_iq_access_token=work_iq_access_token,
                 )
+                if work_iq_enabled_for_prompt:
+                    timeout_seconds = _resolve_work_iq_timeout_seconds()
+                    try:
+                        result = await asyncio.wait_for(run_prompt_agent, timeout=timeout_seconds)
+                    except TimeoutError as exc:
+                        raise TimeoutError(
+                            f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s"
+                        ) from exc
+                else:
+                    result = await run_prompt_agent
                 attempt_tool_events.append(
                     _build_agent_tool_event(
                         "foundry_prompt_agent",
@@ -3562,6 +3586,10 @@ async def workflow_event_generator(
         existing_brief = _sanitize_optional_text(work_iq_session.get("brief_summary"))
         initial_status = _sanitize_optional_text(work_iq_session.get("status") or work_iq_session.get("warning_code"))
         if not existing_brief:
+            yield format_sse(
+                SSEEventType.AGENT_PROGRESS,
+                {"agent": "marketing-plan-agent", "status": "running", "step": 2, "total_steps": _PIPELINE_TOTAL_STEPS},
+            )
             if initial_status in {"auth_required", "identity_mismatch"}:
                 work_iq_session["status"] = initial_status
                 work_iq_session["warning_code"] = initial_status

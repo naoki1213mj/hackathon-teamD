@@ -110,7 +110,7 @@ azd up                                    # provision + build + deploy
 | Area | Current state |
 | --- | --- |
 | Work IQ delegated auth | SPA redirect URIs, Microsoft Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
-| Work IQ runtime | The default runtime is `WORKIQ_RUNTIME=foundry_tool` with `MARKETING_PLAN_RUNTIME=foundry_prompt`. Agent2 runs as a Foundry Prompt Agent and dynamically injects read-only Microsoft 365 connectors from `source_scope`; `graph_prefetch` remains the rollback path for prefetching a short brief through Microsoft Graph Copilot Chat API (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120` by default). Frontend auth preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same UI state. Accounts outside the tenant/guest list are rejected during sign-in |
+| Work IQ runtime | The default runtime is `WORKIQ_RUNTIME=graph_prefetch`. Agent1 and Agent2 are bridged by a short workplace brief fetched through Microsoft Graph Copilot Chat API (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120` by default), which keeps the pipeline progressing even when Foundry connector execution is unstable. `foundry_tool` remains available as an opt-in path with `MARKETING_PLAN_RUNTIME=foundry_prompt`, where Agent2 dynamically injects read-only Microsoft 365 connectors from `source_scope`. Frontend auth preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same UI state. Accounts outside the tenant/guest list are rejected during sign-in |
 | Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
 | Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` |
 | MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
@@ -130,7 +130,7 @@ azd up                                    # provision + build + deploy
 | `SEARCH_API_KEY` | Optional | Azure AI Search admin key (stored as a secret in Container Apps for the live tenant) |
 | `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent Published URL |
 | `MARKETING_PLAN_RUNTIME` | Optional | Marketing-plan runtime selector (default: `foundry_prompt`; `legacy` remains available for rollback/testing) |
-| `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `foundry_tool`; use `graph_prefetch` only as the rollback path). `foundry_tool` requires `MARKETING_PLAN_RUNTIME=foundry_prompt` |
+| `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `graph_prefetch`). `foundry_tool` remains available as an opt-in path and requires `MARKETING_PLAN_RUNTIME=foundry_prompt` |
 | `WORK_IQ_TIMEOUT_SECONDS` | Optional | Timeout for the `graph_prefetch` rollback path when fetching a short Work IQ brief from Microsoft Graph Copilot Chat API (default: `120`) |
 | `SPEECH_SERVICE_ENDPOINT` | Optional | Photo Avatar video generation |
 | `IMPROVEMENT_MCP_ENDPOINT` | Optional | APIM MCP route for evaluation refinement |
