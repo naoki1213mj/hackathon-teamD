@@ -72,27 +72,48 @@ def _resolve_marketing_plan_agent_name(model_name: str) -> str:
     return f"{base_name}-{_normalize_agent_name_token(model_name)}"
 
 
+def build_marketing_plan_agent_definition(model_name: str) -> PromptAgentDefinition:
+    """marketing-plan 用の事前作成済み Agent 定義を返す。"""
+    return PromptAgentDefinition(
+        model=model_name,
+        instructions=MARKETING_PLAN_INSTRUCTIONS,
+        tools=[_build_marketing_plan_web_search_tool()],
+    )
+
+
 def _utc_now_iso() -> str:
     """UTC 現在時刻を ISO 文字列で返す。"""
     return datetime.now(timezone.utc).isoformat()
 
 
-def _ensure_marketing_plan_agent(project_client: AIProjectClient, model_name: str):
-    """marketing-plan 用 Prompt Agent を取得または作成する。"""
+def _get_marketing_plan_agent(project_client: AIProjectClient, model_name: str):
+    """marketing-plan 用 Prompt Agent を取得する。"""
     agent_name = _resolve_marketing_plan_agent_name(model_name)
     try:
         return project_client.agents.get(agent_name=agent_name)
     except ResourceNotFoundError:
-        logger.info("marketing-plan Prompt Agent を作成します: %s", agent_name)
+        raise ValueError(
+            "marketing-plan Foundry Agent が未作成です。scripts/postprovision.py を実行して "
+            f"{agent_name} を同期してください"
+        ) from None
 
-    return project_client.agents.create_version(
-        agent_name=agent_name,
-        definition=PromptAgentDefinition(
-            model=model_name,
-            instructions=MARKETING_PLAN_INSTRUCTIONS,
-            tools=[_build_marketing_plan_web_search_tool()],
-        ),
-    )
+
+def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
+    """marketing-plan 用 Prompt Agent を create_version で同期する。"""
+    project_client: AIProjectClient | None = None
+    try:
+        project_client = AIProjectClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
+        agent_name = _resolve_marketing_plan_agent_name(model_name)
+        project_client.agents.create_version(
+            agent_name=agent_name,
+            definition=build_marketing_plan_agent_definition(model_name),
+        )
+        logger.info("marketing-plan Prompt Agent を同期しました: %s", agent_name)
+        return True
+    finally:
+        close_method = getattr(project_client, "close", None)
+        if callable(close_method):
+            close_method()
 
 
 def _build_work_iq_tools(
@@ -197,7 +218,12 @@ def run_marketing_plan_prompt_agent(
     project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)
     openai_client = project_client.get_openai_client()
     try:
-        work_iq_tools, resolved_work_iq_tools = _build_work_iq_tools(
+        agent = _get_marketing_plan_agent(project_client, model_name)
+        response_kwargs: dict[str, object] = {
+            "input": user_input,
+            "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+        }
+        work_iq_tools, _resolved_work_iq_tools = _build_work_iq_tools(
             work_iq or {"enabled": False, "source_scope": []},
             work_iq_access_token,
         )
@@ -209,15 +235,7 @@ def run_marketing_plan_prompt_agent(
                 started_at=started_at,
                 source_scope=list((work_iq or {"enabled": False, "source_scope": []})["source_scope"]),
             )
-            response_kwargs: dict[str, object] = {
-                "model": model_name,
-                "instructions": (
-                    f"{MARKETING_PLAN_INSTRUCTIONS.rstrip()}\n\n"
-                    f"{_build_work_iq_tool_guidance(work_iq or {'enabled': False, 'source_scope': []}, resolved_work_iq_tools)}"
-                ),
-                "input": user_input,
-                "tools": [_build_marketing_plan_web_search_tool(), *work_iq_tools],
-            }
+            response_kwargs["tools"] = work_iq_tools
             try:
                 response = openai_client.responses.create(
                     **response_kwargs,
@@ -241,12 +259,6 @@ def run_marketing_plan_prompt_agent(
                 source_scope=list((work_iq or {"enabled": False, "source_scope": []})["source_scope"]),
             )
             return response
-        else:
-            agent = _ensure_marketing_plan_agent(project_client, model_name)
-            response_kwargs = {
-                "input": user_input,
-                "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-            }
         return openai_client.responses.create(
             **response_kwargs,
         )

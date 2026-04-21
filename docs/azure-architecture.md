@@ -73,7 +73,7 @@ flowchart TD
 
 | Runtime | 既定 | 実装 |
 | --- | --- | --- |
-| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせて Agent2 を Foundry Prompt Agent として実行し、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入する |
+| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行し、`source_scope` に応じて read-only の Microsoft 365 connector を動的 overlay する |
 | `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
 
 - `source_scope` ごとの connector は `meeting_notes` → Teams、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint です。

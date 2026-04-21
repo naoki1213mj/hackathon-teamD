@@ -141,22 +141,26 @@ class TestExtractPlanSummary:
 class TestMarketingPlanRuntimeSettings:
     """marketing-plan-agent runtime selector のテスト"""
 
-    def test_resolve_runtime_defaults_to_foundry_prompt(self, monkeypatch) -> None:
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
-        assert chat_module._resolve_marketing_plan_runtime(None) == "foundry_prompt"
+    def test_resolve_runtime_defaults_to_foundry_preprovisioned(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_preprovisioned"})
+        assert chat_module._resolve_marketing_plan_runtime(None) == "foundry_preprovisioned"
 
     def test_resolve_runtime_request_override_wins(self, monkeypatch) -> None:
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_preprovisioned"})
         assert (
             chat_module._resolve_marketing_plan_runtime({"marketing_plan_runtime": "legacy"})
             == "legacy"
         )
 
+    def test_resolve_runtime_accepts_foundry_prompt_alias(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        assert chat_module._resolve_marketing_plan_runtime(None) == "foundry_preprovisioned"
+
     def test_build_effective_workflow_settings_includes_runtime(self, monkeypatch) -> None:
         monkeypatch.setattr(
             chat_module,
             "get_settings",
-            lambda: {"marketing_plan_runtime": "foundry_prompt", "work_iq_runtime": "foundry_tool"},
+            lambda: {"marketing_plan_runtime": "foundry_preprovisioned", "work_iq_runtime": "foundry_tool"},
         )
         assert chat_module._build_effective_workflow_settings(
             {
@@ -166,7 +170,7 @@ class TestMarketingPlanRuntimeSettings:
         ) == {
             "manager_approval_enabled": True,
             "manager_email": "manager@example.com",
-            "marketing_plan_runtime": "foundry_prompt",
+            "marketing_plan_runtime": "foundry_preprovisioned",
             "work_iq_runtime": "foundry_tool",
         }
 
@@ -181,39 +185,13 @@ class TestMarketingPlanRuntimeSettings:
             "manager_email": "manager@example.com",
         }
 
-    def test_resolve_work_iq_runtime_defaults_to_graph_prefetch(self, monkeypatch) -> None:
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "graph_prefetch"})
-        assert chat_module._resolve_work_iq_runtime(None) == "graph_prefetch"
+    def test_resolve_work_iq_runtime_defaults_to_foundry_tool(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "foundry_tool"})
+        assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
 
     def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
         assert chat_module._resolve_work_iq_timeout_seconds() == 95.0
-
-    def test_should_fallback_work_iq_foundry_tool_on_timeout(self) -> None:
-        outcome = {
-            "events": [
-                chat_module.format_sse(
-                    chat_module.SSEEventType.TOOL_EVENT,
-                    {
-                        "tool": "foundry_prompt_agent",
-                        "status": "failed",
-                        "agent": "marketing-plan-agent",
-                        "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
-                        "error_message": "Foundry Work IQ connector timed out after 95s",
-                    },
-                )
-            ],
-            "text": "",
-            "success": False,
-            "latency_seconds": 95.0,
-            "tool_calls": 0,
-        }
-        assert chat_module._should_fallback_work_iq_foundry_tool(
-            outcome,
-            "foundry_tool",
-            {"enabled": True, "source_scope": ["emails"], "auth_mode": "delegated", "owner_oid": "", "owner_tid": "", "owner_upn": ""},
-            "graph-token",
-        )
 
     def test_build_effective_workflow_settings_rejects_legacy_foundry_tool_combo(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -1299,8 +1277,8 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
 
 
 @pytest.mark.asyncio
-async def test_workflow_event_generator_falls_back_to_graph_prefetch_when_foundry_tool_errors(monkeypatch) -> None:
-    """foundry_tool が server_error で失敗したら graph_prefetch にフォールバックする。"""
+async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_implicit_fallback(monkeypatch) -> None:
+    """foundry_tool が失敗しても暗黙 rollback はせず、そのまま失敗を返す。"""
 
     captured: dict[str, object] = {"marketing_calls": []}
 
@@ -1331,58 +1309,32 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_when_foundr
                 "access_token": work_iq_access_token,
             }
         )
-        if len(captured["marketing_calls"]) == 1:
-            return {
-                "events": [
-                    chat_module.format_sse(
-                        chat_module.SSEEventType.TOOL_EVENT,
-                        {
-                            "tool": "foundry_prompt_agent",
-                            "status": "failed",
-                            "agent": "marketing-plan-agent",
-                            "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
-                            "error_message": "Error code: 500 - {'error': {'code': 'server_error'}}",
-                        },
-                    ),
-                    chat_module.format_sse(
-                        chat_module.SSEEventType.ERROR,
-                        {"message": "marketing-plan-agent failed", "code": "AGENT_RUNTIME_ERROR"},
-                    ),
-                ],
-                "text": "",
-                "success": False,
-                "latency_seconds": 0.1,
-                "tool_calls": 0,
-            }
         return {
             "events": [
                 chat_module.format_sse(
-                    chat_module.SSEEventType.TEXT,
-                    {"content": "marketing output", "agent": "marketing-plan-agent"},
+                    chat_module.SSEEventType.TOOL_EVENT,
+                    {
+                        "tool": "foundry_prompt_agent",
+                        "status": "failed",
+                        "agent": "marketing-plan-agent",
+                        "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
+                        "error_message": "Error code: 500 - {'error': {'code': 'server_error'}}",
+                    },
+                )
+            ]
+            + [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.ERROR,
+                    {"message": "marketing-plan-agent failed", "code": "AGENT_RUNTIME_ERROR"},
                 )
             ],
-            "text": "marketing output",
-            "success": True,
+            "text": "",
+            "success": False,
             "latency_seconds": 0.1,
-            "tool_calls": 1,
+            "tool_calls": 0,
         }
-
-    async def fake_generate_workplace_context_brief(**kwargs):
-        return {
-            "brief_summary": "会議メモでは学生旅行向けに SNS 訴求が重視されていました。",
-            "brief_source_metadata": [{"source": "meeting_notes", "label": "会議メモ", "count": 1}],
-            "status": "completed",
-        }
-
-    class _SafeResult:
-        is_safe = True
-
-    async def fake_check_tool_response(_: str):
-        return _SafeResult()
 
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
-    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
-    monkeypatch.setattr(chat_module, "check_tool_response", fake_check_tool_response)
     chat_module._pending_approvals.clear()
 
     events = [
@@ -1410,24 +1362,13 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_when_foundr
 
     marketing_calls = captured["marketing_calls"]
     assert isinstance(marketing_calls, list)
-    assert len(marketing_calls) == 2
+    assert len(marketing_calls) == 1
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
-    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
-    assert "Work IQ の職場コンテキスト" in str(marketing_calls[1]["prompt"])
-    assert marketing_calls[1]["access_token"] == ""
-    assert not any(
+    assert any(
         event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR"
         for event_name, payload in parsed
     )
-    assert any(
-        event_name == chat_module.SSEEventType.TOOL_EVENT
-        and payload.get("source") == "workiq"
-        and payload.get("status") == "completed"
-        for event_name, payload in parsed
-    )
-    assert chat_module._pending_approvals["conv-workiq-fallback"]["work_iq_session"]["brief_summary"] == (
-        "会議メモでは学生旅行向けに SNS 訴求が重視されていました。"
-    )
+    assert "conv-workiq-fallback" not in chat_module._pending_approvals
 
 
 @pytest.mark.asyncio

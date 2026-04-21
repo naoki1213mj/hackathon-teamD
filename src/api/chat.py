@@ -174,7 +174,7 @@ class WorkflowSettings(TypedDict):
     work_iq_runtime: NotRequired[str]
 
 
-MarketingPlanRuntime = Literal["legacy", "foundry_prompt"]
+MarketingPlanRuntime = Literal["legacy", "foundry_preprovisioned"]
 WorkIQRuntime = Literal["graph_prefetch", "foundry_tool"]
 
 
@@ -693,27 +693,6 @@ async def _apply_work_iq_result_to_session(
         work_iq_session.pop("warning_code", None)
 
 
-def _should_fallback_work_iq_foundry_tool(
-    plan_outcome: AgentExecutionOutcome,
-    work_iq_runtime: WorkIQRuntime,
-    work_iq_session: WorkIQSessionMetadata | None,
-    work_iq_graph_access_token: str,
-) -> bool:
-    """Foundry connector 経路の失敗時に graph_prefetch へフォールバックすべきか判定する。"""
-    if plan_outcome["success"] or work_iq_runtime != "foundry_tool" or not work_iq_graph_access_token.strip():
-        return False
-    if not isinstance(work_iq_session, dict) or not work_iq_session.get("enabled"):
-        return False
-
-    event_blob = "\n".join(plan_outcome["events"])
-    return "PROMPT_AGENT_RUNTIME_FAILED" in event_blob and (
-        "Error code: 500" in event_blob
-        or "server_error" in event_blob
-        or "timed out" in event_blob.lower()
-        or "timeout" in event_blob.lower()
-    )
-
-
 def _build_conversation_metadata_for_save(
     conversation_id: str,
     existing_conversation: dict | None,
@@ -809,10 +788,12 @@ def _sanitize_marketing_plan_runtime(value: object) -> MarketingPlanRuntime | No
     if not isinstance(value, str):
         return None
     normalized = _sanitize_optional_text(value).lower().replace("-", "_")
-    if normalized in {"legacy", "foundry_prompt"}:
+    if normalized == "foundry_prompt":
+        normalized = "foundry_preprovisioned"
+    if normalized in {"legacy", "foundry_preprovisioned"}:
         return normalized
     if normalized:
-        raise ValueError("marketing_plan_runtime は legacy または foundry_prompt を指定してください")
+        raise ValueError("marketing_plan_runtime は legacy または foundry_preprovisioned を指定してください")
     return None
 
 
@@ -846,7 +827,7 @@ def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) 
         runtime_override = _sanitize_marketing_plan_runtime(workflow_settings.get("marketing_plan_runtime"))
         if runtime_override is not None:
             return runtime_override
-    return _sanitize_marketing_plan_runtime(get_settings()["marketing_plan_runtime"]) or "legacy"
+    return _sanitize_marketing_plan_runtime(get_settings()["marketing_plan_runtime"]) or "foundry_preprovisioned"
 
 
 def _resolve_work_iq_runtime(workflow_settings: WorkflowSettings | None) -> WorkIQRuntime:
@@ -863,8 +844,10 @@ def _build_effective_workflow_settings(workflow_settings: WorkflowSettings | Non
     source = workflow_settings or {}
     marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings)
     work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
-    if marketing_plan_runtime != "foundry_prompt" and work_iq_runtime == "foundry_tool":
-        raise ValueError("work_iq_runtime=foundry_tool は marketing_plan_runtime=foundry_prompt と組み合わせてください")
+    if marketing_plan_runtime != "foundry_preprovisioned" and work_iq_runtime == "foundry_tool":
+        raise ValueError(
+            "work_iq_runtime=foundry_tool は marketing_plan_runtime=foundry_preprovisioned と組み合わせてください"
+        )
     return {
         "manager_approval_enabled": _to_bool(source.get("manager_approval_enabled")),
         "manager_email": _sanitize_optional_text(source.get("manager_email")),
@@ -1850,7 +1833,7 @@ async def _execute_agent(
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
-            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
+            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
                 from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
 
                 work_iq_enabled_for_prompt = bool(
@@ -1907,7 +1890,7 @@ async def _execute_agent(
             collected_tool_events = attempt_tool_events
             break
         except Exception as exc:
-            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
+            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
                 attempt_tool_events.append(
                     _build_agent_tool_event(
                         "foundry_prompt_agent",
@@ -3647,41 +3630,6 @@ async def workflow_event_generator(
         work_iq_session=work_iq_session,
         work_iq_access_token=work_iq_access_token,
     )
-    if _should_fallback_work_iq_foundry_tool(
-        plan_outcome,
-        work_iq_runtime,
-        work_iq_session,
-        work_iq_graph_access_token,
-    ):
-        logger.warning("Work IQ foundry_tool 経路が失敗したため graph_prefetch にフォールバックします")
-        work_iq_result = await generate_workplace_context_brief(
-            user_input=user_input,
-            source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
-            access_token=work_iq_graph_access_token,
-            user_time_zone=user_time_zone,
-        )
-        if work_iq_session:
-            await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
-            yield format_sse(
-                SSEEventType.TOOL_EVENT,
-                _build_work_iq_tool_event_data(
-                    work_iq_session,
-                    _sanitize_optional_text(work_iq_session.get("status")) or "completed",
-                ),
-            )
-
-        fallback_workflow_settings = dict(workflow_settings or {})
-        fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
-        plan_outcome = await _execute_agent_with_runtime(
-            agent_name="marketing-plan-agent",
-            agent_step=2,
-            user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session, "graph_prefetch"),
-            conversation_id=conversation_id,
-            model_settings=model_settings,
-            workflow_settings=fallback_workflow_settings,
-            work_iq_session=work_iq_session,
-            work_iq_access_token="",
-        )
     for event in plan_outcome["events"]:
         yield event
     if not plan_outcome["success"]:

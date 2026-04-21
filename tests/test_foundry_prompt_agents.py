@@ -57,8 +57,8 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_without_work_iq_to
     assert "instructions" not in kwargs
 
 
-def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(monkeypatch) -> None:
-    """Work IQ connector 利用時は agent_reference を外して tools を直接渡す。"""
+def test_run_marketing_plan_prompt_agent_overlays_work_iq_tools_on_agent_reference(monkeypatch) -> None:
+    """Work IQ connector 利用時も agent_reference を維持しつつ overlay する。"""
     responses_client = _FakeResponsesClient()
     emitted_events: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -84,22 +84,57 @@ def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(
     assert len(responses_client.calls) == 1
     kwargs = responses_client.calls[0]
     assert kwargs["input"] == "test input"
-    assert kwargs["model"] == "gpt-5-4-mini"
-    assert module.MARKETING_PLAN_INSTRUCTIONS in kwargs["instructions"]
-    assert "Microsoft 365 参照ガイド" in kwargs["instructions"]
-    assert "メール" in kwargs["instructions"]
-    assert "Teams チャット" in kwargs["instructions"]
-    assert "extra_body" not in kwargs
+    assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
     tools = kwargs["tools"]
     assert isinstance(tools, list)
-    assert len(tools) == 3
-    assert tools[0].as_dict()["type"] == "web_search"
-    assert tools[1].as_dict()["connector_id"] == "connector_outlookemail"
-    assert tools[2].as_dict()["connector_id"] == "connector_microsoftteams"
+    assert len(tools) == 2
+    assert tools[0].as_dict()["connector_id"] == "connector_outlookemail"
+    assert tools[1].as_dict()["connector_id"] == "connector_microsoftteams"
+    assert tools[0].as_dict()["require_approval"] == "never"
     assert tools[1].as_dict()["require_approval"] == "never"
-    assert tools[2].as_dict()["require_approval"] == "never"
     assert [event["status"] for event in emitted_events] == ["running", "completed"]
     assert all(event["tool"] == "workiq_foundry_tool" for event in emitted_events)
+
+
+def test_run_marketing_plan_prompt_agent_raises_when_agent_missing(monkeypatch) -> None:
+    """事前作成済み Agent が無ければ明示的エラーにする。"""
+
+    class FakeNotFoundError(Exception):
+        """ResourceNotFoundError の代替。"""
+
+    class _MissingAgents:
+        def get(self, *, agent_name: str):
+            raise FakeNotFoundError("missing")
+
+    class _MissingProjectClient:
+        def __init__(self) -> None:
+            self.agents = _MissingAgents()
+
+        def get_openai_client(self) -> _FakeResponsesClient:
+            return _FakeResponsesClient()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test",
+            "model_name": "gpt-5-4-mini",
+            "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+        },
+    )
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "ResourceNotFoundError", FakeNotFoundError)
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _MissingProjectClient())
+
+    try:
+        module.run_marketing_plan_prompt_agent("test input")
+    except ValueError as exc:
+        assert "scripts/postprovision.py" in str(exc)
+    else:
+        raise AssertionError("ValueError was not raised")
 
 
 def test_build_work_iq_tools_prefers_teams_for_meeting_notes() -> None:
@@ -111,3 +146,41 @@ def test_build_work_iq_tools_prefers_teams_for_meeting_notes() -> None:
 
     assert [tool.as_dict()["connector_id"] for tool in tools] == ["connector_microsoftteams"]
     assert [tool["display_name"] for tool in resolved_tools] == ["Work IQ Teams"]
+
+
+def test_sync_marketing_plan_agent_creates_new_version(monkeypatch) -> None:
+    """postprovision 用 helper は create_version で agent を同期する。"""
+
+    class _FakeAgents:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create_version(self, *, agent_name: str, definition):
+            self.calls.append({"agent_name": agent_name, "definition": definition})
+            return SimpleNamespace(name=agent_name)
+
+    class _SyncProjectClient:
+        def __init__(self) -> None:
+            self.agents = _FakeAgents()
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_client = _SyncProjectClient()
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: {
+            "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+        },
+    )
+
+    result = module.sync_marketing_plan_agent("https://example.test", "gpt-5-4-mini")
+
+    assert result is True
+    assert fake_client.closed is True
+    assert fake_client.agents.calls[0]["agent_name"] == "travel-marketing-plan-gpt-5-4-mini"
+    assert fake_client.agents.calls[0]["definition"].as_dict()["tools"][0]["type"] == "web_search"

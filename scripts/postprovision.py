@@ -1473,6 +1473,24 @@ def create_voice_agent(
             close_method()
 
 
+def sync_marketing_plan_agent(project_endpoint: str) -> bool:
+    """marketing-plan 用の事前作成済み Foundry Agent を同期する。"""
+    from src.foundry_prompt_agents import sync_marketing_plan_agent as sync_agent
+
+    model_name = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
+    try:
+        return sync_agent(project_endpoint, model_name)
+    except ClientAuthenticationError as exc:
+        logger.warning("marketing-plan Agent の認証に失敗しました: %s", exc)
+        return False
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("marketing-plan Agent の同期に失敗しました: %s", exc)
+        return False
+    except Exception as exc:
+        logger.warning("marketing-plan Agent の同期中に予期しないエラーが発生しました: %s", exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -1534,6 +1552,9 @@ def main() -> None:
 
     # Step 4: Voice Agent 作成
     create_voice_agent(project_endpoint, subscription_id, rg)
+
+    # Step 4.5: marketing-plan Agent 同期
+    sync_marketing_plan_agent(project_endpoint)
 
     # Step 5: Entra App 登録（Voice Live SPA 認証用）
     tenant_result = _run_cli(

@@ -445,6 +445,28 @@ def test_create_voice_agent_creates_agent_when_missing(monkeypatch) -> None:
     assert "semantic_detection_v1_multilingual" in "".join(metadata.values())
 
 
+def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
+    """marketing-plan Agent 同期は共通 helper に委譲する。"""
+
+    captured: dict[str, object] = {}
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        captured["project_endpoint"] = project_endpoint
+        captured["model_name"] = model_name
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is True
+    assert captured == {
+        "project_endpoint": "https://example.test",
+        "model_name": "gpt-5-4-mini",
+    }
+
+
 def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:
     """既存 Voice Agent があれば新規作成しない"""
 
