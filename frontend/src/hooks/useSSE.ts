@@ -24,6 +24,7 @@ export type { ToolEvent } from '../lib/tool-events'
 const MAX_TOOL_EVENTS = 50
 const PIPELINE_TOTAL_STEPS = 5
 const DRAFT_EVALUATION_CACHE_KEY = '__draft__'
+const PENDING_WORKIQ_REQUEST_KEY = 'workIqPendingChatRequest'
 
 export interface AgentProgress {
   agent: string
@@ -134,7 +135,12 @@ export interface PipelineState {
   userMessages: string[]
 }
 
-export type SendMessageOptions = ChatRequestOptions
+export interface SendMessageOptions extends ChatRequestOptions {
+  resumeState?: {
+    settings: ModelSettings
+    conversationSettings: ConversationSettings
+  }
+}
 
 export interface RestoreConversationOptions {
   passive?: boolean
@@ -186,6 +192,62 @@ function cloneConversationSettings(settings: ConversationSettings): Conversation
   return {
     workIqEnabled: settings.workIqEnabled,
     workIqSourceScope: [...settings.workIqSourceScope],
+  }
+}
+
+interface PendingWorkIqRequest {
+  message: string
+  settings: ModelSettings
+  conversationSettings: ConversationSettings
+  options?: ChatRequestOptions
+}
+
+function loadPendingWorkIqRequest(): PendingWorkIqRequest | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_WORKIQ_REQUEST_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PendingWorkIqRequest>
+    if (typeof parsed.message !== 'string' || !parsed.message.trim()) return null
+    if (!parsed.settings || typeof parsed.settings !== 'object') return null
+    if (!parsed.conversationSettings || typeof parsed.conversationSettings !== 'object') return null
+
+    const conversationSettings = cloneConversationSettings({
+      workIqEnabled: parsed.conversationSettings.workIqEnabled === true,
+      workIqSourceScope: parseWorkIqSourceScope(parsed.conversationSettings.workIqSourceScope),
+    })
+
+    return {
+      message: parsed.message,
+      settings: normalizeModelSettings({ ...DEFAULT_SETTINGS, ...parsed.settings }),
+      conversationSettings,
+      options: parsed.options,
+    }
+  } catch {
+    return null
+  }
+}
+
+function savePendingWorkIqRequest(request: PendingWorkIqRequest): void {
+  try {
+    window.sessionStorage.setItem(
+      PENDING_WORKIQ_REQUEST_KEY,
+      JSON.stringify({
+        message: request.message,
+        settings: normalizeModelSettings(request.settings),
+        conversationSettings: cloneConversationSettings(request.conversationSettings),
+        options: request.options,
+      }),
+    )
+  } catch {
+    // no-op
+  }
+}
+
+function clearPendingWorkIqRequest(): void {
+  try {
+    window.sessionStorage.removeItem(PENDING_WORKIQ_REQUEST_KEY)
+  } catch {
+    // no-op
   }
 }
 
@@ -883,6 +945,7 @@ export function useSSE() {
   const activeRequestIdRef = useRef(0)
   const activeRestoreRequestIdRef = useRef(0)
   const localEvaluationCacheRef = useRef<Record<string, EvaluationRecord[]>>({})
+  const attemptedPendingResumeRef = useRef(false)
 
   const cacheEvaluationRecord = useCallback((conversationId: string | null | undefined, record: EvaluationRecord) => {
     const cacheKey = getEvaluationCacheKey(conversationId)
@@ -1077,11 +1140,26 @@ export function useSSE() {
     activeRestoreRequestIdRef.current += 1
     const previousState = stateRef.current
     const existingConversationId = conversationIdRef.current
-    const currentSettings = stateRef.current.settings
-    const currentDraftConversationSettings = stateRef.current.draftConversationSettings
+    const currentSettings = options?.resumeState?.settings ?? stateRef.current.settings
+    const currentDraftConversationSettings = options?.resumeState?.conversationSettings ?? stateRef.current.draftConversationSettings
     const nextConversationSettings = existingConversationId
       ? stateRef.current.conversationSettings
       : currentDraftConversationSettings
+    const requestOptions: ChatRequestOptions | undefined = options
+      ? {
+          refineContext: options.refineContext,
+          authInteractionMode: options.authInteractionMode,
+        }
+      : undefined
+    const shouldPersistPendingWorkIqRequest = !existingConversationId && nextConversationSettings.workIqEnabled
+    if (shouldPersistPendingWorkIqRequest) {
+      savePendingWorkIqRequest({
+        message,
+        settings: currentSettings,
+        conversationSettings: nextConversationSettings,
+        options: requestOptions,
+      })
+    }
     const nextWorkIq = existingConversationId
       ? createWorkIqState(
           stateRef.current.conversationSettings,
@@ -1124,17 +1202,52 @@ export function useSSE() {
         controller.signal,
         currentSettings,
         nextConversationSettings,
-        options,
+        requestOptions,
       )
+      if (requestStartResult !== 'redirecting') {
+        clearPendingWorkIqRequest()
+      }
       if (requestStartResult === 'redirecting' && requestId === activeRequestIdRef.current) {
         setState(previousState)
       }
+    } catch (error) {
+      clearPendingWorkIqRequest()
+      throw error
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
       }
     }
   }, [createHandlers])
+
+  useEffect(() => {
+    if (attemptedPendingResumeRef.current) return
+    if (state.status !== 'idle' || state.conversationId || state.userMessages.length > 0) return
+
+    attemptedPendingResumeRef.current = true
+    const pendingRequest = loadPendingWorkIqRequest()
+    if (!pendingRequest) return
+
+    const restoredSettings = normalizeModelSettings(pendingRequest.settings)
+    const restoredConversationSettings = cloneConversationSettings(pendingRequest.conversationSettings)
+
+    setState(prev => ({
+      ...prev,
+      settings: restoredSettings,
+      conversationSettings: cloneConversationSettings(restoredConversationSettings),
+      draftConversationSettings: cloneConversationSettings(restoredConversationSettings),
+      workIq: createWorkIqState(restoredConversationSettings, restoredConversationSettings.workIqEnabled ? 'ready' : 'off'),
+    }))
+
+    void sendMessage(pendingRequest.message, {
+      ...(pendingRequest.options ?? {}),
+      authInteractionMode: 'silent',
+      resumeState: {
+        settings: restoredSettings,
+        conversationSettings: restoredConversationSettings,
+      },
+    })
+  }, [sendMessage, state.conversationId, state.status, state.userMessages.length])
 
   const approve = useCallback(async (response: string) => {
     const threadId = conversationIdRef.current
@@ -1178,6 +1291,7 @@ export function useSSE() {
   const reset = useCallback(() => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    clearPendingWorkIqRequest()
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
     setState({
@@ -1195,6 +1309,7 @@ export function useSSE() {
   const startNewConversation = useCallback(() => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    clearPendingWorkIqRequest()
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
     const preservedSettings = { ...stateRef.current.settings }

@@ -32,6 +32,7 @@ export interface RefineContext {
 
 export interface ChatRequestOptions {
   refineContext?: RefineContext
+  authInteractionMode?: 'default' | 'silent'
 }
 
 export type ConnectSSEStartResult = 'started' | 'redirecting' | 'blocked'
@@ -147,8 +148,9 @@ export async function connectSSE(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (conversationSettings?.workIqEnabled) {
+    const interactiveAuth = options?.authInteractionMode === 'silent' ? false : !conversationId
     const delegatedAuth = await getDelegatedApiAuth({
-      interactive: !conversationId,
+      interactive: interactiveAuth,
       ...(settings ? { workIqRuntime: normalizeWorkIqRuntime(settings.workIqRuntime) } : {}),
     })
     Object.assign(headers, delegatedAuth.headers)

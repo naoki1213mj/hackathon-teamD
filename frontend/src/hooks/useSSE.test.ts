@@ -27,6 +27,7 @@ describe('buildRestoredPipelineState', () => {
     connectSSE.mockClear()
     sendApproval.mockClear()
     getDelegatedApiHeaders.mockClear()
+    window.sessionStorage.clear()
   })
 
   afterEach(() => {
@@ -511,6 +512,35 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.status).toBe('idle')
     expect(result.current.state.pendingVersion).toBeNull()
     expect(result.current.state.userMessages).toEqual([])
+  })
+
+  it('replays a pending Work IQ request after auth redirect returns', async () => {
+    window.sessionStorage.setItem('workIqPendingChatRequest', JSON.stringify({
+      message: '沖縄プランを企画して',
+      settings: {
+        ...DEFAULT_SETTINGS,
+        workIqRuntime: 'foundry_tool',
+      },
+      conversationSettings: {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+      options: {},
+    }))
+
+    renderHook(() => useSSE())
+
+    await waitFor(() => {
+      expect(connectSSE).toHaveBeenCalledWith(
+        '沖縄プランを企画して',
+        expect.any(Object),
+        undefined,
+        expect.any(AbortSignal),
+        expect.objectContaining({ workIqRuntime: 'foundry_tool' }),
+        { workIqEnabled: true, workIqSourceScope: ['emails'] },
+        expect.objectContaining({ authInteractionMode: 'silent' }),
+      )
+    })
   })
 
   it('seeds a first snapshot when evaluating before the first round is committed', async () => {
