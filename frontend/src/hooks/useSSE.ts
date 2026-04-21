@@ -1075,6 +1075,7 @@ export function useSSE() {
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
     activeRestoreRequestIdRef.current += 1
+    const previousState = stateRef.current
     const existingConversationId = conversationIdRef.current
     const currentSettings = stateRef.current.settings
     const currentDraftConversationSettings = stateRef.current.draftConversationSettings
@@ -1116,7 +1117,7 @@ export function useSSE() {
     }))
     const handlers = createHandlers(requestId)
     try {
-      await connectSSE(
+      const requestStartResult = await connectSSE(
         message,
         handlers,
         existingConversationId || undefined,
@@ -1125,6 +1126,9 @@ export function useSSE() {
         nextConversationSettings,
         options,
       )
+      if (requestStartResult === 'redirecting' && requestId === activeRequestIdRef.current) {
+        setState(previousState)
+      }
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null

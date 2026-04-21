@@ -496,6 +496,23 @@ describe('buildRestoredPipelineState', () => {
     )
   })
 
+  it('restores the previous state when auth redirects before the SSE request starts', async () => {
+    connectSSE.mockResolvedValueOnce('redirecting')
+
+    const { result } = renderHook(() => useSSE())
+
+    expect(result.current.state.status).toBe('idle')
+    expect(result.current.state.userMessages).toEqual([])
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(result.current.state.status).toBe('idle')
+    expect(result.current.state.pendingVersion).toBeNull()
+    expect(result.current.state.userMessages).toEqual([])
+  })
+
   it('seeds a first snapshot when evaluating before the first round is committed', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'awaiting_approval',

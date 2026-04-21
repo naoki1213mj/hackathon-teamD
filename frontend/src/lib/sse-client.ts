@@ -34,6 +34,8 @@ export interface ChatRequestOptions {
   refineContext?: RefineContext
 }
 
+export type ConnectSSEStartResult = 'started' | 'redirecting' | 'blocked'
+
 /**
  * SSE ストリームを読み取る共通処理
  */
@@ -95,7 +97,7 @@ export async function connectSSE(
   settings?: ModelSettings,
   conversationSettings?: ConversationSettings,
   options?: ChatRequestOptions,
-): Promise<void> {
+): Promise<ConnectSSEStartResult> {
   const combinedSignal = buildSignal(signal)
 
   const body: Record<string, unknown> = { message, conversation_id: conversationId }
@@ -111,7 +113,7 @@ export async function connectSSE(
     const trimmedManagerEmail = settings.managerEmail.trim()
     if (settings.managerApprovalEnabled && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)) {
       handlers.error?.({ message: '有効な上司メールアドレスを入力してください', code: 'INVALID_MANAGER_EMAIL' })
-      return
+      return 'blocked'
     }
 
     body.settings = {
@@ -163,7 +165,7 @@ export async function connectSSE(
       })
     }
     if (delegatedAuth.status === 'redirecting') {
-      return
+      return 'redirecting'
     }
   }
 
@@ -178,17 +180,18 @@ export async function connectSSE(
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
-      return
+      return 'blocked'
     }
     throw err
   }
 
   if (!response.ok) {
     handlers.error?.({ message: `HTTP ${response.status}`, code: 'HTTP_ERROR' })
-    return
+    return 'blocked'
   }
 
   await readSSEStream(response, handlers, combinedSignal)
+  return 'started'
 }
 
 /**
