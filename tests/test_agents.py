@@ -1,5 +1,6 @@
 """エージェントのツール関数テスト"""
 
+import contextvars
 import json
 from unittest.mock import MagicMock
 
@@ -175,7 +176,7 @@ class TestBrochureGenTools:
         # side-channel に保存されていること
         images = bg.pop_pending_images("hero-test")
         assert "hero" in images
-        assert images["hero"].startswith("data:image/png;base64,")
+        assert images["hero"].startswith("data:image/")
 
     @pytest.mark.asyncio
     async def test_generate_banner_image_fallback(self, monkeypatch):
@@ -186,6 +187,7 @@ class TestBrochureGenTools:
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+        bg.set_current_conversation_id("banner-test")
 
         result = await bg.generate_banner_image(
             prompt="travel banner",
@@ -195,6 +197,9 @@ class TestBrochureGenTools:
         assert parsed["status"] == "generated"
         assert parsed["platform"] == "instagram"
         assert parsed["size"] == "1024x1024"
+        images = bg.pop_pending_images("banner-test")
+        assert "banner_instagram" in images
+        assert images["banner_instagram"].startswith("data:image/")
 
     @pytest.mark.asyncio
     async def test_generate_banner_image_twitter_size(self, monkeypatch):
@@ -214,6 +219,28 @@ class TestBrochureGenTools:
         assert parsed["size"] == "1536x1024"
         assert parsed["platform"] == "x"
         assert parsed["display_aspect_ratio"] == "1.91:1"
+
+    @pytest.mark.asyncio
+    async def test_generate_banner_image_uses_conversation_id_fallback(self, monkeypatch):
+        """context が落ちても最後の conversation_id で side-channel 保存できる"""
+        import src.agents.brochure_gen as bg
+
+        _disable_azd_env(monkeypatch)
+        monkeypatch.setattr(bg, "_image_openai_client", None)
+        monkeypatch.setattr(bg, "_image_client_initialized", False)
+        monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+        monkeypatch.setattr(
+            bg,
+            "_conversation_id_var",
+            contextvars.ContextVar("brochure_conversation_id_test", default=""),
+        )
+        monkeypatch.setattr(bg, "_conversation_id_fallback", "banner-fallback")
+
+        await bg.generate_banner_image(prompt="travel banner", platform="instagram")
+
+        images = bg.pop_pending_images("banner-fallback")
+        assert "banner_instagram" in images
+        assert images["banner_instagram"] == bg._FALLBACK_IMAGE
 
     def test_pop_pending_images_returns_and_clears(self):
         """pop_pending_images が保存済み画像を返しクリアする"""

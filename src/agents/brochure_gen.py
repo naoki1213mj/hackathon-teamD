@@ -7,6 +7,7 @@ import contextvars
 import json
 import logging
 import threading
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -18,12 +19,29 @@ from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
 
-# 1x1 透明 PNG（フォールバック用）
-_FALLBACK_IMAGE = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
-    "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
-)
+def _build_fallback_image() -> str:
+    """失敗時でもプレビュー上で認識できる代替画像を返す。"""
+    svg = """
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#bfdbfe"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" rx="36" fill="url(#bg)"/>
+  <rect x="72" y="72" width="1056" height="656" rx="28" fill="#ffffff" fill-opacity="0.82" stroke="#93c5fd" stroke-width="4"/>
+  <path d="M220 560l145-150 120 115 160-185 185 220H220z" fill="#93c5fd" fill-opacity="0.85"/>
+  <circle cx="860" cy="250" r="58" fill="#fbbf24" fill-opacity="0.9"/>
+  <text x="600" y="236" text-anchor="middle" font-size="48" font-family="Segoe UI, Arial, sans-serif" fill="#0f172a" font-weight="700">Image unavailable</text>
+  <text x="600" y="304" text-anchor="middle" font-size="28" font-family="Segoe UI, Arial, sans-serif" fill="#334155">Travel Marketing AI placeholder</text>
+  <text x="600" y="640" text-anchor="middle" font-size="24" font-family="Segoe UI, Arial, sans-serif" fill="#475569">The brochure keeps its layout while image generation retries are investigated.</text>
+</svg>
+""".strip()
+    return f"data:image/svg+xml;charset=UTF-8,{urllib.parse.quote(svg)}"
+
+
+_FALLBACK_IMAGE = _build_fallback_image()
 
 # 画像生成モデル名（デフォルト値）
 _DEFAULT_IMAGE_MODEL = "gpt-image-1.5"
@@ -356,16 +374,26 @@ _conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "brochure_conversation_id",
     default="",
 )
+_conversation_id_fallback: str = ""
 
 
 def set_current_conversation_id(conversation_id: str) -> None:
     """現在実行中の conversation_id を設定する。"""
+    global _conversation_id_fallback
     _conversation_id_var.set(conversation_id)
+    _conversation_id_fallback = conversation_id
 
 
 def _get_current_conversation_id() -> str:
     """現在の非同期コンテキストに紐づく conversation_id を返す。"""
-    return _conversation_id_var.get()
+    conversation_id = _conversation_id_var.get()
+    if conversation_id:
+        return conversation_id
+    if _conversation_id_fallback:
+        logger.warning("conversation_id の context が空です。モジュールレベルフォールバックを使用します")
+        return _conversation_id_fallback
+    logger.warning("conversation_id が未設定のため、side-channel 画像を安定保存できません")
+    return ""
 
 
 def pop_pending_images(conversation_id: str) -> dict[str, str]:

@@ -1223,6 +1223,25 @@ def _inject_images_into_html(html: str, images: dict[str, str]) -> str:
     return html
 
 
+def _resolve_brochure_pending_images(pending: dict[str, str]) -> dict[str, str]:
+    """不足しているブローシャ画像を可視フォールバックで補完する。"""
+    from src.agents.brochure_gen import _FALLBACK_IMAGE
+
+    resolved = dict(pending)
+    if "banner_twitter" in resolved and "banner_x" not in resolved:
+        resolved["banner_x"] = resolved["banner_twitter"]
+
+    missing_slots: list[str] = []
+    for key in ("hero", "banner_instagram", "banner_x"):
+        if not _sanitize_optional_text(resolved.get(key)):
+            resolved[key] = _FALLBACK_IMAGE
+            missing_slots.append(key)
+
+    if missing_slots:
+        logger.warning("ブローシャ画像が不足していたため可視フォールバックで補完します: %s", ", ".join(missing_slots))
+    return resolved
+
+
 def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
     """Code Interpreter の出力から画像データを抽出する。
 
@@ -1963,25 +1982,26 @@ async def _execute_agent(
         tool_names = _merge_tool_names(tool_names, brochure_tools)
 
         # ブローシャ HTML に画像を埋め込む
-        if pending:
-            for i, evt in enumerate(events):
-                if '"content_type": "html"' in evt and '"brochure-gen-agent"' in evt:
-                    data_match = re.search(r"data: ({.*})", evt)
-                    if data_match:
-                        try:
-                            data = json.loads(data_match.group(1))
-                            html_content = data.get("content", "")
-                            if "<html" in html_content.lower() or "<!doctype" in html_content.lower():
-                                data["content"] = _inject_images_into_html(html_content, pending)
-                                events[i] = (
-                                    f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-                                )
-                        except json.JSONDecodeError, AttributeError:
-                            pass
-                    break
+        resolved_pending = pending
+        for i, evt in enumerate(events):
+            if '"content_type": "html"' in evt and '"brochure-gen-agent"' in evt:
+                data_match = re.search(r"data: ({.*})", evt)
+                if data_match:
+                    try:
+                        data = json.loads(data_match.group(1))
+                        html_content = data.get("content", "")
+                        if "<html" in html_content.lower() or "<!doctype" in html_content.lower():
+                            resolved_pending = _resolve_brochure_pending_images(pending)
+                            data["content"] = _inject_images_into_html(html_content, resolved_pending)
+                            events[i] = (
+                                f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                            )
+                    except json.JSONDecodeError, AttributeError:
+                        pass
+                break
 
         # IMAGE イベントも別途送出（Images タブ用）
-        for img_key, img_data_uri in pending.items():
+        for img_key, img_data_uri in resolved_pending.items():
             events.append(
                 format_sse(
                     SSEEventType.IMAGE,

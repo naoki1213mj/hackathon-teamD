@@ -505,6 +505,22 @@ class TestBuildContentEvents:
         assert events == []
 
 
+class TestResolveBrochurePendingImages:
+    """ブローシャ画像の不足補完テスト"""
+
+    def test_fills_missing_slots_with_fallback_image(self):
+        resolved = chat_module._resolve_brochure_pending_images({"hero": "data:image/png;base64,hero"})
+
+        assert resolved["hero"] == "data:image/png;base64,hero"
+        assert resolved["banner_instagram"] == resolved["banner_x"]
+        assert resolved["banner_instagram"].startswith("data:image/svg+xml")
+
+    def test_normalizes_banner_twitter_to_banner_x(self):
+        resolved = chat_module._resolve_brochure_pending_images({"banner_twitter": "data:image/png;base64,x"})
+
+        assert resolved["banner_x"] == "data:image/png;base64,x"
+
+
 # --- _conversation_status_from_events テスト ---
 
 
