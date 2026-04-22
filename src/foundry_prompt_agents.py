@@ -215,6 +215,7 @@ def run_marketing_plan_prompt_agent(
     try:
         agent = _get_marketing_plan_agent(project_client, model_name)
         response_kwargs: dict[str, object] = {
+            "model": model_name,
             "input": user_input,
             "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
         }

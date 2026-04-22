@@ -103,6 +103,7 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_without_work_iq_to
 
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
+    assert kwargs["model"] == "gpt-5-4-mini"
     assert kwargs["input"] == "test input"
     assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
     assert "tools" not in kwargs
@@ -184,6 +185,7 @@ def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch
 
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
+    assert kwargs["model"] == "gpt-5-4-mini"
     assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
     assert "Work IQ MCP 利用ガイド" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
