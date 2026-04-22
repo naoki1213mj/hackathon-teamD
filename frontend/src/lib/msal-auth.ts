@@ -15,7 +15,11 @@ import {
   InteractionRequiredAuthError,
 } from '@azure/msal-browser'
 import { clearMsalRedirectFailureSentinel, recordMsalRedirectFailureSentinel } from './msal-redirect-sentinel'
-import { readAndClearRedirectBridgeResult, writeRedirectBridgeResult } from './msal-redirect-bridge'
+import {
+  clearRedirectBridgeResult,
+  readAndClearRedirectBridgeResult,
+  writeRedirectBridgeResult,
+} from './msal-redirect-bridge'
 import type { MsalConfig } from './msal-config-cache'
 
 let msalInstance: PublicClientApplication | null = null
@@ -80,6 +84,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
   if (pendingRedirectExpiresAt > 0 && pendingRedirectExpiresAt <= Date.now()) {
     pendingRedirectResult = null
     pendingRedirectExpiresAt = 0
+    clearRedirectBridgeResult()
     return null
   }
 
@@ -92,6 +97,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
   if (!redirectToken || redirectScopes.length === 0 || requestedScopes.length === 0) {
     pendingRedirectResult = null
     pendingRedirectExpiresAt = 0
+    clearRedirectBridgeResult()
     return null
   }
 
@@ -101,6 +107,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
 
   pendingRedirectResult = null
   pendingRedirectExpiresAt = 0
+  clearRedirectBridgeResult()
   return { token: redirectToken, status: 'ok' }
 }
 
@@ -121,9 +128,10 @@ export async function initMsal(config: MsalConfig): Promise<void> {
 
   initPromise = (async () => {
     await nextInstance.initialize()
-    // bridge (/auth-redirect.html) で token 交換済みなら main app に hash は残らず
-    // null が返る。万一 main app が hash 付きで起動した場合も、MSAL が勝手に
-    // request.origin へ再 navigate しないよう navigateToLoginRequestUrl:false で固定する。
+    // auth-redirect.html は auth code を保持したままメインアプリへ転送するだけにしている。
+    // ここで handleRedirectPromise() を呼び、acquireTokenRedirect() と同じ PCA 設定で
+    // code exchange を完了させる。navigateToLoginRequestUrl:false で request.origin への
+    // 自動遷移も抑止する。
     let redirectResponse: AuthenticationResult | null = null
     if (locationHasMsalAuthResponse()) {
       try {
@@ -154,7 +162,7 @@ export async function initMsal(config: MsalConfig): Promise<void> {
       return
     }
 
-    // auth-redirect.html のブリッジページがトークンを書き込んでいれば読み取る。
+    // redirect 処理済みトークンが bridge cache に残っていれば読み取る。
     // acquireTokenSilent が新規 PCA インスタンスで InteractionRequiredAuthError を
     // 投げるエッジケースに備え、直接取得したトークンを pendingRedirectResult に設定する。
     if (!pendingRedirectResult) {

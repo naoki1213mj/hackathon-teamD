@@ -117,6 +117,7 @@ describe('msal-auth', () => {
     handleRedirectPromiseMock.mockResolvedValue({
       account: redirectAccount,
       accessToken: 'redirect-token',
+      expiresOn: new Date(Date.now() + 60_000),
       scopes: [
         'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
         'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
@@ -134,6 +135,32 @@ describe('msal-auth', () => {
 
     expect(acquireTokenSilentMock).not.toHaveBeenCalled()
     expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
+    expect(window.sessionStorage.getItem('workIqMsalRedirectBridge')).toBeNull()
+  })
+
+  it('writes a bridge token when the main app finishes redirect handling', async () => {
+    const redirectAccount = { username: 'user@example.com' }
+    window.location.hash = '#code=abc&state=xyz'
+    handleRedirectPromiseMock.mockResolvedValue({
+      account: redirectAccount,
+      accessToken: 'redirect-token',
+      expiresOn: new Date(Date.now() + 60_000),
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+      ],
+    })
+    setActiveAccountMock.mockImplementation((account) => {
+      getActiveAccountMock.mockReturnValue(account)
+    })
+
+    const { initMsal } = await import('./msal-auth')
+
+    await initMsal({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(window.sessionStorage.getItem('workIqMsalRedirectBridge')).toContain('redirect-token')
   })
 
   it('falls back to silent token acquisition when the redirect response scopes only partially cover Work IQ', async () => {
@@ -168,27 +195,43 @@ describe('msal-auth', () => {
     expect(result).toEqual({ token: 'silent-token', status: 'ok' })
   })
 
-  it('returns redirecting immediately for interactive login redirects', async () => {
+  it('returns redirecting after starting an interactive login redirect', async () => {
+    vi.useFakeTimers()
     acquireTokenRedirectMock.mockImplementation(() => new Promise<void>(() => {}))
 
+    try {
+      const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+      const resultPromise = getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(acquireTokenRedirectMock).toHaveBeenCalledWith({
+        scopes: [
+          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+        ],
+      })
+      await expect(resultPromise).resolves.toEqual({ token: null, status: 'redirecting' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('returns unavailable when interactive redirect setup fails immediately', async () => {
+    acquireTokenRedirectMock.mockRejectedValue(new Error('interaction_in_progress'))
+
     const { getWorkIqFoundryAuth } = await import('./msal-auth')
+    const { readMsalRedirectFailureSentinel } = await import('./msal-redirect-sentinel')
 
-    const result = await Promise.race([
-      getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' }, true),
-      new Promise<DelegatedTokenResult>((resolve) => {
-        setTimeout(() => resolve({ token: null, status: 'unavailable' }), 25)
-      }),
-    ])
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
 
-    expect(acquireTokenRedirectMock).toHaveBeenCalledWith({
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
-    })
-    expect(result).toEqual({ token: null, status: 'redirecting' })
+    expect(result).toEqual({ token: null, status: 'unavailable' })
+    expect(readMsalRedirectFailureSentinel()).toEqual(expect.objectContaining({
+      stage: 'main_app',
+      message: 'interaction_in_progress',
+    }))
   })
 
   it('requests Agent 365 Tools scopes via the documented api:// app ID URI', async () => {
@@ -232,8 +275,8 @@ describe('msal-auth', () => {
 
   // --- msal-redirect-bridge: post-login resume path ---
 
-  it('uses the bridge token written by auth-redirect.html without calling acquireTokenSilent', async () => {
-    // auth-redirect.html が書き込んだブリッジ結果をシミュレート
+  it('uses the cached redirect bridge token without calling acquireTokenSilent', async () => {
+    // redirect 処理後に保持された bridge token をシミュレート
     const bridgeScopes = [
       'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
       'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',

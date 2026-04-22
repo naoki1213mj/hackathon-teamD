@@ -1,8 +1,8 @@
 /**
  * MSAL リダイレクト認証結果のブリッジ。
  *
- * auth-redirect.html で handleRedirectPromise が取得したアクセストークンを
- * sessionStorage 経由でメインアプリの initMsal に渡す。
+ * メインアプリで handleRedirectPromise が取得したアクセストークンを
+ * sessionStorage 経由で次回ロード時の initMsal に渡す。
  *
  * MSAL の内部 sessionStorage キャッシュは新しい PCA インスタンスでも読み取れるが、
  * acquireTokenSilent が InteractionRequiredAuthError を投げるエッジケース（特に
@@ -20,10 +20,19 @@ export interface RedirectBridgeResult {
   expiresAt: number
 }
 
-/** ブリッジ結果を sessionStorage に書き込む（auth-redirect.html から呼ぶ） */
+/** ブリッジ結果を sessionStorage に書き込む */
 export function writeRedirectBridgeResult(result: RedirectBridgeResult): void {
   try {
     window.sessionStorage.setItem(REDIRECT_BRIDGE_KEY, JSON.stringify(result))
+  } catch {
+    // no-op
+  }
+}
+
+/** ブリッジ結果を sessionStorage から削除する */
+export function clearRedirectBridgeResult(): void {
+  try {
+    window.sessionStorage.removeItem(REDIRECT_BRIDGE_KEY)
   } catch {
     // no-op
   }
@@ -37,7 +46,7 @@ export function readAndClearRedirectBridgeResult(): RedirectBridgeResult | null 
   try {
     const raw = window.sessionStorage.getItem(REDIRECT_BRIDGE_KEY)
     if (!raw) return null
-    window.sessionStorage.removeItem(REDIRECT_BRIDGE_KEY)
+    clearRedirectBridgeResult()
 
     const parsed = JSON.parse(raw) as Partial<RedirectBridgeResult>
     const accessToken = typeof parsed.accessToken === 'string' ? parsed.accessToken.trim() : ''

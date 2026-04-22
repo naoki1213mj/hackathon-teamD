@@ -1,6 +1,7 @@
 """チャット逐次オーケストレーションのテスト"""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -225,6 +226,89 @@ class TestMarketingPlanRuntimeSettings:
                     "manager_email": "",
                 }
             )
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_uses_legacy_marketing_agent_when_foundry_token_is_missing(monkeypatch) -> None:
+    """Work IQ OFF では foundry_preprovisioned を避けて legacy Agent2 を使う。"""
+
+    captured: dict[str, object] = {}
+
+    class _FakeLegacyAgent:
+        async def run(self, user_input: str):
+            captured["user_input"] = user_input
+            return SimpleNamespace(output_text="legacy output")
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        captured["model_settings"] = model_settings
+        return _FakeLegacyAgent()
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        raise AssertionError("Foundry prompt agent should not run without a delegated Work IQ token")
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="沖縄プラン",
+        conversation_id="conv-legacy",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={"marketing_plan_runtime": "foundry_preprovisioned"},
+        work_iq_access_token="",
+    )
+
+    assert outcome["success"] is True
+    assert outcome["text"] == "legacy output"
+    assert captured == {
+        "user_input": "沖縄プラン",
+        "model_settings": {"model": "gpt-5-4-mini"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_falls_back_to_legacy_when_foundry_prompt_agent_is_unavailable(monkeypatch) -> None:
+    """Foundry Agent 未作成時は Agent Framework 経路へ 1 回だけフォールバックする。"""
+
+    captured: dict[str, object] = {"foundry_calls": 0, "legacy_calls": 0}
+
+    class _FakeLegacyAgent:
+        async def run(self, user_input: str):
+            captured["legacy_calls"] += 1
+            captured["legacy_user_input"] = user_input
+            return SimpleNamespace(output_text="legacy fallback output")
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        captured["legacy_model_settings"] = model_settings
+        return _FakeLegacyAgent()
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        captured["foundry_calls"] += 1
+        raise ValueError("marketing-plan Foundry Agent が未作成です")
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="北海道プラン",
+        conversation_id="conv-foundry-fallback",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={"marketing_plan_runtime": "foundry_preprovisioned"},
+        work_iq_access_token="delegated-token",
+    )
+
+    assert outcome["success"] is True
+    assert outcome["text"] == "legacy fallback output"
+    assert captured == {
+        "foundry_calls": 1,
+        "legacy_calls": 1,
+        "legacy_user_input": "北海道プラン",
+        "legacy_model_settings": {"model": "gpt-5-4-mini"},
+    }
 
 
 # --- _extract_inline_images テスト ---

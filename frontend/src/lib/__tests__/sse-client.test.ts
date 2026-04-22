@@ -199,6 +199,24 @@ describe('connectSSE', () => {
     expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'graph_prefetch' })
   })
 
+  it('keeps interactive auth enabled for Work IQ in existing conversations', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"conv-1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello again',
+      {},
+      'conv-1',
+      undefined,
+      undefined,
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+    )
+
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
+  })
+
   it('sends the selected image model in image settings', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
