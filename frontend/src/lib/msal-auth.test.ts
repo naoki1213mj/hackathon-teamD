@@ -132,4 +132,21 @@ describe('msal-auth', () => {
       ]),
     }))
   })
+
+  it('retries initialization after a failed redirect handling attempt', async () => {
+    handleRedirectPromiseMock
+      .mockRejectedValueOnce(new Error('bridge failed'))
+      .mockResolvedValueOnce(null)
+    getAllAccountsMock.mockReturnValue([{ username: 'user@example.com' }])
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    await expect(getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })).rejects.toThrow('bridge failed')
+
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(publicClientApplicationMock).toHaveBeenCalledTimes(2)
+    expect(initializeMock).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({ token: 'token', status: 'ok' })
+  })
 })

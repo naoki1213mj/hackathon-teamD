@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getDelegatedApiAuth, resetDelegatedApiAuthCache } from './api-auth'
+import { bootstrapDelegatedApiAuth, getDelegatedApiAuth, resetDelegatedApiAuthCache } from './api-auth'
 
 const originalFetch = global.fetch
 const {
@@ -97,5 +97,73 @@ describe('getDelegatedApiAuth', () => {
     await getDelegatedApiAuth({ interactive: false })
 
     expect(initMsal).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries loading MSAL config after an initial bootstrap fetch failure', async () => {
+    global.fetch = vi.fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValue(new Response(JSON.stringify({ client_id: 'client-id', tenant_id: 'tenant-id' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
+
+    const firstResult = await getDelegatedApiAuth({ interactive: false })
+    const secondResult = await getDelegatedApiAuth({ interactive: false })
+
+    expect(firstResult).toEqual({
+      headers: {
+        Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
+      status: 'ok',
+    })
+    expect(secondResult).toEqual({
+      headers: {
+        Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
+      status: 'ok',
+    })
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries bootstrap on a later call when startup config loading initially returns unavailable', async () => {
+    global.fetch = vi.fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ client_id: 'client-id', tenant_id: 'tenant-id' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch
+
+    await bootstrapDelegatedApiAuth()
+    await bootstrapDelegatedApiAuth()
+
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(initMsal).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries bootstrap after an initial MSAL initialization failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    initMsal
+      .mockRejectedValueOnce(new Error('redirect bridge failed'))
+      .mockResolvedValue(undefined)
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
+
+    const firstResult = await getDelegatedApiAuth({ interactive: false })
+    const secondResult = await getDelegatedApiAuth({ interactive: false })
+
+    expect(firstResult).toEqual({
+      headers: {
+        Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
+      status: 'ok',
+    })
+    expect(secondResult).toEqual(firstResult)
+    expect(initMsal).toHaveBeenCalledTimes(2)
+    expect(warnSpy).toHaveBeenCalledWith('Delegated auth bootstrap failed:', expect.any(Error))
   })
 })

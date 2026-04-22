@@ -12,6 +12,7 @@ import { PublicClientApplication, type SilentRequest, InteractionRequiredAuthErr
 
 let msalInstance: PublicClientApplication | null = null
 let initPromise: Promise<void> | null = null
+let msalInitialized = false
 
 export interface MsalConfig {
   clientId: string
@@ -49,38 +50,51 @@ const WORK_IQ_FOUNDRY_SCOPES = [
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
 export async function initMsal(config: MsalConfig): Promise<void> {
-  if (msalInstance) return
+  if (msalInitialized && msalInstance) return
   if (initPromise) { await initPromise; return }
 
-  initPromise = (async () => {
-    msalInstance = new PublicClientApplication({
-      auth: {
-        clientId: config.clientId,
-        authority: `https://login.microsoftonline.com/${config.tenantId}`,
-        redirectUri: new URL(MSAL_REDIRECT_PATH, window.location.origin).toString(),
-      },
-      cache: {
-        cacheLocation: 'sessionStorage',
-      },
-    })
+  const nextInstance = new PublicClientApplication({
+    auth: {
+      clientId: config.clientId,
+      authority: `https://login.microsoftonline.com/${config.tenantId}`,
+      redirectUri: new URL(MSAL_REDIRECT_PATH, window.location.origin).toString(),
+    },
+    cache: {
+      cacheLocation: 'sessionStorage',
+    },
+  })
 
-    await msalInstance.initialize()
+  initPromise = (async () => {
+    await nextInstance.initialize()
     // redirect からの戻りを処理
-    const redirectResponse = await msalInstance.handleRedirectPromise()
+    const redirectResponse = await nextInstance.handleRedirectPromise()
     if (redirectResponse?.account) {
-      msalInstance.setActiveAccount(redirectResponse.account)
+      nextInstance.setActiveAccount(redirectResponse.account)
+      msalInstance = nextInstance
+      msalInitialized = true
       return
     }
 
-    if (!msalInstance.getActiveAccount()) {
-      const accounts = msalInstance.getAllAccounts()
+    if (!nextInstance.getActiveAccount()) {
+      const accounts = nextInstance.getAllAccounts()
       if (accounts.length > 0) {
-        msalInstance.setActiveAccount(accounts[0])
+        nextInstance.setActiveAccount(accounts[0])
       }
     }
+
+    msalInstance = nextInstance
+    msalInitialized = true
   })()
 
-  await initPromise
+  try {
+    await initPromise
+  } catch (error) {
+    msalInstance = null
+    msalInitialized = false
+    throw error
+  } finally {
+    initPromise = null
+  }
 }
 
 function beginRedirectAuth(

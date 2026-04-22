@@ -1,6 +1,8 @@
 import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
 
+let cachedMsalConfig: MsalConfig | null = null
 let cachedMsalConfigPromise: Promise<MsalConfig | null> | null = null
+let delegatedAuthBootstrapped = false
 let delegatedAuthBootstrapPromise: Promise<void> | null = null
 
 function normalizeMsalConfig(raw: unknown): MsalConfig | null {
@@ -16,14 +18,23 @@ function normalizeMsalConfig(raw: unknown): MsalConfig | null {
 }
 
 async function getMsalConfig(): Promise<MsalConfig | null> {
+  if (cachedMsalConfig) {
+    return cachedMsalConfig
+  }
   if (!cachedMsalConfigPromise) {
     cachedMsalConfigPromise = (async () => {
       try {
         const response = await fetch('/api/voice-config')
         if (!response.ok) return null
-        return normalizeMsalConfig(await response.json())
+        const config = normalizeMsalConfig(await response.json())
+        if (config) {
+          cachedMsalConfig = config
+        }
+        return config
       } catch {
         return null
+      } finally {
+        cachedMsalConfigPromise = null
       }
     })()
   }
@@ -31,15 +42,25 @@ async function getMsalConfig(): Promise<MsalConfig | null> {
 }
 
 export async function bootstrapDelegatedApiAuth(): Promise<void> {
+  if (delegatedAuthBootstrapped) {
+    return
+  }
   if (!delegatedAuthBootstrapPromise) {
     delegatedAuthBootstrapPromise = (async () => {
       const config = await getMsalConfig()
       if (!config) return
       await initMsal(config)
+      delegatedAuthBootstrapped = true
     })()
   }
 
-  await delegatedAuthBootstrapPromise
+  try {
+    await delegatedAuthBootstrapPromise
+  } catch (error) {
+    throw error
+  } finally {
+    delegatedAuthBootstrapPromise = null
+  }
 }
 
 export interface DelegatedApiAuthResult {
@@ -50,7 +71,11 @@ export interface DelegatedApiAuthResult {
 export async function getDelegatedApiAuth(
   options?: { interactive?: boolean; workIqRuntime?: 'graph_prefetch' | 'foundry_tool' },
 ): Promise<DelegatedApiAuthResult> {
-  await bootstrapDelegatedApiAuth()
+  try {
+    await bootstrapDelegatedApiAuth()
+  } catch (error) {
+    console.warn('Delegated auth bootstrap failed:', error)
+  }
   const config = await getMsalConfig()
   if (!config) {
     return { headers: {}, status: 'unavailable' }
@@ -85,6 +110,8 @@ export async function getDelegatedApiHeaders(options?: { interactive?: boolean }
 }
 
 export function resetDelegatedApiAuthCache(): void {
+  cachedMsalConfig = null
   cachedMsalConfigPromise = null
+  delegatedAuthBootstrapped = false
   delegatedAuthBootstrapPromise = null
 }
