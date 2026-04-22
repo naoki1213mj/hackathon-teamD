@@ -144,7 +144,7 @@ describe('connectSSE', () => {
     })
   })
 
-  it('adds delegated auth headers when Work IQ is enabled', async () => {
+  it('does not add delegated auth headers for foundry Work IQ runtime', async () => {
     getDelegatedApiAuth.mockResolvedValue({
       headers: {
         Authorization: 'Bearer foundry-token',
@@ -159,14 +159,14 @@ describe('connectSSE', () => {
       workIqSourceScope: ['emails'],
     })
 
-    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true })
+    expect(getDelegatedApiAuth).not.toHaveBeenCalled()
     const [, options] = mockFetch.mock.calls[0]
-    expect(options.headers.Authorization).toBe('Bearer foundry-token')
-    expect(options.headers['X-Work-IQ-Graph-Authorization']).toBe('Bearer graph-token')
-    expect(options.headers['X-User-Timezone']).toBeTruthy()
+    expect(options.headers.Authorization).toBeUndefined()
+    expect(options.headers['X-Work-IQ-Graph-Authorization']).toBeUndefined()
+    expect(options.headers['X-User-Timezone']).toBeUndefined()
   })
 
-  it('passes work iq runtime to delegated auth lookup when present', async () => {
+  it('passes graph_prefetch runtime to delegated auth lookup when present', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await connectSSE(
@@ -188,7 +188,7 @@ describe('connectSSE', () => {
         iqSearchResults: 5,
         iqScoreThreshold: 0.3,
         marketingPlanRuntime: 'foundry_preprovisioned',
-        workIqRuntime: 'foundry_tool',
+        workIqRuntime: 'graph_prefetch',
       },
       {
         workIqEnabled: true,
@@ -196,7 +196,7 @@ describe('connectSSE', () => {
       },
     )
 
-    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'graph_prefetch' })
   })
 
   it('sends the selected image model in image settings', async () => {
@@ -232,9 +232,8 @@ describe('connectSSE', () => {
     })
   })
 
-  it('emits a local Work IQ tool event when consent is required', async () => {
+  it('does not emit a synthetic Foundry Work IQ tool event before the request starts', async () => {
     const toolHandler = vi.fn()
-    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'consent_required' })
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await connectSSE('hello', { tool_event: toolHandler }, undefined, undefined, undefined, {
@@ -242,22 +241,38 @@ describe('connectSSE', () => {
       workIqSourceScope: ['emails'],
     })
 
-    expect(toolHandler).toHaveBeenCalledWith(expect.objectContaining({
-      source: 'workiq',
-      status: 'consent_required',
-      source_scope: ['emails'],
-    }))
-    const [, options] = mockFetch.mock.calls[0]
-    expect(options.headers['X-Work-IQ-Auth-Status']).toBe('consent_required')
+    expect(toolHandler).not.toHaveBeenCalled()
   })
 
-  it('does not send the request after starting interactive redirect', async () => {
+  it('does not send the request after starting interactive redirect for graph prefetch', async () => {
     getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'redirecting' })
 
-    await connectSSE('hello', {}, undefined, undefined, undefined, {
-      workIqEnabled: true,
-      workIqSourceScope: ['emails'],
-    })
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1.5',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+        workIqRuntime: 'graph_prefetch',
+      },
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+    )
 
     expect(mockFetch).not.toHaveBeenCalled()
   })

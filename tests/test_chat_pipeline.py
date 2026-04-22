@@ -1271,10 +1271,10 @@ async def test_workflow_event_generator_returns_error_when_analysis_is_insuffici
 
 
 @pytest.mark.asyncio
-async def test_workflow_event_generator_emits_auth_required_work_iq_status_without_fetch(monkeypatch) -> None:
-    """delegated auth がない場合は Work IQ fetch を行わず visible fail-closed する"""
+async def test_workflow_event_generator_blocks_foundry_tool_when_sign_in_is_required(monkeypatch) -> None:
+    """Foundry Work IQ が auth_required の場合は marketing-plan を実行せず fail-closed にする。"""
 
-    captured: dict[str, object] = {"fetch_called": False}
+    captured: dict[str, object] = {"fetch_called": False, "marketing_called": False}
 
     async def fake_execute_agent(
         agent_name: str,
@@ -1282,11 +1282,15 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
         user_input: str,
         conversation_id: str,
         model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
         total_steps: int = 5,
         include_done: bool = False,
     ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps, include_done
         if agent_name == "marketing-plan-agent":
-            captured["marketing_prompt"] = user_input
+            captured["marketing_called"] = True
         return {
             "events": [],
             "text": f"{agent_name} output",
@@ -1296,6 +1300,7 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
         }
 
     async def fake_generate_workplace_context_brief(**kwargs):
+        del kwargs
         captured["fetch_called"] = True
         return {
             "brief_summary": "should not run",
@@ -1312,6 +1317,7 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
             "沖縄プラン",
             "conv-workiq-auth",
             {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
             conversation_settings={"work_iq_enabled": True, "source_scope": ["emails"]},
             work_iq_session={
                 "enabled": True,
@@ -1328,13 +1334,24 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
     parsed = [_parse_sse(event) for event in events]
 
     assert captured["fetch_called"] is False
-    assert "Work IQ の職場コンテキスト" not in str(captured["marketing_prompt"])
+    assert captured["marketing_called"] is False
     assert any(
         event_name == chat_module.SSEEventType.TOOL_EVENT
-        and payload.get("source") == "workiq"
+        and payload.get("tool") == "workiq_foundry_tool"
         and payload.get("status") == "auth_required"
+        and payload.get("agent") == "marketing-plan-agent"
+        and payload.get("provider") == "foundry"
+        and payload.get("display_name") == "Work IQ context tools"
+        and payload.get("source_scope") == ["emails"]
         for event_name, payload in parsed
     )
+    assert (
+        chat_module.SSEEventType.ERROR,
+        {
+            "message": "Work IQ を使うにはサインインが必要です。サインイン後に再試行してください。",
+            "code": "WORKIQ_AUTH_REQUIRED",
+        },
+    ) in parsed
 
 
 @pytest.mark.asyncio
@@ -1430,6 +1447,64 @@ async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_im
         for event_name, payload in parsed
     )
     assert "conv-workiq-fallback" not in chat_module._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_uses_foundry_work_iq_tool_event_semantics(monkeypatch) -> None:
+    """foundry_tool 実行時は prefetch 名ではなく canonical Foundry Work IQ telemetry を流す。"""
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps, include_done
+        return {
+            "events": [],
+            "text": "analysis output" if agent_name == "data-search-agent" else "plan output",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "夏の北海道プランを企画して",
+            "conv-foundry-workiq-semantics",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="foundry-token",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+    tool_events = [payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.TOOL_EVENT]
+
+    assert [payload["tool"] for payload in tool_events] == ["workiq_foundry_tool", "workiq_foundry_tool"]
+    assert [payload["status"] for payload in tool_events] == ["running", "completed"]
+    assert all(payload["provider"] == "foundry" for payload in tool_events)
+    assert all(payload["display_name"] == "Work IQ context tools" for payload in tool_events)
+    assert all(payload["source_scope"] == ["meeting_notes"] for payload in tool_events)
+    assert not any(payload.get("tool") == "generate_workplace_context_brief" for payload in tool_events)
 
 
 @pytest.mark.asyncio

@@ -2,42 +2,35 @@
 
 import logging
 import re
-import time
 from datetime import datetime, timezone
 from typing import TypedDict
 
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import MCPTool, MCPToolFilter, PromptAgentDefinition, WebSearchTool
+from azure.ai.projects.models import MCPTool, PromptAgentDefinition, WebSearchTool
 from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
 from src.agents.marketing_plan import INSTRUCTIONS as MARKETING_PLAN_INSTRUCTIONS
 from src.config import get_settings
-from src.tool_telemetry import build_tool_event_data, emit_tool_event
 
 logger = logging.getLogger(__name__)
 
 _AGENT_NAME_SANITIZER = re.compile(r"[^a-z0-9-]+")
-_CONNECTOR_SPECS = {
-    "meeting_notes": [
-        ("connector_microsoftteams", "workiq-teams", "Work IQ Teams"),
-    ],
-    "emails": [("connector_outlookemail", "workiq-email", "Work IQ Mail")],
-    "teams_chats": [("connector_microsoftteams", "workiq-teams", "Work IQ Teams")],
-    "documents_notes": [("connector_sharepoint", "workiq-sharepoint", "Work IQ SharePoint")],
-}
 _SOURCE_LABELS = {
     "meeting_notes": "会議メモ",
     "emails": "メール",
     "teams_chats": "Teams チャット",
     "documents_notes": "ドキュメント / ノート",
 }
+_WORK_IQ_CONNECTION_NAME = "WorkIQCopilot"
+_WORK_IQ_SERVER_LABEL = "mcp_M365Copilot"
 _WORK_IQ_BASELINE_GUIDANCE = (
     "\n\n## Work IQ / Microsoft 365 tools の利用方針\n"
-    "- 実行時に Work IQ / Microsoft 365 tools が付与されている場合は、"
+    "- 保存済み agent に Work IQ / Microsoft 365 MCP tool が接続されている場合は、"
     "社内方針・過去施策・承認条件・会議メモ・メール・チャット・文書の確認にそれらを優先利用してください。\n"
     "- ツールから得た情報は、個人情報や長い原文を転載せず、企画判断に必要な要点だけを要約して反映してください。\n"
-    "- 追加文脈が十分でない場合はブロックせず、利用可能な情報だけで企画を完結させてください。"
+    "- この実行で Work IQ MCP tool が有効な場合は、少なくとも一度は Work IQ を参照してから企画書を作成してください。\n"
+    "- Work IQ MCP tool が利用できない場合は、推測で続行せず失敗として扱ってください。"
 )
 
 
@@ -46,15 +39,6 @@ class WorkIQPromptConfig(TypedDict):
 
     enabled: bool
     source_scope: list[str]
-
-
-class WorkIQResolvedTool(TypedDict):
-    """Work IQ connector の安全な表示用メタデータ。"""
-
-    connector_id: str
-    server_label: str
-    display_name: str
-    source_scope: str
 
 
 def _build_marketing_plan_web_search_tool() -> WebSearchTool:
@@ -79,12 +63,19 @@ def _resolve_marketing_plan_agent_name(model_name: str) -> str:
     return f"{base_name}-{_normalize_agent_name_token(model_name)}"
 
 
-def build_marketing_plan_agent_definition(model_name: str) -> PromptAgentDefinition:
+def build_marketing_plan_agent_definition(
+    model_name: str,
+    *,
+    work_iq_tool: MCPTool | None = None,
+) -> PromptAgentDefinition:
     """marketing-plan 用の事前作成済み Agent 定義を返す。"""
+    tools: list[object] = [_build_marketing_plan_web_search_tool()]
+    if work_iq_tool is not None:
+        tools.append(work_iq_tool)
     return PromptAgentDefinition(
         model=model_name,
         instructions=f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
-        tools=[_build_marketing_plan_web_search_tool()],
+        tools=tools,
     )
 
 
@@ -105,15 +96,77 @@ def _get_marketing_plan_agent(project_client: AIProjectClient, model_name: str):
         ) from None
 
 
+def _resolve_work_iq_server_url(connection_target: object) -> str:
+    """Work IQ RemoteTool connection から server_url を抽出する。"""
+    if not isinstance(connection_target, str):
+        return ""
+    return connection_target.strip()
+
+
+def _build_work_iq_mcp_tool(project_client: AIProjectClient) -> MCPTool | None:
+    """Foundry project の Work IQ Copilot connection から MCP tool を組み立てる。"""
+    try:
+        connections = list(project_client.connections.list())
+    except Exception:
+        return None
+
+    for connection in connections:
+        connection_name = getattr(connection, "name", "")
+        connection_type = getattr(connection, "type", "")
+        connection_target = _resolve_work_iq_server_url(getattr(connection, "target", ""))
+        if not isinstance(connection_name, str) or not isinstance(connection_type, str):
+            continue
+        if connection_type != "RemoteTool" or not connection_target:
+            continue
+        if connection_name != _WORK_IQ_CONNECTION_NAME and _WORK_IQ_SERVER_LABEL not in connection_target:
+            continue
+        return MCPTool(
+            server_label=_WORK_IQ_SERVER_LABEL,
+            server_url=connection_target,
+            project_connection_id=connection_name,
+            require_approval="never",
+        )
+    return None
+
+
+def _agent_definition_tools(agent_details: object) -> list[dict]:
+    """AgentDetails から最新 version の tool 定義を取り出す。"""
+    if hasattr(agent_details, "as_dict"):
+        try:
+            payload = agent_details.as_dict()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            definition = payload.get("versions", {}).get("latest", {}).get("definition", {})
+            tools = definition.get("tools")
+            if isinstance(tools, list):
+                return [tool for tool in tools if isinstance(tool, dict)]
+    return []
+
+
+def _agent_has_work_iq_tool(agent_details: object) -> bool:
+    """保存済み agent に Work IQ MCP tool が含まれるか判定する。"""
+    for tool in _agent_definition_tools(agent_details):
+        if tool.get("type") != "mcp":
+            continue
+        if tool.get("server_label") == _WORK_IQ_SERVER_LABEL:
+            return True
+        project_connection_id = tool.get("project_connection_id")
+        if isinstance(project_connection_id, str) and project_connection_id == _WORK_IQ_CONNECTION_NAME:
+            return True
+    return False
+
+
 def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
     """marketing-plan 用 Prompt Agent を create_version で同期する。"""
     project_client: AIProjectClient | None = None
     try:
         project_client = AIProjectClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
         agent_name = _resolve_marketing_plan_agent_name(model_name)
+        work_iq_tool = _build_work_iq_mcp_tool(project_client)
         project_client.agents.create_version(
             agent_name=agent_name,
-            definition=build_marketing_plan_agent_definition(model_name),
+            definition=build_marketing_plan_agent_definition(model_name, work_iq_tool=work_iq_tool),
         )
         logger.info("marketing-plan Prompt Agent を同期しました: %s", agent_name)
         return True
@@ -123,84 +176,19 @@ def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
             close_method()
 
 
-def _build_work_iq_tools(
-    config: WorkIQPromptConfig, access_token: str
-) -> tuple[list[MCPTool], list[WorkIQResolvedTool]]:
-    """Work IQ source_scope から read-only MCP connector 群を組み立てる。"""
-    if not config["enabled"] or not access_token.strip():
-        return [], []
-
-    seen_connectors: set[str] = set()
-    tools: list[MCPTool] = []
-    resolved_tools: list[WorkIQResolvedTool] = []
-    for scope in config["source_scope"]:
-        for connector_id, server_label, display_name in _CONNECTOR_SPECS.get(scope, []):
-            if connector_id in seen_connectors:
-                continue
-            seen_connectors.add(connector_id)
-            tools.append(
-                MCPTool(
-                    connector_id=connector_id,
-                    server_label=server_label,
-                    authorization=access_token,
-                    allowed_tools=MCPToolFilter(read_only=True),
-                    require_approval="never",
-                )
-            )
-            resolved_tools.append(
-                {
-                    "connector_id": connector_id,
-                    "server_label": server_label,
-                    "display_name": display_name,
-                    "source_scope": scope,
-                }
-            )
-    return tools, resolved_tools
-
-
 def _build_work_iq_tool_guidance(
     config: WorkIQPromptConfig,
-    resolved_tools: list[WorkIQResolvedTool],
 ) -> str:
-    """Work IQ connector 利用時の追加指示を構築する。"""
+    """保存済み Work IQ MCP tool 利用時の追加指示を構築する。"""
     source_labels = [_SOURCE_LABELS.get(scope, scope) for scope in config["source_scope"] if scope]
     selected_sources = "、".join(source_labels) if source_labels else "Microsoft 365"
-    connector_names = "、".join(dict.fromkeys(tool["display_name"] for tool in resolved_tools))
     return (
-        "Microsoft 365 参照ガイド:\n"
-        f"- 選択された職場ソース（{selected_sources}）に関係する追加文脈が必要なときだけ、利用可能な Work IQ tools（{connector_names}）を参照してください。\n"
+        "Work IQ MCP 利用ガイド:\n"
+        f"- 選択された職場ソース（{selected_sources}）に関係する追加文脈を確認するため、保存済み agent の Work IQ MCP tool を優先利用してください。\n"
         "- まず Work IQ から、過去の会議・メール・チャット・社内文書にある方針、制約、過去施策、承認条件を高レベルに把握してください。\n"
         "- 原文の長い引用や個人情報の転載は避け、企画判断に必要な要点だけを要約して利用してください。\n"
-        "- Work IQ tool が使えない、遅い、または十分な結果がない場合はブロックせず、利用可能な情報だけで企画を続行してください。"
-    )
-
-
-def _emit_work_iq_tool_event(
-    status: str,
-    *,
-    source_scope: list[str],
-    started_at: str | None = None,
-    duration_ms: int | None = None,
-    error_code: str | None = None,
-    error_message: str | None = None,
-) -> None:
-    """Work IQ foundry_tool 実行状態を canonical tool_event として流す。"""
-    emit_tool_event(
-        build_tool_event_data(
-            "workiq_foundry_tool",
-            status,
-            agent_name="marketing-plan-agent",
-            step=2,
-            source="workiq",
-            provider="foundry",
-            display_name="Work IQ context tools",
-            started_at=started_at,
-            finished_at=_utc_now_iso() if status != "running" else None,
-            duration_ms=duration_ms,
-            error_code=error_code,
-            error_message=error_message,
-            source_scope=source_scope,
-        )
+        "- この実行では Work IQ MCP tool を少なくとも一度は参照してから企画書を作成してください。\n"
+        "- Work IQ MCP tool が使えない場合は、推測で続行せずエラーとして終了してください。"
     )
 
 
@@ -230,46 +218,17 @@ def run_marketing_plan_prompt_agent(
             "input": user_input,
             "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
         }
-        work_iq_tools, resolved_work_iq_tools = _build_work_iq_tools(
-            work_iq or {"enabled": False, "source_scope": []},
-            work_iq_access_token,
-        )
-        if work_iq_tools:
-            started_at = _utc_now_iso()
-            started_perf = time.perf_counter()
+        work_iq_config = work_iq or {"enabled": False, "source_scope": []}
+        del work_iq_access_token
+        if work_iq_config["enabled"]:
+            if not _agent_has_work_iq_tool(agent):
+                raise ValueError(
+                    "Work IQ is enabled for the Foundry marketing-plan path, but the saved agent has no WorkIQCopilot MCP tool."
+                )
             response_kwargs["input"] = (
-                f"{_build_work_iq_tool_guidance(work_iq or {'enabled': False, 'source_scope': []}, resolved_work_iq_tools)}"
+                f"{_build_work_iq_tool_guidance(work_iq_config)}"
                 f"\n\n---\n\nユーザー入力:\n{user_input}"
             )
-            _emit_work_iq_tool_event(
-                "running",
-                started_at=started_at,
-                source_scope=list((work_iq or {"enabled": False, "source_scope": []})["source_scope"]),
-            )
-            response_kwargs["tools"] = work_iq_tools
-            try:
-                response = openai_client.responses.create(
-                    **response_kwargs,
-                )
-            except Exception as exc:
-                duration_ms = max(int((time.perf_counter() - started_perf) * 1000), 0)
-                _emit_work_iq_tool_event(
-                    "failed",
-                    started_at=started_at,
-                    duration_ms=duration_ms,
-                    error_code=exc.__class__.__name__,
-                    error_message=str(exc)[:500],
-                    source_scope=list((work_iq or {"enabled": False, "source_scope": []})["source_scope"]),
-                )
-                raise
-            duration_ms = max(int((time.perf_counter() - started_perf) * 1000), 0)
-            _emit_work_iq_tool_event(
-                "completed",
-                started_at=started_at,
-                duration_ms=duration_ms,
-                source_scope=list((work_iq or {"enabled": False, "source_scope": []})["source_scope"]),
-            )
-            return response
         return openai_client.responses.create(
             **response_kwargs,
         )

@@ -7,6 +7,7 @@ import {
   DEFAULT_CONVERSATION_SETTINGS,
   DEFAULT_SETTINGS,
   normalizeModelSettings,
+  normalizeWorkIqRuntime,
   type ConversationSettings,
   type ModelSettings,
   type WorkIqSourceScope,
@@ -995,6 +996,17 @@ export function useSSE() {
     },
     tool_event: (data) => {
       if (requestId !== activeRequestIdRef.current) return
+      const rawToolEvent = data as Record<string, unknown>
+      const consentLink = typeof rawToolEvent.consent_link === 'string' ? rawToolEvent.consent_link.trim() : ''
+      if (
+        consentLink
+        && rawToolEvent.provider === 'foundry'
+        && rawToolEvent.source === 'workiq'
+        && (rawToolEvent.status === 'auth_required' || rawToolEvent.status === 'consent_required')
+      ) {
+        window.location.assign(consentLink)
+        return
+      }
       setState(prev => {
         const requestedVersion = Number((data as ToolEvent).version || 0)
         const toolEvent = normalizeToolEventData(data as Record<string, unknown>, {
@@ -1279,7 +1291,7 @@ export function useSSE() {
         normalizedResponse,
         handlers,
         controller.signal,
-        stateRef.current.workIq.workIqEnabled,
+        stateRef.current.workIq.workIqEnabled && normalizeWorkIqRuntime(stateRef.current.settings.workIqRuntime) === 'graph_prefetch',
       )
     } finally {
       if (abortControllerRef.current === controller) {

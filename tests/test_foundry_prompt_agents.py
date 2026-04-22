@@ -18,43 +18,94 @@ class _FakeResponsesClient:
         return None
 
 
+class _FakeConnection:
+    def __init__(self, name: str, conn_type: str, target: str) -> None:
+        self.name = name
+        self.type = conn_type
+        self.target = target
+
+
+class _FakeConnections:
+    def __init__(self, items: list[_FakeConnection]) -> None:
+        self._items = items
+
+    def list(self):
+        return list(self._items)
+
+
+class _FakeAgentDetails:
+    def __init__(self, agent_name: str, tools: list[dict] | None = None) -> None:
+        self.name = agent_name
+        self._tools = tools or []
+
+    def as_dict(self) -> dict:
+        return {
+            "versions": {
+                "latest": {
+                    "definition": {
+                        "tools": self._tools,
+                    }
+                }
+            }
+        }
+
+
+class _FakeAgents:
+    def __init__(self, agent_name: str, tools: list[dict] | None = None) -> None:
+        self._details = _FakeAgentDetails(agent_name, tools)
+        self.calls: list[dict[str, object]] = []
+
+    def get(self, *, agent_name: str):
+        return _FakeAgentDetails(agent_name, self._details._tools)
+
+    def create_version(self, *, agent_name: str, definition):
+        self.calls.append({"agent_name": agent_name, "definition": definition})
+        return SimpleNamespace(name=agent_name)
+
+
 class _FakeProjectClient:
-    def __init__(self, responses_client: _FakeResponsesClient, agent_name: str = "travel-marketing-plan-gpt-5-4-mini") -> None:
+    def __init__(
+        self,
+        responses_client: _FakeResponsesClient,
+        *,
+        agent_name: str = "travel-marketing-plan-gpt-5-4-mini",
+        agent_tools: list[dict] | None = None,
+        connections: list[_FakeConnection] | None = None,
+    ) -> None:
         self._responses_client = responses_client
-        self.agents = SimpleNamespace(get=lambda agent_name=agent_name: SimpleNamespace(name=agent_name))
+        self.agents = _FakeAgents(agent_name, agent_tools)
+        self.connections = _FakeConnections(connections or [])
+        self.closed = False
 
     def get_openai_client(self) -> _FakeResponsesClient:
         return self._responses_client
 
     def close(self) -> None:
-        return None
+        self.closed = True
+
+
+def _settings() -> dict[str, str]:
+    return {
+        "project_endpoint": "https://example.test",
+        "model_name": "gpt-5-4-mini",
+        "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+    }
 
 
 def test_run_marketing_plan_prompt_agent_uses_agent_reference_without_work_iq_tools(monkeypatch) -> None:
-    """Work IQ connector を使わない場合は agent_reference 経路を維持する。"""
+    """Work IQ を使わない場合は agent_reference 経路を維持する。"""
     responses_client = _FakeResponsesClient()
-    monkeypatch.setattr(
-        module,
-        "get_settings",
-        lambda: {
-            "project_endpoint": "https://example.test",
-            "model_name": "gpt-5-4-mini",
-            "marketing_plan_prompt_agent_name": "travel-marketing-plan",
-        },
-    )
+    monkeypatch.setattr(module, "get_settings", _settings)
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
     monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _FakeProjectClient(responses_client))
 
     result = module.run_marketing_plan_prompt_agent("test input")
 
     assert result == {"id": "resp_123"}
-    assert len(responses_client.calls) == 1
     kwargs = responses_client.calls[0]
     assert kwargs["input"] == "test input"
     assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
     assert "tools" not in kwargs
-    assert "model" not in kwargs
-    assert "instructions" not in kwargs
 
 
 def test_build_marketing_plan_agent_definition_includes_work_iq_guidance() -> None:
@@ -64,50 +115,99 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_guidance() -> No
     instructions = definition.as_dict()["instructions"]
     assert "Work IQ / Microsoft 365 tools の利用方針" in instructions
     assert "優先利用してください" in instructions
-    assert "Web Search ツールが利用可能な場合は" in instructions
-    assert "Web Search ツールが利用できない場合でも" in instructions
+    assert "少なくとも一度は Work IQ を参照" in instructions
+    assert "推測で続行せず失敗として扱ってください" in instructions
 
 
-def test_run_marketing_plan_prompt_agent_overlays_work_iq_tools_on_agent_reference(monkeypatch) -> None:
-    """Work IQ connector 利用時も agent_reference を維持しつつ overlay する。"""
-    responses_client = _FakeResponsesClient()
-    emitted_events: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        module,
-        "get_settings",
-        lambda: {
-            "project_endpoint": "https://example.test",
-            "model_name": "gpt-5-4-mini",
-            "marketing_plan_prompt_agent_name": "travel-marketing-plan",
-        },
+def test_build_work_iq_mcp_tool_from_remote_tool_connection() -> None:
+    """WorkIQCopilot の RemoteTool connection から MCPTool を組み立てる。"""
+    fake_client = _FakeProjectClient(
+        _FakeResponsesClient(),
+        connections=[
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            )
+        ],
     )
+
+    tool = module._build_work_iq_mcp_tool(fake_client)
+
+    assert tool is not None
+    assert tool.as_dict()["type"] == "mcp"
+    assert tool.as_dict()["server_label"] == "mcp_M365Copilot"
+    assert tool.as_dict()["server_url"] == "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot"
+    assert tool.as_dict()["project_connection_id"] == "WorkIQCopilot"
+
+
+def test_build_marketing_plan_agent_definition_includes_work_iq_tool_when_provided() -> None:
+    """Work IQ MCP tool を渡した場合は Prompt Agent 定義に含める。"""
+    tool = module.MCPTool(
+        server_label="mcp_M365Copilot",
+        server_url="https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+        project_connection_id="WorkIQCopilot",
+        require_approval="never",
+    )
+
+    definition = module.build_marketing_plan_agent_definition("gpt-5-4-mini", work_iq_tool=tool)
+
+    tools = definition.as_dict()["tools"]
+    assert [item["type"] for item in tools] == ["web_search", "mcp"]
+    assert tools[1]["server_label"] == "mcp_M365Copilot"
+
+
+def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch) -> None:
+    """Work IQ 有効時は保存済み agent の MCP tool を使う前提で実行する。"""
+    responses_client = _FakeResponsesClient()
+    fake_client = _FakeProjectClient(
+        responses_client,
+        agent_tools=[
+            {
+                "type": "web_search",
+            },
+            {
+                "type": "mcp",
+                "server_label": "mcp_M365Copilot",
+                "project_connection_id": "WorkIQCopilot",
+            },
+        ],
+    )
+    monkeypatch.setattr(module, "get_settings", _settings)
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
-    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _FakeProjectClient(responses_client))
-    monkeypatch.setattr(module, "emit_tool_event", lambda payload: emitted_events.append(payload) or payload)
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
 
     result = module.run_marketing_plan_prompt_agent(
         "test input",
         work_iq={"enabled": True, "source_scope": ["emails", "teams_chats"]},
-        work_iq_access_token="delegated-token",
     )
 
     assert result == {"id": "resp_123"}
-    assert len(responses_client.calls) == 1
     kwargs = responses_client.calls[0]
     assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
-    assert "Microsoft 365 参照ガイド" in kwargs["input"]
+    assert "Work IQ MCP 利用ガイド" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
-    assert "Work IQ Mail" in kwargs["input"]
-    assert "Work IQ Teams" in kwargs["input"]
-    tools = kwargs["tools"]
-    assert isinstance(tools, list)
-    assert len(tools) == 2
-    assert tools[0].as_dict()["connector_id"] == "connector_outlookemail"
-    assert tools[1].as_dict()["connector_id"] == "connector_microsoftteams"
-    assert tools[0].as_dict()["require_approval"] == "never"
-    assert tools[1].as_dict()["require_approval"] == "never"
-    assert [event["status"] for event in emitted_events] == ["running", "completed"]
-    assert all(event["tool"] == "workiq_foundry_tool" for event in emitted_events)
+    assert "tools" not in kwargs
+
+
+def test_run_marketing_plan_prompt_agent_raises_when_saved_agent_missing_work_iq_tool(monkeypatch) -> None:
+    """Work IQ 有効なのに保存済み agent へ MCP tool が無ければ fail-closed にする。"""
+    responses_client = _FakeResponsesClient()
+    monkeypatch.setattr(module, "get_settings", _settings)
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _FakeProjectClient(responses_client))
+
+    try:
+        module.run_marketing_plan_prompt_agent(
+            "test input",
+            work_iq={"enabled": True, "source_scope": ["emails"]},
+        )
+    except ValueError as exc:
+        assert "WorkIQCopilot MCP tool" in str(exc)
+    else:
+        raise AssertionError("ValueError was not raised")
+
+    assert responses_client.calls == []
 
 
 def test_run_marketing_plan_prompt_agent_raises_when_agent_missing(monkeypatch) -> None:
@@ -130,15 +230,7 @@ def test_run_marketing_plan_prompt_agent_raises_when_agent_missing(monkeypatch) 
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(
-        module,
-        "get_settings",
-        lambda: {
-            "project_endpoint": "https://example.test",
-            "model_name": "gpt-5-4-mini",
-            "marketing_plan_prompt_agent_name": "travel-marketing-plan",
-        },
-    )
+    monkeypatch.setattr(module, "get_settings", _settings)
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
     monkeypatch.setattr(module, "ResourceNotFoundError", FakeNotFoundError)
     monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _MissingProjectClient())
@@ -151,37 +243,18 @@ def test_run_marketing_plan_prompt_agent_raises_when_agent_missing(monkeypatch) 
         raise AssertionError("ValueError was not raised")
 
 
-def test_build_work_iq_tools_prefers_teams_for_meeting_notes() -> None:
-    """meeting_notes は不要な calendar connector を混ぜない。"""
-    tools, resolved_tools = module._build_work_iq_tools(
-        {"enabled": True, "source_scope": ["meeting_notes", "teams_chats"]},
-        "delegated-token",
+def test_sync_marketing_plan_agent_creates_new_version_with_work_iq_tool(monkeypatch) -> None:
+    """postprovision 用 helper は Web Search と Work IQ MCP を含む version を作る。"""
+    fake_client = _FakeProjectClient(
+        _FakeResponsesClient(),
+        connections=[
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            )
+        ],
     )
-
-    assert [tool.as_dict()["connector_id"] for tool in tools] == ["connector_microsoftteams"]
-    assert [tool["display_name"] for tool in resolved_tools] == ["Work IQ Teams"]
-
-
-def test_sync_marketing_plan_agent_creates_new_version(monkeypatch) -> None:
-    """postprovision 用 helper は create_version で agent を同期する。"""
-
-    class _FakeAgents:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def create_version(self, *, agent_name: str, definition):
-            self.calls.append({"agent_name": agent_name, "definition": definition})
-            return SimpleNamespace(name=agent_name)
-
-    class _SyncProjectClient:
-        def __init__(self) -> None:
-            self.agents = _FakeAgents()
-            self.closed = False
-
-        def close(self) -> None:
-            self.closed = True
-
-    fake_client = _SyncProjectClient()
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
     monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
     monkeypatch.setattr(
@@ -196,5 +269,5 @@ def test_sync_marketing_plan_agent_creates_new_version(monkeypatch) -> None:
 
     assert result is True
     assert fake_client.closed is True
-    assert fake_client.agents.calls[0]["agent_name"] == "travel-marketing-plan-gpt-5-4-mini"
-    assert fake_client.agents.calls[0]["definition"].as_dict()["tools"][0]["type"] == "web_search"
+    definition_tools = fake_client.agents.calls[0]["definition"].as_dict()["tools"]
+    assert [tool["type"] for tool in definition_tools] == ["web_search", "mcp"]

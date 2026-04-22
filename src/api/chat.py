@@ -242,6 +242,15 @@ _WORK_IQ_SOURCE_LABELS = {
     "teams_chats": "Teams チャット",
     "documents_notes": "文書 / ノート",
 }
+_WORK_IQ_BLOCKING_STATUSES = {
+    "auth_required",
+    "consent_required",
+    "identity_mismatch",
+    "unavailable",
+    "timeout",
+    "failed",
+    "error",
+}
 
 
 def _format_tool_event_sse(payload: ToolEventPayload) -> str:
@@ -255,6 +264,7 @@ def _build_agent_tool_event(
     *,
     agent_name: str,
     step: int,
+    display_name: str | None = None,
     source: str | None = None,
     provider: str | None = None,
     version: int | None = None,
@@ -276,6 +286,7 @@ def _build_agent_tool_event(
         agent_name=agent_name,
         step=step,
         step_key=resolve_step_key(agent_name),
+        display_name=display_name,
         source=source,
         provider=provider,
         version=version,
@@ -633,21 +644,65 @@ def _format_work_iq_brief_for_prompt(work_iq_session: WorkIQSessionMetadata | No
     return "\n".join(lines)
 
 
-def _build_work_iq_tool_event_data(work_iq_session: WorkIQSessionMetadata, status: str) -> dict[str, object]:
+def _build_work_iq_tool_event_data(
+    work_iq_session: WorkIQSessionMetadata,
+    status: str,
+    *,
+    work_iq_runtime: WorkIQRuntime = "graph_prefetch",
+) -> dict[str, object]:
     """Work IQ status を UI 向け tool_event payload に整形する。"""
     payload: dict[str, object] = _build_agent_tool_event(
-        "generate_workplace_context_brief",
+        "workiq_foundry_tool" if work_iq_runtime == "foundry_tool" else "generate_workplace_context_brief",
         status,
         agent_name="marketing-plan-agent",
         step=2,
         source="workiq",
-        provider="workiq",
+        provider="foundry" if work_iq_runtime == "foundry_tool" else "workiq",
+        display_name="Work IQ context tools" if work_iq_runtime == "foundry_tool" else None,
         source_scope=None,
     )
     source_scope = work_iq_session.get("source_scope")
     if isinstance(source_scope, list) and source_scope:
         payload["source_scope"] = list(source_scope)
     return payload
+
+
+def _resolve_foundry_work_iq_blocking_status(
+    work_iq_session: WorkIQSessionMetadata | None,
+    *,
+    work_iq_runtime: WorkIQRuntime,
+    work_iq_access_token: str,
+) -> str:
+    """Foundry Work IQ 実行前に fail-closed すべき状態を返す。"""
+    if (
+        work_iq_runtime != "foundry_tool"
+        or not isinstance(work_iq_session, dict)
+        or not work_iq_session.get("enabled")
+    ):
+        return ""
+    status = _sanitize_optional_text(work_iq_session.get("status") or work_iq_session.get("warning_code")).lower()
+    if status in _WORK_IQ_BLOCKING_STATUSES:
+        return status
+    if not _sanitize_optional_text(work_iq_access_token):
+        return "auth_required"
+    return ""
+
+
+def _build_work_iq_blocked_error(status: str) -> dict[str, str]:
+    """Foundry Work IQ が使えない場合の UI 向けエラー情報を返す。"""
+    messages = {
+        "auth_required": "Work IQ を使うにはサインインが必要です。サインイン後に再試行してください。",
+        "consent_required": "Work IQ を使うには追加の権限同意が必要です。権限付与後に再試行してください。",
+        "identity_mismatch": "Work IQ のサインイン情報が会話の所有者と一致しません。同じアカウントで再度サインインしてください。",
+        "unavailable": "Work IQ が利用できないため、Foundry 経路を安全に続行できません。時間をおいて再試行してください。",
+        "timeout": "Work IQ の認証確認がタイムアウトしました。再度サインインしてから再試行してください。",
+        "failed": "Work IQ の利用準備に失敗したため、企画書生成を停止しました。再試行してください。",
+        "error": "Work IQ の利用準備中にエラーが発生したため、企画書生成を停止しました。",
+    }
+    return {
+        "message": messages.get(status, "Work IQ が利用できないため、企画書生成を停止しました。"),
+        "code": "WORKIQ_AUTH_REQUIRED" if status in {"auth_required", "consent_required", "identity_mismatch"} else "WORKIQ_UNAVAILABLE",
+    }
 
 
 def _extract_bearer_token(header_value: str) -> str:
@@ -1594,6 +1649,7 @@ _TOOL_CALL_TYPE_MAP = {
     "web_search_call": "web_search",
     "bing_grounding_call": "web_search",
 }
+_WORK_IQ_MCP_SERVER_LABEL = "mcp_M365Copilot"
 
 
 def _merge_tool_names(*tool_groups: list[str]) -> list[str]:
@@ -1674,6 +1730,26 @@ def _extract_tool_names(result: object, agent_name: str, result_text: str) -> li
         tool_names.append(normalize_tool_name("generate_promo_video"))
 
     return _merge_tool_names(tool_names)
+
+
+def _find_output_item_by_type(result: object, output_type: str) -> object | None:
+    """指定 type の output item を最初の 1 件だけ返す。"""
+    for output in _collect_result_outputs(result):
+        if getattr(output, "type", None) == output_type:
+            return output
+    return None
+
+
+def _extract_mcp_calls(result: object, *, server_label: str | None = None) -> list[object]:
+    """Responses output から MCP call items を抽出する。"""
+    calls: list[object] = []
+    for output in _collect_result_outputs(result):
+        if getattr(output, "type", None) != "mcp_call":
+            continue
+        if server_label is not None and getattr(output, "server_label", None) != server_label:
+            continue
+        calls.append(output)
+    return calls
 
 
 async def _load_pending_approval_context(
@@ -1893,16 +1969,6 @@ async def _execute_agent(
                             ) from exc
                     else:
                         result = await run_prompt_agent
-                attempt_tool_events.append(
-                    _build_agent_tool_event(
-                        "foundry_prompt_agent",
-                        "completed",
-                        agent_name=agent_name,
-                        step=step,
-                        source="foundry",
-                        provider="foundry",
-                    )
-                )
             else:
                 agent = create_fn(model_settings)
                 with tool_event_context(
@@ -1985,6 +2051,136 @@ async def _execute_agent(
     result_text = _extract_result_text(result)
     total_tokens = _extract_total_tokens(result)
     tool_names = _extract_tool_names(result, agent_name, result_text)
+    if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
+        work_iq_enabled_for_prompt = bool(
+            work_iq_session
+            and work_iq_session.get("enabled")
+            and _resolve_work_iq_runtime(workflow_settings) == "foundry_tool"
+        )
+        if work_iq_enabled_for_prompt:
+            oauth_consent_request = _find_output_item_by_type(result, "oauth_consent_request")
+            if oauth_consent_request is not None:
+                consent_link = _sanitize_optional_text(getattr(oauth_consent_request, "consent_link", ""))
+                consent_payload = _build_agent_tool_event(
+                    "workiq_foundry_tool",
+                    "auth_required",
+                    agent_name=agent_name,
+                    step=step,
+                    source="workiq",
+                    provider="foundry",
+                    display_name="Work IQ context tools",
+                    error_code="WORKIQ_CONSENT_REQUIRED",
+                    error_message="Foundry Work IQ requires OAuth consent before the marketing plan can run.",
+                    source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                )
+                if consent_link:
+                    consent_payload["consent_link"] = consent_link
+                events.append(_format_tool_event_sse(consent_payload))
+                events.append(
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {
+                            "message": "Foundry Work IQ の同意が必要です。サインイン後に再実行してください。",
+                            "code": "WORKIQ_AUTH_REQUIRED",
+                            "consent_link": consent_link,
+                        },
+                    )
+                )
+                return {
+                    "events": events,
+                    "text": "",
+                    "success": False,
+                    "latency_seconds": round(time.monotonic() - start_time, 1),
+                    "tool_calls": 0,
+                }
+            mcp_approval_request = _find_output_item_by_type(result, "mcp_approval_request")
+            if mcp_approval_request is not None:
+                approval_payload = _build_agent_tool_event(
+                    "workiq_foundry_tool",
+                    "failed",
+                    agent_name=agent_name,
+                    step=step,
+                    source="workiq",
+                    provider="foundry",
+                    display_name="Work IQ context tools",
+                    error_code="WORKIQ_APPROVAL_REQUIRED",
+                    error_message="Foundry Work IQ returned an MCP approval request.",
+                    source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                )
+                approval_payload["approval_request_id"] = _sanitize_optional_text(getattr(mcp_approval_request, "id", ""))
+                events.append(_format_tool_event_sse(approval_payload))
+                events.append(
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {
+                            "message": "Foundry Work IQ の承認待ちが発生したため、企画書生成を中断しました。",
+                            "code": "WORKIQ_APPROVAL_REQUIRED",
+                        },
+                    )
+                )
+                return {
+                    "events": events,
+                    "text": "",
+                    "success": False,
+                    "latency_seconds": round(time.monotonic() - start_time, 1),
+                    "tool_calls": 0,
+                }
+            work_iq_mcp_calls = _extract_mcp_calls(result, server_label=_WORK_IQ_MCP_SERVER_LABEL)
+            if not work_iq_mcp_calls:
+                events.append(
+                    _format_tool_event_sse(
+                        _build_agent_tool_event(
+                            "workiq_foundry_tool",
+                            "failed",
+                            agent_name=agent_name,
+                            step=step,
+                            source="workiq",
+                            provider="foundry",
+                            display_name="Work IQ context tools",
+                            error_code="WORKIQ_NOT_USED",
+                            error_message="Foundry marketing-plan completed without any Work IQ MCP calls.",
+                            source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                        )
+                    )
+                )
+                events.append(
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {
+                            "message": "Foundry Work IQ tool が実行されなかったため、企画書生成を中断しました。",
+                            "code": "WORKIQ_NOT_USED",
+                        },
+                    )
+                )
+                return {
+                    "events": events,
+                    "text": "",
+                    "success": False,
+                    "latency_seconds": round(time.monotonic() - start_time, 1),
+                    "tool_calls": 0,
+                }
+            collected_tool_events.append(
+                _build_agent_tool_event(
+                    "workiq_foundry_tool",
+                    "completed",
+                    agent_name=agent_name,
+                    step=step,
+                    source="workiq",
+                    provider="foundry",
+                    display_name="Work IQ context tools",
+                    source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                )
+            )
+        collected_tool_events.append(
+            _build_agent_tool_event(
+                "foundry_prompt_agent",
+                "completed",
+                agent_name=agent_name,
+                step=step,
+                source="foundry",
+                provider="foundry",
+            )
+        )
     explicit_completed_tools = {
         str(payload.get("tool", ""))
         for payload in collected_tool_events
@@ -3607,27 +3803,53 @@ async def workflow_event_generator(
                 SSEEventType.AGENT_PROGRESS,
                 {"agent": "marketing-plan-agent", "status": "running", "step": 2, "total_steps": _PIPELINE_TOTAL_STEPS},
             )
-            if initial_status in {"auth_required", "identity_mismatch"}:
+            blocking_status = _resolve_foundry_work_iq_blocking_status(
+                work_iq_session,
+                work_iq_runtime=work_iq_runtime,
+                work_iq_access_token=work_iq_access_token,
+            )
+            if blocking_status:
+                work_iq_session["status"] = blocking_status
+                work_iq_session["warning_code"] = blocking_status
+                yield format_sse(
+                    SSEEventType.TOOL_EVENT,
+                    _build_work_iq_tool_event_data(
+                        work_iq_session,
+                        blocking_status,
+                        work_iq_runtime=work_iq_runtime,
+                    ),
+                )
+                if work_iq_runtime == "foundry_tool":
+                    yield format_sse(
+                        SSEEventType.ERROR,
+                        _build_work_iq_blocked_error(blocking_status),
+                    )
+                    return
+            elif work_iq_runtime != "foundry_tool" and initial_status in _WORK_IQ_BLOCKING_STATUSES:
                 work_iq_session["status"] = initial_status
                 work_iq_session["warning_code"] = initial_status
                 yield format_sse(
                     SSEEventType.TOOL_EVENT,
-                    _build_work_iq_tool_event_data(work_iq_session, initial_status),
+                    _build_work_iq_tool_event_data(
+                        work_iq_session,
+                        initial_status,
+                        work_iq_runtime=work_iq_runtime,
+                    ),
                 )
             else:
                 yield format_sse(
                     SSEEventType.TOOL_EVENT,
-                    _build_work_iq_tool_event_data(work_iq_session, "running"),
+                    _build_work_iq_tool_event_data(
+                        work_iq_session,
+                        "running",
+                        work_iq_runtime=work_iq_runtime,
+                    ),
                 )
                 if work_iq_runtime == "foundry_tool":
                     work_iq_session.pop("brief_summary", None)
                     work_iq_session.pop("brief_source_metadata", None)
-                    if work_iq_access_token:
-                        work_iq_session["status"] = "running"
-                        work_iq_session.pop("warning_code", None)
-                    else:
-                        work_iq_session["status"] = "auth_required"
-                        work_iq_session["warning_code"] = "auth_required"
+                    work_iq_session["status"] = "running"
+                    work_iq_session.pop("warning_code", None)
                 else:
                     work_iq_result = await generate_workplace_context_brief(
                         user_input=user_input,
@@ -3637,13 +3859,16 @@ async def workflow_event_generator(
                     )
                     await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
 
-                yield format_sse(
-                    SSEEventType.TOOL_EVENT,
-                    _build_work_iq_tool_event_data(
-                        work_iq_session,
-                        _sanitize_optional_text(work_iq_session.get("status")) or "completed",
-                    ),
-                )
+                current_work_iq_status = _sanitize_optional_text(work_iq_session.get("status")) or "completed"
+                if not (work_iq_runtime == "foundry_tool" and current_work_iq_status == "running"):
+                    yield format_sse(
+                        SSEEventType.TOOL_EVENT,
+                        _build_work_iq_tool_event_data(
+                            work_iq_session,
+                            current_work_iq_status,
+                            work_iq_runtime=work_iq_runtime,
+                        ),
+                    )
 
     try:
         marketing_plan_input = _build_marketing_plan_prompt(
@@ -3686,7 +3911,11 @@ async def workflow_event_generator(
         work_iq_session["status"] = "completed"
         yield format_sse(
             SSEEventType.TOOL_EVENT,
-            _build_work_iq_tool_event_data(work_iq_session, "completed"),
+            _build_work_iq_tool_event_data(
+                work_iq_session,
+                "completed",
+                work_iq_runtime=work_iq_runtime,
+            ),
         )
 
     _store_pending_approval_context(
