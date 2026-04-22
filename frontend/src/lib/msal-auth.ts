@@ -15,12 +15,14 @@ import {
   InteractionRequiredAuthError,
 } from '@azure/msal-browser'
 import { clearMsalRedirectFailureSentinel, recordMsalRedirectFailureSentinel } from './msal-redirect-sentinel'
+import { readAndClearRedirectBridgeResult } from './msal-redirect-bridge'
 import type { MsalConfig } from './msal-config-cache'
 
 let msalInstance: PublicClientApplication | null = null
 let initPromise: Promise<void> | null = null
 let msalInitialized = false
 let pendingRedirectResult: AuthenticationResult | null = null
+let pendingRedirectExpiresAt: number = 0
 
 export type DelegatedAuthStatus = 'ok' | 'auth_required' | 'consent_required' | 'redirecting' | 'unavailable'
 
@@ -75,6 +77,12 @@ function hasRequiredScopeCoverage(requestedScopes: string[], grantedScopes: stri
 function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | null {
   if (!pendingRedirectResult) return null
 
+  if (pendingRedirectExpiresAt > 0 && pendingRedirectExpiresAt <= Date.now()) {
+    pendingRedirectResult = null
+    pendingRedirectExpiresAt = 0
+    return null
+  }
+
   const redirectToken = typeof pendingRedirectResult.accessToken === 'string'
     ? pendingRedirectResult.accessToken.trim()
     : ''
@@ -83,6 +91,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
 
   if (!redirectToken || redirectScopes.length === 0 || requestedScopes.length === 0) {
     pendingRedirectResult = null
+    pendingRedirectExpiresAt = 0
     return null
   }
 
@@ -91,6 +100,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
   }
 
   pendingRedirectResult = null
+  pendingRedirectExpiresAt = 0
   return { token: redirectToken, status: 'ok' }
 }
 
@@ -128,10 +138,26 @@ export async function initMsal(config: MsalConfig): Promise<void> {
     if (redirectResponse?.account) {
       clearMsalRedirectFailureSentinel()
       pendingRedirectResult = redirectResponse
+      pendingRedirectExpiresAt = redirectResponse.expiresOn?.getTime() ?? 0
       nextInstance.setActiveAccount(redirectResponse.account)
       msalInstance = nextInstance
       msalInitialized = true
       return
+    }
+
+    // auth-redirect.html のブリッジページがトークンを書き込んでいれば読み取る。
+    // acquireTokenSilent が新規 PCA インスタンスで InteractionRequiredAuthError を
+    // 投げるエッジケースに備え、直接取得したトークンを pendingRedirectResult に設定する。
+    if (!pendingRedirectResult) {
+      const bridgeResult = readAndClearRedirectBridgeResult()
+      if (bridgeResult) {
+        clearMsalRedirectFailureSentinel()
+        pendingRedirectResult = {
+          accessToken: bridgeResult.accessToken,
+          scopes: bridgeResult.scopes,
+        } as AuthenticationResult
+        pendingRedirectExpiresAt = bridgeResult.expiresAt
+      }
     }
 
     if (!nextInstance.getActiveAccount()) {
@@ -150,6 +176,8 @@ export async function initMsal(config: MsalConfig): Promise<void> {
   } catch (error) {
     msalInstance = null
     msalInitialized = false
+    pendingRedirectResult = null
+    pendingRedirectExpiresAt = 0
     throw error
   } finally {
     initPromise = null
@@ -211,6 +239,12 @@ async function acquireDelegatedToken(
   }
 
   if (!interactive) {
+    // accounts が空の場合でもブリッジトークンが残っていれば使う（アカウントキャッシュ
+    // の取得に失敗したエッジケース対策）。
+    const bridgeFallback = consumePendingRedirectToken(scopes)
+    if (bridgeFallback) {
+      return bridgeFallback
+    }
     return { token: null, status: 'auth_required' }
   }
 

@@ -18,6 +18,7 @@
         readCachedMsalConfig,
         writeCachedMsalConfig,
       } from '/src/lib/msal-config-cache.ts'
+      import { writeRedirectBridgeResult } from '/src/lib/msal-redirect-bridge.ts'
 
       async function loadMsalConfig() {
         const cached = readCachedMsalConfig()
@@ -57,6 +58,14 @@
           if (result?.account) {
             clearMsalRedirectFailureSentinel()
             pca.setActiveAccount(result.account)
+            // アクセストークンをメインアプリへ渡す（pendingRedirectResult として使う）
+            if (result.accessToken && result.expiresOn) {
+              writeRedirectBridgeResult({
+                accessToken: result.accessToken,
+                scopes: result.scopes,
+                expiresAt: result.expiresOn.getTime(),
+              })
+            }
           }
         } catch (err) {
           console.warn('auth-redirect finalize error', err)

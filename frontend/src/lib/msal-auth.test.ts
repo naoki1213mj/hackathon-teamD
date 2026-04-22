@@ -229,4 +229,126 @@ describe('msal-auth', () => {
     expect(initializeMock).toHaveBeenCalledTimes(2)
     expect(result).toEqual({ token: 'token', status: 'ok' })
   })
+
+  // --- msal-redirect-bridge: post-login resume path ---
+
+  it('uses the bridge token written by auth-redirect.html without calling acquireTokenSilent', async () => {
+    // auth-redirect.html が書き込んだブリッジ結果をシミュレート
+    const bridgeScopes = [
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+    ]
+    window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
+      accessToken: 'bridge-access-token',
+      scopes: bridgeScopes,
+      expiresAt: Date.now() + 3_600_000,
+    }))
+    // MSAL のアカウントキャッシュにもアカウントを設定（bridge page が setActiveAccount 済みを模擬）
+    const bridgeAccount = { username: 'user@example.com' }
+    getAllAccountsMock.mockReturnValue([bridgeAccount])
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    // ブリッジトークンを直接使うため silent acquisition は不要
+    expect(acquireTokenSilentMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ token: 'bridge-access-token', status: 'ok' })
+    // 消費後はブリッジエントリが消えていること
+    expect(window.sessionStorage.getItem('workIqMsalRedirectBridge')).toBeNull()
+  })
+
+  it('ignores an expired bridge result and falls back to silent token acquisition', async () => {
+    const bridgeAccount = { username: 'user@example.com' }
+    getAllAccountsMock.mockReturnValue([bridgeAccount])
+    // 期限切れのブリッジ結果
+    window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
+      accessToken: 'old-bridge-token',
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+      ],
+      expiresAt: Date.now() - 1_000,
+    }))
+    acquireTokenSilentMock.mockResolvedValue({ accessToken: 'silent-token' })
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(acquireTokenSilentMock).toHaveBeenCalled()
+    expect(result).toEqual({ token: 'silent-token', status: 'ok' })
+  })
+
+  it('uses bridge token as safety fallback when MSAL account cache is empty after redirect', async () => {
+    // accounts が空（MSAL のアカウントキャッシュが引き継がれなかったエッジケース）
+    getAllAccountsMock.mockReturnValue([])
+    const bridgeScopes = [
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+    ]
+    window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
+      accessToken: 'bridge-fallback-token',
+      scopes: bridgeScopes,
+      expiresAt: Date.now() + 3_600_000,
+    }))
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+    // interactive=false（リダイレクト後の silent リトライ）
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
+
+    expect(acquireTokenSilentMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ token: 'bridge-fallback-token', status: 'ok' })
+  })
+
+  it('clears the bridge entry and falls back to silent when scopes do not match the request', async () => {
+    getAllAccountsMock.mockReturnValue([{ username: 'user@example.com' }])
+    // ブリッジ結果は Graph スコープ（Foundry スコープとは不一致）
+    window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
+      accessToken: 'graph-bridge-token',
+      scopes: ['https://graph.microsoft.com/Sites.Read.All'],
+      expiresAt: Date.now() + 3_600_000,
+    }))
+    acquireTokenSilentMock.mockResolvedValue({ accessToken: 'silent-foundry-token' })
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    // スコープ不一致 → silent acquisition にフォールバック
+    expect(acquireTokenSilentMock).toHaveBeenCalled()
+    expect(result).toEqual({ token: 'silent-foundry-token', status: 'ok' })
+  })
+
+  it('does not reuse an expired in-memory bridge token after a prior scope mismatch', async () => {
+    getAllAccountsMock.mockReturnValue([{ username: 'user@example.com' }])
+    const realDateNow = Date.now
+    const bridgeExpiry = realDateNow() + 5_000
+    window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
+      accessToken: 'foundry-bridge-token',
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+      ],
+      expiresAt: bridgeExpiry,
+    }))
+    acquireTokenSilentMock
+      .mockResolvedValueOnce({ accessToken: 'graph-token' })
+      .mockResolvedValueOnce({ accessToken: 'refreshed-foundry-token' })
+
+    const { getWorkIqGraphAuth, getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    const graphResult = await getWorkIqGraphAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+    expect(graphResult).toEqual({ token: 'graph-token', status: 'ok' })
+
+    vi.spyOn(Date, 'now').mockReturnValue(bridgeExpiry + 1)
+
+    const foundryResult = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(foundryResult).toEqual({ token: 'refreshed-foundry-token', status: 'ok' })
+    expect(acquireTokenSilentMock).toHaveBeenCalledTimes(2)
+    vi.restoreAllMocks()
+  })
 })
