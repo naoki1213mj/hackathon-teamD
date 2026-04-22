@@ -36,11 +36,15 @@ const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/ExternalItem.Read.All',
 ]
 const AGENT_365_TOOLS_APP_ID = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1'
+const AGENT_365_TOOLS_APP_ID_URI = `api://${AGENT_365_TOOLS_APP_ID}`
+function buildAgent365Scope(scopeName: string): string {
+  return `${AGENT_365_TOOLS_APP_ID_URI}/${scopeName}`
+}
 const WORK_IQ_FOUNDRY_SCOPES = [
-  `${AGENT_365_TOOLS_APP_ID}/McpServers.Mail.All`,
-  `${AGENT_365_TOOLS_APP_ID}/McpServers.Calendar.All`,
-  `${AGENT_365_TOOLS_APP_ID}/McpServers.Teams.All`,
-  `${AGENT_365_TOOLS_APP_ID}/McpServers.OneDriveSharepoint.All`,
+  buildAgent365Scope('McpServers.Mail.All'),
+  buildAgent365Scope('McpServers.Calendar.All'),
+  buildAgent365Scope('McpServers.Teams.All'),
+  buildAgent365Scope('McpServers.OneDriveSharepoint.All'),
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 

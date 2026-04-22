@@ -132,6 +132,7 @@ GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger
    - `McpServers.Calendar.All`
    - `McpServers.Teams.All`
    - `McpServers.OneDriveSharepoint.All`
+   - MSAL Browser から token を要求するときは、Microsoft Learn の resources/scopes ガイドどおり `api://<Agent365Tools appId>/McpServers.*` 形式の scope を使う
 5. SPA redirect URI にはアプリ本体 URL に加えて **専用 redirect bridge ページ** も登録する
    - `http://localhost:5173/auth-redirect.html`
    - `http://localhost:8000/auth-redirect.html`

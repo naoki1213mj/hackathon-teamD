@@ -86,10 +86,10 @@ describe('msal-auth', () => {
     expect(setActiveAccountMock).toHaveBeenCalledWith(redirectAccount)
     expect(acquireTokenSilentMock).toHaveBeenCalledWith({
       scopes: [
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
       ],
       account: redirectAccount,
     })
@@ -110,12 +110,26 @@ describe('msal-auth', () => {
 
     expect(acquireTokenRedirectMock).toHaveBeenCalledWith({
       scopes: [
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
       ],
     })
     expect(result).toEqual({ token: null, status: 'redirecting' })
+  })
+
+  it('requests Agent 365 Tools scopes via the documented api:// app ID URI', async () => {
+    const account = { username: 'user@example.com' }
+    getAllAccountsMock.mockReturnValue([account])
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(acquireTokenSilentMock).toHaveBeenCalledWith(expect.objectContaining({
+      scopes: expect.arrayContaining([
+        expect.stringMatching(/^api:\/\/ea9ffc3e-8a23-4a7d-836d-234d7c7565c1\/McpServers\./),
+      ]),
+    }))
   })
 })
