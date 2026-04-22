@@ -448,11 +448,10 @@ def test_create_voice_agent_creates_agent_when_missing(monkeypatch) -> None:
 def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
     """marketing-plan Agent 同期は共通 helper に委譲する。"""
 
-    captured: dict[str, object] = {}
+    captured: list[tuple[str, str]] = []
 
     def fake_sync(project_endpoint: str, model_name: str) -> bool:
-        captured["project_endpoint"] = project_endpoint
-        captured["model_name"] = model_name
+        captured.append((project_endpoint, model_name))
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
@@ -461,10 +460,37 @@ def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
 
     assert result is True
-    assert captured == {
-        "project_endpoint": "https://example.test",
-        "model_name": "gpt-5-4-mini",
-    }
+    assert captured == [
+        ("https://example.test", "gpt-5-4-mini"),
+        ("https://example.test", "gpt-5.4"),
+        ("https://example.test", "gpt-4-1-mini"),
+        ("https://example.test", "gpt-4.1"),
+    ]
+
+
+def test_sync_marketing_plan_agent_includes_requested_model_once(monkeypatch) -> None:
+    """UI 既定外の requested model も重複なく同期する。"""
+
+    captured: list[str] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        assert project_endpoint == "https://example.test"
+        captured.append(model_name)
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5.4-turbo")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is True
+    assert captured == [
+        "gpt-5.4-turbo",
+        "gpt-5-4-mini",
+        "gpt-5.4",
+        "gpt-4-1-mini",
+        "gpt-4.1",
+    ]
 
 
 def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:

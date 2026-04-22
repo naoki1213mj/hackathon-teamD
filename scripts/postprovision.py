@@ -1473,9 +1473,15 @@ def sync_marketing_plan_agent(project_endpoint: str) -> bool:
     """marketing-plan 用の事前作成済み Foundry Agent を同期する。"""
     from src.foundry_prompt_agents import sync_marketing_plan_agent as sync_agent
 
-    model_name = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
+    requested_model = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
+    model_names: list[str] = []
+    for model_name in (requested_model, "gpt-5-4-mini", "gpt-5.4", "gpt-4-1-mini", "gpt-4.1"):
+        normalized = model_name.strip()
+        if normalized and normalized not in model_names:
+            model_names.append(normalized)
     try:
-        return sync_agent(project_endpoint, model_name)
+        results = [sync_agent(project_endpoint, model_name) for model_name in model_names]
+        return all(results)
     except ClientAuthenticationError as exc:
         logger.warning("marketing-plan Agent の認証に失敗しました: %s", exc)
         return False
