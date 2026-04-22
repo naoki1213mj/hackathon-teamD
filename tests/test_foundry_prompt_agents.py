@@ -64,6 +64,8 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_guidance() -> No
     instructions = definition.as_dict()["instructions"]
     assert "Work IQ / Microsoft 365 tools の利用方針" in instructions
     assert "優先利用してください" in instructions
+    assert "Web Search ツールが利用可能な場合は" in instructions
+    assert "Web Search ツールが利用できない場合でも" in instructions
 
 
 def test_run_marketing_plan_prompt_agent_overlays_work_iq_tools_on_agent_reference(monkeypatch) -> None:

@@ -1325,10 +1325,11 @@ def _build_marketing_plan_prompt(
     work_iq_runtime: WorkIQRuntime = "graph_prefetch",
 ) -> str:
     """Agent2 に渡す企画書生成プロンプトを組み立てる。"""
+    sanitized_analysis_markdown = _validate_marketing_plan_analysis(analysis_markdown)
     prompt = (
         "以下の依頼と分析結果をもとに、旅行マーケティング企画書を作成してください。\n\n"
         f"## ユーザー依頼\n{user_input}\n\n"
-        f"## Agent1 の分析結果\n{analysis_markdown}\n"
+        f"## Agent1 の分析結果\n{sanitized_analysis_markdown}\n"
     )
     work_iq_brief = _format_work_iq_brief_for_prompt(work_iq_session)
     if work_iq_brief:
@@ -1354,6 +1355,30 @@ def _build_marketing_plan_prompt(
         "- 取得した社内情報は要約のみを反映し、原文や過度に具体的な個人情報は出力しないでください。\n"
         "- 社内情報で裏付けできない内容を断定しないでください。\n"
     )
+
+
+def _extract_meaningful_analysis_lines(analysis_markdown: str) -> list[str]:
+    """企画書生成に使える分析行だけを抽出する。"""
+    meaningful_lines: list[str] = []
+    for raw_line in analysis_markdown.splitlines():
+        line = _sanitize_optional_text(raw_line)
+        if not line:
+            continue
+        candidate = re.sub(r"^[#>\-\*\d\.\)\s]+", "", line).strip()
+        if len(candidate) >= 4:
+            meaningful_lines.append(candidate)
+    return meaningful_lines
+
+
+def _validate_marketing_plan_analysis(analysis_markdown: str) -> str:
+    """企画書生成に十分な分析結果があるかを検証する。"""
+    sanitized = _sanitize_optional_text(analysis_markdown)
+    meaningful_lines = _extract_meaningful_analysis_lines(sanitized)
+    if len(sanitized) < 4 or not meaningful_lines:
+        raise ValueError(
+            "Agent1 の分析結果が不足しているため、企画書を生成できません。データ検索結果を確認して再試行してください。"
+        )
+    return sanitized
 
 
 def _build_revision_prompt(context: PendingApprovalContext, revision_text: str) -> str:
@@ -3620,10 +3645,27 @@ async def workflow_event_generator(
                     ),
                 )
 
+    try:
+        marketing_plan_input = _build_marketing_plan_prompt(
+            user_input,
+            analysis_outcome["text"],
+            work_iq_session,
+            work_iq_runtime,
+        )
+    except ValueError as exc:
+        yield format_sse(
+            SSEEventType.ERROR,
+            {
+                "message": str(exc),
+                "code": "INSUFFICIENT_ANALYSIS_INPUT",
+            },
+        )
+        return
+
     plan_outcome = await _execute_agent_with_runtime(
         agent_name="marketing-plan-agent",
         agent_step=2,
-        user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session, work_iq_runtime),
+        user_input=marketing_plan_input,
         conversation_id=conversation_id,
         model_settings=model_settings,
         workflow_settings=workflow_settings,

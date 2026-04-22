@@ -401,6 +401,10 @@ class TestBuildMarketingPlanPrompt:
         assert "メール" in result
         assert "Teams チャット" in result
 
+    def test_rejects_insufficient_analysis(self):
+        with pytest.raises(ValueError, match="Agent1 の分析結果が不足"):
+            chat_module._build_marketing_plan_prompt("沖縄プラン", "分析")
+
 
 # --- _build_revision_prompt テスト ---
 
@@ -1207,6 +1211,63 @@ async def test_workflow_event_generator_injects_work_iq_brief_and_emits_tool_eve
     assert chat_module._pending_approvals["conv-workiq"]["work_iq_session"]["brief_summary"] == (
         "メールでは家族向け訴求と春休み需要が重視されていました。"
     )
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_returns_error_when_analysis_is_insufficient(monkeypatch) -> None:
+    """分析結果が不足している場合は marketing-plan を実行せず明示エラーを返す。"""
+
+    calls: list[str] = []
+
+    async def fake_execute_agent_with_runtime(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps
+        calls.append(agent_name)
+        if agent_name != "data-search-agent":
+            raise AssertionError("marketing-plan-agent should not run with insufficient analysis")
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": "分析", "agent": "data-search-agent"},
+                )
+            ],
+            "text": "分析",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 0,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent_with_runtime", fake_execute_agent_with_runtime)
+    monkeypatch.setattr(chat_module, "_resolve_work_iq_runtime", lambda _settings: "graph_prefetch")
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "沖縄プラン",
+            "conv-insufficient-analysis",
+            {"temperature": 0.2},
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert calls == ["data-search-agent"]
+    assert (
+        chat_module.SSEEventType.ERROR,
+        {
+            "message": "Agent1 の分析結果が不足しているため、企画書を生成できません。データ検索結果を確認して再試行してください。",
+            "code": "INSUFFICIENT_ANALYSIS_INPUT",
+        },
+    ) in parsed
 
 
 @pytest.mark.asyncio

@@ -98,4 +98,27 @@ describe('ToolEventBadges', () => {
     expect(container.querySelectorAll('[data-tool-name="fetch_workplace_context"]')).toHaveLength(1)
     expect(container.querySelector('[data-tool-name="fetch_workplace_context"][data-tool-status="completed"]')).not.toBeNull()
   })
+
+  it('collapses duplicate auth badges even when display_name differs', () => {
+    const events: ToolEvent[] = [
+      {
+        tool: 'generate_workplace_context_brief',
+        status: 'auth_required',
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+      },
+      {
+        tool: 'generate_workplace_context_brief',
+        status: 'auth_required',
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        display_name: 'Work IQ context tools',
+      },
+    ]
+
+    const { container } = render(<ToolEventBadges events={events} t={t} />)
+
+    expect(container.querySelectorAll('[data-tool-name="generate_workplace_context_brief"]')).toHaveLength(1)
+    expect(screen.getByText('Sign-in required')).toBeInTheDocument()
+  })
 })

@@ -137,7 +137,6 @@ function buildToolEventKey(event: ToolEvent): string {
     event.tool || '',
     resolveToolProvider(event),
     event.source || '',
-    event.display_name || '',
     event.phase || '',
     event.background_update ? 'background' : 'foreground',
   ].join('::')
