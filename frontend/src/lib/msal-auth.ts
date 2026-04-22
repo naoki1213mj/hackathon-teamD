@@ -15,7 +15,7 @@ import {
   InteractionRequiredAuthError,
 } from '@azure/msal-browser'
 import { clearMsalRedirectFailureSentinel, recordMsalRedirectFailureSentinel } from './msal-redirect-sentinel'
-import { readAndClearRedirectBridgeResult } from './msal-redirect-bridge'
+import { readAndClearRedirectBridgeResult, writeRedirectBridgeResult } from './msal-redirect-bridge'
 import type { MsalConfig } from './msal-config-cache'
 
 let msalInstance: PublicClientApplication | null = null
@@ -140,6 +140,15 @@ export async function initMsal(config: MsalConfig): Promise<void> {
       pendingRedirectResult = redirectResponse
       pendingRedirectExpiresAt = redirectResponse.expiresOn?.getTime() ?? 0
       nextInstance.setActiveAccount(redirectResponse.account)
+      // auth-redirect.html からパススルーされた auth code をメインアプリで処理した場合も
+      // bridge result を書き込み、consumePendingRedirectToken のフォールバックを有効にする。
+      if (redirectResponse.accessToken && redirectResponse.expiresOn) {
+        writeRedirectBridgeResult({
+          accessToken: redirectResponse.accessToken,
+          scopes: redirectResponse.scopes,
+          expiresAt: redirectResponse.expiresOn.getTime(),
+        })
+      }
       msalInstance = nextInstance
       msalInitialized = true
       return
