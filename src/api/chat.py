@@ -355,6 +355,31 @@ def _sanitize_optional_text(value: str | None) -> str:
     return _CONTROL_CHAR_RE.sub("", value).strip()
 
 
+def _extract_oauth_consent_link(oauth_consent_request: object) -> str:
+    """oauth_consent_request から consent link を抽出する。"""
+    for attr_name in ("consentLink", "consent_link", "authUri", "auth_uri"):
+        raw_value = getattr(oauth_consent_request, attr_name, "")
+        if isinstance(raw_value, str):
+            link = _sanitize_optional_text(raw_value)
+            if link:
+                return link
+
+    as_dict = getattr(oauth_consent_request, "as_dict", None)
+    if callable(as_dict):
+        try:
+            payload = as_dict()
+        except (TypeError, ValueError, RuntimeError, OSError):
+            payload = None
+        if isinstance(payload, dict):
+            for key in ("consentLink", "consent_link", "authUri", "auth_uri"):
+                raw_value = payload.get(key)
+                if isinstance(raw_value, str):
+                    link = _sanitize_optional_text(raw_value)
+                    if link:
+                        return link
+    return ""
+
+
 def _resolve_context_owner_lookup(
     context: Mapping[str, object] | None,
     fallback_owner_id: str | None = None,
@@ -2060,7 +2085,7 @@ async def _execute_agent(
         if work_iq_enabled_for_prompt:
             oauth_consent_request = _find_output_item_by_type(result, "oauth_consent_request")
             if oauth_consent_request is not None:
-                consent_link = _sanitize_optional_text(getattr(oauth_consent_request, "consent_link", ""))
+                consent_link = _extract_oauth_consent_link(oauth_consent_request)
                 consent_payload = _build_agent_tool_event(
                     "workiq_foundry_tool",
                     "auth_required",

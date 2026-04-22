@@ -16,6 +16,25 @@ def _parse_sse(event: str) -> tuple[str, dict]:
     return event_name, payload
 
 
+class TestExtractOauthConsentLink:
+    """_extract_oauth_consent_link のテスト"""
+
+    def test_prefers_camel_case_attribute(self):
+        consent_request = MagicMock()
+        consent_request.consentLink = " https://example.com/consent "
+        consent_request.consent_link = ""
+
+        assert chat_module._extract_oauth_consent_link(consent_request) == "https://example.com/consent"
+
+    def test_falls_back_to_as_dict_payload(self):
+        consent_request = MagicMock()
+        consent_request.consentLink = ""
+        consent_request.consent_link = ""
+        consent_request.as_dict.return_value = {"auth_uri": "https://example.com/auth"}
+
+        assert chat_module._extract_oauth_consent_link(consent_request) == "https://example.com/auth"
+
+
 # --- _extract_result_text テスト ---
 
 

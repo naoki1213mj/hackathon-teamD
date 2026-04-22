@@ -66,6 +66,10 @@ export interface PipelineMetrics {
 export interface ErrorData {
   message: string
   code: string
+  consent_link?: string
+  consentLink?: string
+  auth_link?: string
+  authLink?: string
 }
 
 export type PipelineStatus = 'idle' | 'running' | 'approval' | 'completed' | 'error'
@@ -145,6 +149,17 @@ export interface SendMessageOptions extends ChatRequestOptions {
 
 export interface RestoreConversationOptions {
   passive?: boolean
+}
+
+function getAuthRedirectUrl(payload: Record<string, unknown>): string {
+  for (const key of ['consent_link', 'consentLink', 'auth_link', 'authLink']) {
+    const value = payload[key]
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (trimmed) return trimmed
+    }
+  }
+  return ''
 }
 
 const initialState: PipelineState = {
@@ -997,7 +1012,7 @@ export function useSSE() {
     tool_event: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       const rawToolEvent = data as Record<string, unknown>
-      const consentLink = typeof rawToolEvent.consent_link === 'string' ? rawToolEvent.consent_link.trim() : ''
+      const consentLink = getAuthRedirectUrl(rawToolEvent)
       if (
         consentLink
         && rawToolEvent.provider === 'foundry'
@@ -1100,6 +1115,12 @@ export function useSSE() {
     },
     error: (data) => {
       if (requestId !== activeRequestIdRef.current) return
+      const rawError = data as Record<string, unknown>
+      const consentLink = getAuthRedirectUrl(rawError)
+      if (consentLink && rawError.code === 'WORKIQ_AUTH_REQUIRED') {
+        window.location.assign(consentLink)
+        return
+      }
       setState(prev => ({
         ...prev,
         error: data as ErrorData,

@@ -1157,6 +1157,52 @@ describe('buildRestoredPipelineState', () => {
     })
   })
 
+  it('redirects to Foundry consent when a Work IQ tool_event carries a camelCase consent link', async () => {
+    const assignSpy = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign: assignSpy })
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.tool_event?.({
+        tool: 'workiq_foundry_tool',
+        status: 'auth_required',
+        agent: 'marketing-plan-agent',
+        provider: 'foundry',
+        source: 'workiq',
+        consentLink: 'https://login.example.com/consent',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(assignSpy).toHaveBeenCalledWith('https://login.example.com/consent')
+    vi.unstubAllGlobals()
+  })
+
+  it('redirects to Foundry consent when WORKIQ_AUTH_REQUIRED error includes a consent link', async () => {
+    const assignSpy = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign: assignSpy })
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.error?.({
+        message: 'Foundry Work IQ の同意が必要です。',
+        code: 'WORKIQ_AUTH_REQUIRED',
+        consentLink: 'https://login.example.com/error-consent',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(assignSpy).toHaveBeenCalledWith('https://login.example.com/error-consent')
+    expect(result.current.state.status).not.toBe('error')
+    vi.unstubAllGlobals()
+  })
+
   it('assigns the pending version number to live tool events during a refinement run', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',

@@ -184,28 +184,26 @@ export async function connectSSE(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (conversationSettings?.workIqEnabled) {
     const workIqRuntime = settings ? normalizeWorkIqRuntime(settings.workIqRuntime) : 'foundry_tool'
-    if (workIqRuntime !== 'foundry_tool') {
-      const interactiveAuth = options?.authInteractionMode === 'silent' ? false : !conversationId
-      const delegatedAuth = await getDelegatedApiAuth({
-        interactive: interactiveAuth,
-        workIqRuntime,
+    const interactiveAuth = options?.authInteractionMode === 'silent' ? false : !conversationId
+    const delegatedAuth = await getDelegatedApiAuth({
+      interactive: interactiveAuth,
+      workIqRuntime,
+    })
+    Object.assign(headers, delegatedAuth.headers)
+    headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    if (delegatedAuth.status !== 'ok' && delegatedAuth.status !== 'redirecting') {
+      headers['X-Work-IQ-Auth-Status'] = delegatedAuth.status
+      handlers.tool_event?.({
+        tool: workIqRuntime === 'foundry_tool' ? 'workiq_foundry_tool' : 'generate_workplace_context_brief',
+        status: delegatedAuth.status,
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        provider: workIqRuntime === 'foundry_tool' ? 'foundry' : 'workiq',
+        source_scope: conversationSettings.workIqSourceScope,
       })
-      Object.assign(headers, delegatedAuth.headers)
-      headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-      if (delegatedAuth.status !== 'ok' && delegatedAuth.status !== 'redirecting') {
-        headers['X-Work-IQ-Auth-Status'] = delegatedAuth.status
-        handlers.tool_event?.({
-          tool: 'generate_workplace_context_brief',
-          status: delegatedAuth.status,
-          agent: 'marketing-plan-agent',
-          source: 'workiq',
-          provider: 'workiq',
-          source_scope: conversationSettings.workIqSourceScope,
-        })
-      }
-      if (delegatedAuth.status === 'redirecting') {
-        return 'redirecting'
-      }
+    }
+    if (delegatedAuth.status === 'redirecting') {
+      return 'redirecting'
     }
   }
 

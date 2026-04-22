@@ -144,7 +144,7 @@ describe('connectSSE', () => {
     })
   })
 
-  it('does not add delegated auth headers for foundry Work IQ runtime', async () => {
+  it('adds delegated auth headers for foundry Work IQ runtime', async () => {
     getDelegatedApiAuth.mockResolvedValue({
       headers: {
         Authorization: 'Bearer foundry-token',
@@ -159,11 +159,11 @@ describe('connectSSE', () => {
       workIqSourceScope: ['emails'],
     })
 
-    expect(getDelegatedApiAuth).not.toHaveBeenCalled()
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
     const [, options] = mockFetch.mock.calls[0]
-    expect(options.headers.Authorization).toBeUndefined()
-    expect(options.headers['X-Work-IQ-Graph-Authorization']).toBeUndefined()
-    expect(options.headers['X-User-Timezone']).toBeUndefined()
+    expect(options.headers.Authorization).toBe('Bearer foundry-token')
+    expect(options.headers['X-Work-IQ-Graph-Authorization']).toBe('Bearer graph-token')
+    expect(options.headers['X-User-Timezone']).toBeTruthy()
   })
 
   it('passes graph_prefetch runtime to delegated auth lookup when present', async () => {
@@ -267,6 +267,39 @@ describe('connectSSE', () => {
         iqScoreThreshold: 0.3,
         marketingPlanRuntime: 'foundry_preprovisioned',
         workIqRuntime: 'graph_prefetch',
+      },
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+    )
+
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('does not send the request after starting interactive redirect for foundry tool', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'redirecting' })
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1.5',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+        workIqRuntime: 'foundry_tool',
       },
       {
         workIqEnabled: true,
