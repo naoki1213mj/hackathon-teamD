@@ -1,4 +1,4 @@
-import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
+import { getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
 import {
   normalizeMsalConfig,
   readCachedMsalConfig,
@@ -90,13 +90,12 @@ export async function getDelegatedApiAuth(
     }
   }
 
-  const result = await getWorkIqFoundryAuth(config, options?.interactive === true)
+  // Foundry Work IQ tool also needs the user's Graph delegated token so the runtime
+  // can perform the downstream OBO exchange for Microsoft 365 connectors.
+  const result = await getWorkIqGraphAuth(config, options?.interactive === true)
   const headers: Record<string, string> = result.token ? { Authorization: `Bearer ${result.token}` } : {}
-  if (result.status === 'ok') {
-    const graphResult = await getWorkIqGraphAuth(config, false)
-    if (graphResult.token) {
-      headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
-    }
+  if (result.token) {
+    headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${result.token}`
   }
 
   return {

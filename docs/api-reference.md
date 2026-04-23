@@ -117,8 +117,8 @@ REST API と SSE イベントの仕様です。
 
 | ヘッダ | 必須 | 用途 |
 | --- | --- | --- |
-| `Authorization: Bearer <token>` | 任意 | Work IQ を有効化した **新規会話** で使う本人の delegated token。`work_iq_runtime=foundry_tool` では **Agent 365 Tools audience** の token を使い、backend が Azure OpenAI Responses API の top-level `tools[].authorization` へ per-run で渡します。`work_iq_runtime=graph_prefetch` では Graph token を使って Microsoft Graph Copilot Chat API の brief を取得します。無い場合でも会話自体は fail-closed で継続し、`tool_event.status=auth_required` などを返します |
-| `X-Work-IQ-Graph-Authorization: Bearer <Graph token>` | 任意 | `foundry_tool` 実行中に backend が `graph_prefetch` へ安全フォールバックする場合だけ利用する Graph delegated token。通常の本命経路では Foundry Work IQ tool 自体の認証には使いません |
+| `Authorization: Bearer <token>` | 任意 | Work IQ を有効化した **新規会話** で使う本人の delegated token。`work_iq_runtime=foundry_tool` / `graph_prefetch` のどちらでも **Graph delegated token** を使います。backend は `foundry_tool` では Azure OpenAI Responses API の top-level `tools[].authorization` に同じ token を渡し、Foundry runtime 側で Microsoft 365 connector 向け OBO を実行します。無い場合でも会話自体は fail-closed で継続し、`tool_event.status=auth_required` などを返します |
+| `X-Work-IQ-Graph-Authorization: Bearer <Graph token>` | 任意 | `foundry_tool` 実行中に backend が `graph_prefetch` へ安全フォールバックする場合に使う Graph delegated token。現在のフロントエンドは `Authorization` と同じ Graph token を互換目的で重ねて送ります |
 | `X-User-Timezone` | 任意 | rollback の `graph_prefetch` で Work IQ brief を取得するときの `locationHint.timeZone` に使用（未指定時は `UTC`） |
 
 > フロントエンドは Work IQ 有効化時に認証 preflight を行い、`auth_required` / `consent_required` / `redirecting` を UI へ先に反映します。`redirecting` の場合は Entra サインインへ遷移するため、この `/api/chat` リクエスト自体は送信されません。
