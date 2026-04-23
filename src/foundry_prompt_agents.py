@@ -26,7 +26,7 @@ _WORK_IQ_CONNECTION_NAME = "WorkIQCopilot"
 _WORK_IQ_SERVER_LABEL = "mcp_M365Copilot"
 _WORK_IQ_BASELINE_GUIDANCE = (
     "\n\n## Work IQ / Microsoft 365 tools の利用方針\n"
-    "- 保存済み agent に Work IQ / Microsoft 365 MCP tool が接続されている場合は、"
+    "- Work IQ / Microsoft 365 MCP tool が利用可能な場合は、"
     "社内方針・過去施策・承認条件・会議メモ・メール・チャット・文書の確認にそれらを優先利用してください。\n"
     "- ツールから得た情報は、個人情報や長い原文を転載せず、企画判断に必要な要点だけを要約して反映してください。\n"
     "- この実行で Work IQ MCP tool が有効な場合は、少なくとも一度は Work IQ を参照してから企画書を作成してください。\n"
@@ -39,6 +39,13 @@ class WorkIQPromptConfig(TypedDict):
 
     enabled: bool
     source_scope: list[str]
+
+
+class WorkIQConnectionConfig(TypedDict):
+    """Work IQ RemoteTool connection から復元した最小構成。"""
+
+    connection_name: str
+    server_url: str
 
 
 def _build_marketing_plan_web_search_tool() -> WebSearchTool:
@@ -103,8 +110,8 @@ def _resolve_work_iq_server_url(connection_target: object) -> str:
     return connection_target.strip()
 
 
-def _build_work_iq_mcp_tool(project_client: AIProjectClient) -> MCPTool | None:
-    """Foundry project の Work IQ Copilot connection から MCP tool を組み立てる。"""
+def _resolve_work_iq_connection(project_client: AIProjectClient) -> WorkIQConnectionConfig | None:
+    """Foundry project の Work IQ RemoteTool connection 情報を返す。"""
     try:
         connections = list(project_client.connections.list())
     except Exception:
@@ -120,41 +127,24 @@ def _build_work_iq_mcp_tool(project_client: AIProjectClient) -> MCPTool | None:
             continue
         if connection_name != _WORK_IQ_CONNECTION_NAME and _WORK_IQ_SERVER_LABEL not in connection_target:
             continue
-        return MCPTool(
-            server_label=_WORK_IQ_SERVER_LABEL,
-            server_url=connection_target,
-            project_connection_id=connection_name,
-            require_approval="never",
-        )
+        return {
+            "connection_name": connection_name,
+            "server_url": connection_target,
+        }
     return None
 
 
-def _agent_definition_tools(agent_details: object) -> list[dict]:
-    """AgentDetails から最新 version の tool 定義を取り出す。"""
-    if hasattr(agent_details, "as_dict"):
-        try:
-            payload = agent_details.as_dict()
-        except Exception:
-            payload = None
-        if isinstance(payload, dict):
-            definition = payload.get("versions", {}).get("latest", {}).get("definition", {})
-            tools = definition.get("tools")
-            if isinstance(tools, list):
-                return [tool for tool in tools if isinstance(tool, dict)]
-    return []
-
-
-def _agent_has_work_iq_tool(agent_details: object) -> bool:
-    """保存済み agent に Work IQ MCP tool が含まれるか判定する。"""
-    for tool in _agent_definition_tools(agent_details):
-        if tool.get("type") != "mcp":
-            continue
-        if tool.get("server_label") == _WORK_IQ_SERVER_LABEL:
-            return True
-        project_connection_id = tool.get("project_connection_id")
-        if isinstance(project_connection_id, str) and project_connection_id == _WORK_IQ_CONNECTION_NAME:
-            return True
-    return False
+def _build_work_iq_mcp_tool(project_client: AIProjectClient) -> MCPTool | None:
+    """Foundry project の Work IQ Copilot connection から MCP tool を組み立てる。"""
+    connection = _resolve_work_iq_connection(project_client)
+    if connection is None:
+        return None
+    return MCPTool(
+        server_label=_WORK_IQ_SERVER_LABEL,
+        server_url=connection["server_url"],
+        project_connection_id=connection["connection_name"],
+        require_approval="never",
+    )
 
 
 def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
@@ -179,12 +169,12 @@ def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
 def _build_work_iq_tool_guidance(
     config: WorkIQPromptConfig,
 ) -> str:
-    """保存済み Work IQ MCP tool 利用時の追加指示を構築する。"""
+    """Work IQ MCP tool 利用時の追加指示を構築する。"""
     source_labels = [_SOURCE_LABELS.get(scope, scope) for scope in config["source_scope"] if scope]
     selected_sources = "、".join(source_labels) if source_labels else "Microsoft 365"
     return (
         "Work IQ MCP 利用ガイド:\n"
-        f"- 選択された職場ソース（{selected_sources}）に関係する追加文脈を確認するため、保存済み agent の Work IQ MCP tool を優先利用してください。\n"
+        f"- 選択された職場ソース（{selected_sources}）に関係する追加文脈を確認するため、Work IQ MCP tool を優先利用してください。\n"
         "- まず Work IQ から、過去の会議・メール・チャット・社内文書にある方針、制約、過去施策、承認条件を高レベルに把握してください。\n"
         "- 原文の長い引用や個人情報の転載は避け、企画判断に必要な要点だけを要約して利用してください。\n"
         "- この実行では Work IQ MCP tool を少なくとも一度は参照してから企画書を作成してください。\n"
@@ -192,16 +182,23 @@ def _build_work_iq_tool_guidance(
     )
 
 
-def _build_work_iq_tool_resources(access_token: str) -> dict[str, list[dict[str, object]]]:
-    """Responses API へ Work IQ MCP の per-run 認可ヘッダーを渡す。"""
+def _build_marketing_plan_responses_web_search_tool() -> dict[str, object]:
+    """Responses API で使う Web Search tool 定義を返す。"""
     return {
-        "mcp": [
-            {
-                "server_label": _WORK_IQ_SERVER_LABEL,
-                "headers": {"Authorization": f"Bearer {access_token}"},
-                "require_approval": "never",
-            }
-        ]
+        "type": "web_search",
+        "user_location": {"type": "approximate", "country": "JP", "region": "Tokyo"},
+        "search_context_size": "medium",
+    }
+
+
+def _build_work_iq_responses_tool(server_url: str, access_token: str) -> dict[str, object]:
+    """Responses API で Work IQ MCP を呼ぶための tool 定義を返す。"""
+    return {
+        "type": "mcp",
+        "server_label": _WORK_IQ_SERVER_LABEL,
+        "server_url": server_url,
+        "authorization": access_token,
+        "require_approval": "never",
     }
 
 
@@ -226,28 +223,35 @@ def run_marketing_plan_prompt_agent(
     project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)
     openai_client = project_client.get_openai_client()
     try:
-        agent = _get_marketing_plan_agent(project_client, model_name)
-        response_kwargs: dict[str, object] = {
-            "model": model_name,
-            "input": user_input,
-            "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-        }
         work_iq_config = work_iq or {"enabled": False, "source_scope": []}
         if work_iq_config["enabled"]:
             access_token = work_iq_access_token.strip()
             if not access_token:
                 raise ValueError("Work IQ is enabled for the Foundry marketing-plan path, but no delegated access token was supplied.")
-            if not _agent_has_work_iq_tool(agent):
+            work_iq_connection = _resolve_work_iq_connection(project_client)
+            if work_iq_connection is None:
                 raise ValueError(
-                    "Work IQ is enabled for the Foundry marketing-plan path, but the saved agent has no WorkIQCopilot MCP tool."
+                    "Work IQ is enabled for the Foundry marketing-plan path, but no WorkIQCopilot RemoteTool connection was found."
                 )
-            response_kwargs["input"] = (
-                f"{_build_work_iq_tool_guidance(work_iq_config)}"
-                f"\n\n---\n\nユーザー入力:\n{user_input}"
-            )
-            extra_body = dict(response_kwargs["extra_body"])
-            extra_body["tool_resources"] = _build_work_iq_tool_resources(access_token)
-            response_kwargs["extra_body"] = extra_body
+            response_kwargs: dict[str, object] = {
+                "model": model_name,
+                "instructions": f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
+                "input": (
+                    f"{_build_work_iq_tool_guidance(work_iq_config)}"
+                    f"\n\n---\n\nユーザー入力:\n{user_input}"
+                ),
+                "tools": [
+                    _build_marketing_plan_responses_web_search_tool(),
+                    _build_work_iq_responses_tool(work_iq_connection["server_url"], access_token),
+                ],
+            }
+        else:
+            agent = _get_marketing_plan_agent(project_client, model_name)
+            response_kwargs = {
+                "model": model_name,
+                "input": user_input,
+                "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+            }
         return openai_client.responses.create(
             **response_kwargs,
         )

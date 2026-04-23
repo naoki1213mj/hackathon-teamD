@@ -158,20 +158,17 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_tool_when_provid
     assert tools[1]["server_label"] == "mcp_M365Copilot"
 
 
-def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch) -> None:
-    """Work IQ 有効時は per-run tool_resources に delegated token を載せる。"""
+def test_run_marketing_plan_prompt_agent_uses_direct_work_iq_mcp_tool(monkeypatch) -> None:
+    """Work IQ 有効時は top-level tools[].authorization で MCP を呼ぶ。"""
     responses_client = _FakeResponsesClient()
     fake_client = _FakeProjectClient(
         responses_client,
-        agent_tools=[
-            {
-                "type": "web_search",
-            },
-            {
-                "type": "mcp",
-                "server_label": "mcp_M365Copilot",
-                "project_connection_id": "WorkIQCopilot",
-            },
+        connections=[
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            )
         ],
     )
     monkeypatch.setattr(module, "get_settings", _settings)
@@ -187,21 +184,24 @@ def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
     assert kwargs["model"] == "gpt-5-4-mini"
-    assert kwargs["extra_body"] == {
-        "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
-        "tool_resources": {
-            "mcp": [
-                {
-                    "server_label": "mcp_M365Copilot",
-                    "headers": {"Authorization": "Bearer delegated-token"},
-                    "require_approval": "never",
-                }
-            ]
-        },
-    }
+    assert kwargs["instructions"].startswith(module.MARKETING_PLAN_INSTRUCTIONS)
     assert "Work IQ MCP 利用ガイド" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
-    assert "tools" not in kwargs
+    assert kwargs["tools"] == [
+        {
+            "type": "web_search",
+            "user_location": {"type": "approximate", "country": "JP", "region": "Tokyo"},
+            "search_context_size": "medium",
+        },
+        {
+            "type": "mcp",
+            "server_label": "mcp_M365Copilot",
+            "server_url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            "authorization": "delegated-token",
+            "require_approval": "never",
+        },
+    ]
+    assert "extra_body" not in kwargs
 
 
 def test_run_marketing_plan_prompt_agent_raises_when_work_iq_token_missing(monkeypatch) -> None:
@@ -235,8 +235,8 @@ def test_run_marketing_plan_prompt_agent_raises_when_work_iq_token_missing(monke
     assert responses_client.calls == []
 
 
-def test_run_marketing_plan_prompt_agent_raises_when_saved_agent_missing_work_iq_tool(monkeypatch) -> None:
-    """Work IQ 有効なのに保存済み agent へ MCP tool が無ければ fail-closed にする。"""
+def test_run_marketing_plan_prompt_agent_raises_when_work_iq_connection_missing(monkeypatch) -> None:
+    """Work IQ 有効なのに RemoteTool connection が無ければ fail-closed にする。"""
     responses_client = _FakeResponsesClient()
     monkeypatch.setattr(module, "get_settings", _settings)
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
@@ -249,7 +249,7 @@ def test_run_marketing_plan_prompt_agent_raises_when_saved_agent_missing_work_iq
             work_iq_access_token="delegated-token",
         )
     except ValueError as exc:
-        assert "WorkIQCopilot MCP tool" in str(exc)
+        assert "RemoteTool connection" in str(exc)
     else:
         raise AssertionError("ValueError was not raised")
 
