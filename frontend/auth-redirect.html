@@ -7,17 +7,76 @@
   </head>
   <body>
     <p>Processing authentication...</p>
-    <script>
-      // MSAL redirect flow では acquireTokenRedirect() を呼び出したのと同じ PCA インスタンスが
-      // handleRedirectPromise() を処理する必要がある。このページで新しい PCA を生成して
-      // handleRedirectPromise() を呼ぶと、セッションストレージに保存されたインタラクション状態を
-      // 別インスタンスが参照できず noTokenRequestCacheError が発生する。
-      //
-      // そのため URL フラグメント（auth code を含む）をそのままメインアプリへ引き継ぎ、
-      // メインアプリの initMsal() 内の handleRedirectPromise() で処理させる。
-      // initMsal() は acquireTokenRedirect() を呼び出したのと同じ設定で PCA を生成し、
-      // sessionStorage の REQUEST_PARAMS / INTERACTION_STATUS を正しく参照できる。
-      window.location.replace('/' + window.location.search + window.location.hash)
+    <script type="module">
+      import { PublicClientApplication } from '@azure/msal-browser'
+      import {
+        clearMsalRedirectFailureSentinel,
+        recordMsalRedirectFailureSentinel,
+      } from '/src/lib/msal-redirect-sentinel.ts'
+      import {
+        normalizeMsalConfig,
+        readCachedMsalConfig,
+        writeCachedMsalConfig,
+      } from '/src/lib/msal-config-cache.ts'
+      import { writeRedirectBridgeResult } from '/src/lib/msal-redirect-bridge.ts'
+
+      async function loadMsalConfig() {
+        const cached = readCachedMsalConfig()
+        if (cached) {
+          return cached
+        }
+
+        const response = await fetch('/api/voice-config')
+        if (!response.ok) throw new Error('failed to load auth config')
+
+        const config = normalizeMsalConfig(await response.json())
+        if (!config) throw new Error('missing client/tenant id')
+
+        writeCachedMsalConfig(config)
+        return config
+      }
+
+      async function finalizeRedirect() {
+        try {
+          const { clientId, tenantId } = await loadMsalConfig()
+          const pca = new PublicClientApplication({
+            auth: {
+              clientId,
+              authority: `https://login.microsoftonline.com/${tenantId}`,
+              redirectUri: new URL('/auth-redirect.html', window.location.origin).toString(),
+            },
+            cache: { cacheLocation: 'sessionStorage' },
+          })
+          await pca.initialize()
+
+          // 専用 redirect ページでも handleRedirectPromise() を実行し、MSAL 自身に
+          // ORIGIN_URI への復帰と URL_HASH の退避を任せる。必要に応じて bridge token
+          // も書き込み、メインアプリ側の silent resume を補強する。
+          const result = await pca.handleRedirectPromise()
+          if (result?.account) {
+            clearMsalRedirectFailureSentinel()
+            pca.setActiveAccount(result.account)
+            if (result.accessToken && result.expiresOn) {
+              writeRedirectBridgeResult({
+                accessToken: result.accessToken,
+                scopes: result.scopes,
+                expiresAt: result.expiresOn.getTime(),
+              })
+            }
+          }
+        } catch (err) {
+          console.warn('auth-redirect finalize error', err)
+          recordMsalRedirectFailureSentinel('redirect_bridge', err)
+          window.location.replace('/')
+          return
+        }
+
+        if (window.location.pathname.endsWith('/auth-redirect.html')) {
+          window.location.replace('/')
+        }
+      }
+
+      void finalizeRedirect()
     </script>
   </body>
 </html>

@@ -58,7 +58,7 @@ describe('msal-auth', () => {
     window.location.search = ''
   })
 
-  it('uses the dedicated redirect bridge page for MSAL auth flows', async () => {
+  it('uses the dedicated redirect page and always gives MSAL a chance to finish redirect handling', async () => {
     const { initMsal } = await import('./msal-auth')
 
     await initMsal({ clientId: 'client-id', tenantId: 'tenant-id' })
@@ -73,7 +73,7 @@ describe('msal-auth', () => {
         cacheLocation: 'sessionStorage',
       },
     })
-    expect(handleRedirectPromiseMock).not.toHaveBeenCalled()
+    expect(handleRedirectPromiseMock).toHaveBeenCalledWith({ navigateToLoginRequestUrl: false })
   })
 
   it('handles a redirect response on pages that actually contain an auth callback hash', async () => {
@@ -84,6 +84,31 @@ describe('msal-auth', () => {
     await initMsal({ clientId: 'client-id', tenantId: 'tenant-id' })
 
     expect(handleRedirectPromiseMock).toHaveBeenCalledWith({ navigateToLoginRequestUrl: false })
+  })
+
+  it('uses a cached redirect result even after the dedicated redirect page has already returned to / without a hash', async () => {
+    const redirectAccount = { username: 'user@example.com' }
+    handleRedirectPromiseMock.mockResolvedValue({
+      account: redirectAccount,
+      accessToken: 'redirect-token',
+      expiresOn: new Date(Date.now() + 60_000),
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+      ],
+    })
+    setActiveAccountMock.mockImplementation((account) => {
+      getActiveAccountMock.mockReturnValue(account)
+    })
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(acquireTokenSilentMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
   })
 
   it('sets the redirect response account as the active account before silent token acquisition', async () => {

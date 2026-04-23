@@ -58,11 +58,6 @@ const WORK_IQ_FOUNDRY_SCOPES = [
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
-function locationHasMsalAuthResponse(): boolean {
-  const currentLocation = `${window.location.hash}${window.location.search}`.toLowerCase()
-  return /(?:^|[?#&])(code|error)=/.test(currentLocation)
-}
-
 function normalizeScopes(scopes: string[]): string[] {
   return scopes
     .map(scope => scope.trim().toLowerCase())
@@ -128,20 +123,21 @@ export async function initMsal(config: MsalConfig): Promise<void> {
 
   initPromise = (async () => {
     await nextInstance.initialize()
-    // auth-redirect.html は auth code を保持したままメインアプリへ転送するだけにしている。
-    // ここで handleRedirectPromise() を呼び、acquireTokenRedirect() と同じ PCA 設定で
-    // code exchange を完了させる。navigateToLoginRequestUrl:false で request.origin への
-    // 自動遷移も抑止する。
+    // MSAL の redirect フローでは、専用 redirect ページだけでなく復帰先ページ側でも
+    // handleRedirectPromise() を呼ぶ必要がある。redirect ページ側が URL_HASH を
+    // temporary cache に退避して ORIGIN_URI に戻したケースでは、現在の URL に
+    // code/error が含まれていなくても、この呼び出しが cached hash を処理する。
+    //
+    // navigateToLoginRequestUrl:false にしておくことで、メインアプリ側では追加の
+    // 自動ナビゲーションを起こさず、現在ページ上で response を確定させる。
     let redirectResponse: AuthenticationResult | null = null
-    if (locationHasMsalAuthResponse()) {
-      try {
-        redirectResponse = await nextInstance.handleRedirectPromise({
-          navigateToLoginRequestUrl: false,
-        })
-      } catch (error) {
-        recordMsalRedirectFailureSentinel('main_app', error)
-        throw error
-      }
+    try {
+      redirectResponse = await nextInstance.handleRedirectPromise({
+        navigateToLoginRequestUrl: false,
+      })
+    } catch (error) {
+      recordMsalRedirectFailureSentinel('main_app', error)
+      throw error
     }
     if (redirectResponse?.account) {
       clearMsalRedirectFailureSentinel()
