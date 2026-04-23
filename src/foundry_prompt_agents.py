@@ -194,6 +194,14 @@ def _build_marketing_plan_responses_web_search_tool() -> dict[str, object]:
     }
 
 
+def _normalize_mcp_authorization_value(access_token: str) -> str:
+    """MCP authorization に渡す値を Bearer 形式へ正規化する。"""
+    token = access_token.strip()
+    if token.lower().startswith("bearer "):
+        return token
+    return f"Bearer {token}"
+
+
 def _build_work_iq_responses_tool(
     server_url: str,
     access_token: str,
@@ -206,7 +214,7 @@ def _build_work_iq_responses_tool(
         "server_label": _WORK_IQ_SERVER_LABEL,
         "server_url": server_url,
         "project_connection_id": connection_name,
-        "authorization": access_token,
+        "authorization": _normalize_mcp_authorization_value(access_token),
         "require_approval": "never",
         "server_description": _WORK_IQ_SERVER_DESCRIPTION,
     }

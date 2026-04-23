@@ -198,13 +198,24 @@ def test_run_marketing_plan_prompt_agent_uses_direct_work_iq_mcp_tool(monkeypatc
             "server_label": "mcp_M365Copilot",
             "server_url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
             "project_connection_id": "WorkIQCopilot",
-            "authorization": "delegated-token",
+            "authorization": "Bearer delegated-token",
             "require_approval": "never",
             "server_description": module._WORK_IQ_SERVER_DESCRIPTION,
         },
     ]
     assert kwargs["tool_choice"] == {"type": "mcp", "server_label": "mcp_M365Copilot"}
     assert "extra_body" not in kwargs
+
+
+def test_build_work_iq_responses_tool_keeps_existing_bearer_prefix() -> None:
+    """Bearer 付き token は二重 prefix しない。"""
+    tool = module._build_work_iq_responses_tool(
+        "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+        "Bearer delegated-token",
+        connection_name="WorkIQCopilot",
+    )
+
+    assert tool["authorization"] == "Bearer delegated-token"
 
 
 def test_run_marketing_plan_prompt_agent_raises_when_work_iq_token_missing(monkeypatch) -> None:
