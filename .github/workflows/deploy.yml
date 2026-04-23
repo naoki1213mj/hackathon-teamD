@@ -78,8 +78,46 @@ jobs:
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
 
+      - name: Wait for Container Apps provisioning
+        run: |
+          wait_for_containerapp_provisioning() {
+            for i in $(seq 1 30); do
+              PROVISIONING_STATE=$(az containerapp show \
+                --name ${{ vars.CONTAINER_APP_NAME }} \
+                --resource-group ${{ vars.RESOURCE_GROUP }} \
+                --query 'properties.provisioningState' -o tsv)
+              if [ "$PROVISIONING_STATE" = "Succeeded" ]; then
+                echo "Container app provisioning completed."
+                return 0
+              fi
+              echo "Container app provisioning state: ${PROVISIONING_STATE:-unknown} (attempt $i/30)"
+              sleep 10
+            done
+            echo "Container app provisioning did not reach Succeeded in time."
+            return 1
+          }
+
+          wait_for_containerapp_provisioning
+
       - name: Sync manager approval trigger URL
         run: |
+          wait_for_containerapp_provisioning() {
+            for i in $(seq 1 30); do
+              PROVISIONING_STATE=$(az containerapp show \
+                --name ${{ vars.CONTAINER_APP_NAME }} \
+                --resource-group ${{ vars.RESOURCE_GROUP }} \
+                --query 'properties.provisioningState' -o tsv)
+              if [ "$PROVISIONING_STATE" = "Succeeded" ]; then
+                echo "Container app provisioning completed."
+                return 0
+              fi
+              echo "Container app provisioning state: ${PROVISIONING_STATE:-unknown} (attempt $i/30)"
+              sleep 10
+            done
+            echo "Container app provisioning did not reach Succeeded in time."
+            return 1
+          }
+
           MANAGER_WORKFLOW_NAME=$(az resource list \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --resource-type Microsoft.Logic/workflows \
@@ -105,10 +143,23 @@ jobs:
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --secrets "manager-approval-trigger-url=${CALLBACK_URL}" >/dev/null
 
-          az containerapp update \
+          wait_for_containerapp_provisioning
+
+          CURRENT_SECRET_REF=$(az containerapp show \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=secretref:manager-approval-trigger-url >/dev/null
+            --query "properties.template.containers[0].env[?name=='MANAGER_APPROVAL_TRIGGER_URL'].secretRef | [0]" -o tsv)
+
+          if [ "$CURRENT_SECRET_REF" != "manager-approval-trigger-url" ]; then
+            az containerapp update \
+              --name ${{ vars.CONTAINER_APP_NAME }} \
+              --resource-group ${{ vars.RESOURCE_GROUP }} \
+              --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=secretref:manager-approval-trigger-url >/dev/null
+
+            wait_for_containerapp_provisioning
+          else
+            echo "Manager approval trigger env already references manager-approval-trigger-url; skipping env update."
+          fi
 
           echo "Synced manager approval trigger URL from ${MANAGER_WORKFLOW_NAME}"
 
@@ -185,6 +236,24 @@ jobs:
       - name: Rollback on failure
         if: failure()
         run: |
+          wait_for_containerapp_provisioning() {
+            for i in $(seq 1 30); do
+              PROVISIONING_STATE=$(az containerapp show \
+                --name ${{ vars.CONTAINER_APP_NAME }} \
+                --resource-group ${{ vars.RESOURCE_GROUP }} \
+                --query 'properties.provisioningState' -o tsv)
+              if [ "$PROVISIONING_STATE" = "Succeeded" ]; then
+                echo "Container app provisioning completed."
+                return 0
+              fi
+              echo "Container app provisioning state: ${PROVISIONING_STATE:-unknown} (attempt $i/30)"
+              sleep 10
+            done
+            echo "Container app provisioning did not reach Succeeded in time; attempting rollback anyway."
+            return 0
+          }
+
+          wait_for_containerapp_provisioning
           echo "Rolling back to previous image: ${{ steps.prev-revision.outputs.image }}"
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
