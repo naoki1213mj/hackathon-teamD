@@ -159,7 +159,7 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_tool_when_provid
 
 
 def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch) -> None:
-    """Work IQ 有効時は保存済み agent の MCP tool を使う前提で実行する。"""
+    """Work IQ 有効時は per-run tool_resources に delegated token を載せる。"""
     responses_client = _FakeResponsesClient()
     fake_client = _FakeProjectClient(
         responses_client,
@@ -181,15 +181,58 @@ def test_run_marketing_plan_prompt_agent_uses_saved_work_iq_mcp_tool(monkeypatch
     result = module.run_marketing_plan_prompt_agent(
         "test input",
         work_iq={"enabled": True, "source_scope": ["emails", "teams_chats"]},
+        work_iq_access_token="delegated-token",
     )
 
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
     assert kwargs["model"] == "gpt-5-4-mini"
-    assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
+    assert kwargs["extra_body"] == {
+        "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
+        "tool_resources": {
+            "mcp": [
+                {
+                    "server_label": "mcp_M365Copilot",
+                    "headers": {"Authorization": "Bearer delegated-token"},
+                    "require_approval": "never",
+                }
+            ]
+        },
+    }
     assert "Work IQ MCP 利用ガイド" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
     assert "tools" not in kwargs
+
+
+def test_run_marketing_plan_prompt_agent_raises_when_work_iq_token_missing(monkeypatch) -> None:
+    """Work IQ 有効なのに delegated token が無ければ fail-closed にする。"""
+    responses_client = _FakeResponsesClient()
+    fake_client = _FakeProjectClient(
+        responses_client,
+        agent_tools=[
+            {
+                "type": "mcp",
+                "server_label": "mcp_M365Copilot",
+                "project_connection_id": "WorkIQCopilot",
+            }
+        ],
+    )
+    monkeypatch.setattr(module, "get_settings", _settings)
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
+
+    try:
+        module.run_marketing_plan_prompt_agent(
+            "test input",
+            work_iq={"enabled": True, "source_scope": ["emails"]},
+            work_iq_access_token="",
+        )
+    except ValueError as exc:
+        assert "no delegated access token" in str(exc)
+    else:
+        raise AssertionError("ValueError was not raised")
+
+    assert responses_client.calls == []
 
 
 def test_run_marketing_plan_prompt_agent_raises_when_saved_agent_missing_work_iq_tool(monkeypatch) -> None:
@@ -203,6 +246,7 @@ def test_run_marketing_plan_prompt_agent_raises_when_saved_agent_missing_work_iq
         module.run_marketing_plan_prompt_agent(
             "test input",
             work_iq={"enabled": True, "source_scope": ["emails"]},
+            work_iq_access_token="delegated-token",
         )
     except ValueError as exc:
         assert "WorkIQCopilot MCP tool" in str(exc)

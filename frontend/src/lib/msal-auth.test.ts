@@ -39,13 +39,10 @@ vi.mock('@azure/msal-browser', () => ({
 }))
 
 const WORK_IQ_SCOPE_SET = [
-  'https://graph.microsoft.com/Sites.Read.All',
-  'https://graph.microsoft.com/Mail.Read',
-  'https://graph.microsoft.com/People.Read.All',
-  'https://graph.microsoft.com/OnlineMeetingTranscript.Read.All',
-  'https://graph.microsoft.com/Chat.Read',
-  'https://graph.microsoft.com/ChannelMessage.Read.All',
-  'https://graph.microsoft.com/ExternalItem.Read.All',
+  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
 ]
 
 describe('msal-auth', () => {
@@ -239,7 +236,7 @@ describe('msal-auth', () => {
     }))
   })
 
-  it('requests Graph delegated scopes for Work IQ preflight', async () => {
+  it('requests Agent 365 delegated scopes for Work IQ preflight', async () => {
     const account = { username: 'user@example.com' }
     getAllAccountsMock.mockReturnValue([account])
     const { getWorkIqFoundryAuth } = await import('./msal-auth')
@@ -340,7 +337,7 @@ describe('msal-auth', () => {
     getAllAccountsMock.mockReturnValue([{ username: 'user@example.com' }])
     // ブリッジ結果は一部の Graph スコープしか持たないため、要求セットを満たせない
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
-      accessToken: 'graph-bridge-token',
+      accessToken: 'partial-bridge-token',
       scopes: ['https://graph.microsoft.com/Sites.Read.All'],
       expiresAt: Date.now() + 3_600_000,
     }))
@@ -359,13 +356,13 @@ describe('msal-auth', () => {
     const realDateNow = Date.now
     const bridgeExpiry = realDateNow() + 5_000
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
-      accessToken: 'graph-bridge-token',
+      accessToken: 'partial-bridge-token',
       scopes: WORK_IQ_SCOPE_SET,
       expiresAt: bridgeExpiry,
     }))
     acquireTokenSilentMock
       .mockResolvedValueOnce({ accessToken: 'voice-live-token' })
-      .mockResolvedValueOnce({ accessToken: 'refreshed-graph-token' })
+      .mockResolvedValueOnce({ accessToken: 'refreshed-foundry-token' })
 
     const { getVoiceLiveToken, getWorkIqFoundryAuth } = await import('./msal-auth')
 
@@ -376,7 +373,7 @@ describe('msal-auth', () => {
 
     const foundryResult = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 
-    expect(foundryResult).toEqual({ token: 'refreshed-graph-token', status: 'ok' })
+    expect(foundryResult).toEqual({ token: 'refreshed-foundry-token', status: 'ok' })
     expect(acquireTokenSilentMock).toHaveBeenCalledTimes(2)
     vi.restoreAllMocks()
   })

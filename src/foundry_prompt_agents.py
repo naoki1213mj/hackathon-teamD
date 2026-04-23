@@ -192,6 +192,19 @@ def _build_work_iq_tool_guidance(
     )
 
 
+def _build_work_iq_tool_resources(access_token: str) -> dict[str, list[dict[str, object]]]:
+    """Responses API へ Work IQ MCP の per-run 認可ヘッダーを渡す。"""
+    return {
+        "mcp": [
+            {
+                "server_label": _WORK_IQ_SERVER_LABEL,
+                "headers": {"Authorization": f"Bearer {access_token}"},
+                "require_approval": "never",
+            }
+        ]
+    }
+
+
 def run_marketing_plan_prompt_agent(
     user_input: str,
     model_settings: dict | None = None,
@@ -220,8 +233,10 @@ def run_marketing_plan_prompt_agent(
             "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
         }
         work_iq_config = work_iq or {"enabled": False, "source_scope": []}
-        del work_iq_access_token
         if work_iq_config["enabled"]:
+            access_token = work_iq_access_token.strip()
+            if not access_token:
+                raise ValueError("Work IQ is enabled for the Foundry marketing-plan path, but no delegated access token was supplied.")
             if not _agent_has_work_iq_tool(agent):
                 raise ValueError(
                     "Work IQ is enabled for the Foundry marketing-plan path, but the saved agent has no WorkIQCopilot MCP tool."
@@ -230,6 +245,9 @@ def run_marketing_plan_prompt_agent(
                 f"{_build_work_iq_tool_guidance(work_iq_config)}"
                 f"\n\n---\n\nユーザー入力:\n{user_input}"
             )
+            extra_body = dict(response_kwargs["extra_body"])
+            extra_body["tool_resources"] = _build_work_iq_tool_resources(access_token)
+            response_kwargs["extra_body"] = extra_body
         return openai_client.responses.create(
             **response_kwargs,
         )

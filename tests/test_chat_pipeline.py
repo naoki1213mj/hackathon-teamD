@@ -1489,8 +1489,8 @@ async def test_workflow_event_generator_blocks_foundry_tool_when_sign_in_is_requ
 
 
 @pytest.mark.asyncio
-async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_implicit_fallback(monkeypatch) -> None:
-    """foundry_tool が失敗しても暗黙 rollback はせず、そのまま失敗を返す。"""
+async def test_workflow_event_generator_falls_back_to_graph_prefetch_after_foundry_tool_failure(monkeypatch) -> None:
+    """foundry_tool が marketing-plan で失敗したら graph_prefetch に退避する。"""
 
     captured: dict[str, object] = {"marketing_calls": []}
 
@@ -1521,6 +1521,20 @@ async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_im
                 "access_token": work_iq_access_token,
             }
         )
+        runtime = (workflow_settings or {}).get("work_iq_runtime")
+        if runtime == "graph_prefetch":
+            return {
+                "events": [
+                    chat_module.format_sse(
+                        chat_module.SSEEventType.TEXT,
+                        {"content": "# graph fallback plan", "agent": "marketing-plan-agent"},
+                    )
+                ],
+                "text": "# graph fallback plan",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
         return {
             "events": [
                 chat_module.format_sse(
@@ -1546,7 +1560,16 @@ async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_im
             "tool_calls": 0,
         }
 
+    async def fake_generate_workplace_context_brief(**kwargs):
+        del kwargs
+        return {
+            "brief_summary": "Graph brief summary",
+            "brief_source_metadata": [{"source": "meeting_notes", "label": "Teams", "count": 1}],
+            "status": "completed",
+        }
+
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
     chat_module._pending_approvals.clear()
 
     events = [
@@ -1555,7 +1578,7 @@ async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_im
             "夏のハワイ学生旅行向けプランを企画して",
             "conv-workiq-fallback",
             {"temperature": 0.2},
-            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
+            workflow_settings={"manager_approval_enabled": True, "manager_email": "manager@example.com", "work_iq_runtime": "foundry_tool"},
             conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
             work_iq_session={
                 "enabled": True,
@@ -1574,13 +1597,105 @@ async def test_workflow_event_generator_surfaces_foundry_tool_failure_without_im
 
     marketing_calls = captured["marketing_calls"]
     assert isinstance(marketing_calls, list)
-    assert len(marketing_calls) == 1
+    assert len(marketing_calls) == 2
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
+    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "generate_workplace_context_brief"
+        and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+    assert any(
+        event_name == chat_module.SSEEventType.TEXT and payload.get("content") == "# graph fallback plan"
+        for event_name, payload in parsed
+    )
+    assert not any(
+        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR"
+        for event_name, payload in parsed
+    )
+    assert "conv-workiq-fallback" in chat_module._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_keeps_foundry_tool_failure_when_graph_token_missing(monkeypatch) -> None:
+    """graph token が無い場合は foundry_tool failure をそのまま返す。"""
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps, include_done
+        if agent_name == "data-search-agent":
+            return {
+                "events": [],
+                "text": "analysis output",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TOOL_EVENT,
+                    {
+                        "tool": "foundry_prompt_agent",
+                        "status": "failed",
+                        "agent": "marketing-plan-agent",
+                        "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
+                        "error_message": "Error code: 500 - {'error': {'code': 'server_error'}}",
+                    },
+                ),
+                chat_module.format_sse(
+                    chat_module.SSEEventType.ERROR,
+                    {"message": "marketing-plan-agent failed", "code": "AGENT_RUNTIME_ERROR"},
+                ),
+            ],
+            "text": "",
+            "success": False,
+            "latency_seconds": 0.1,
+            "tool_calls": 0,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "夏のハワイ学生旅行向けプランを企画して",
+            "conv-workiq-no-graph-fallback",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="foundry-token",
+            work_iq_graph_access_token="",
+            user_time_zone="Asia/Tokyo",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
     assert any(
         event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR"
         for event_name, payload in parsed
     )
-    assert "conv-workiq-fallback" not in chat_module._pending_approvals
+    assert "conv-workiq-no-graph-fallback" not in chat_module._pending_approvals
 
 
 @pytest.mark.asyncio

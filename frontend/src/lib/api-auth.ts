@@ -93,7 +93,10 @@ export async function getDelegatedApiAuth(
   const result = await getWorkIqFoundryAuth(config, options?.interactive === true)
   const headers: Record<string, string> = result.token ? { Authorization: `Bearer ${result.token}` } : {}
   if (result.status === 'ok') {
-    headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${result.token}`
+    const graphResult = await getWorkIqGraphAuth(config, false)
+    if (graphResult.token) {
+      headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
+    }
   }
 
   return {

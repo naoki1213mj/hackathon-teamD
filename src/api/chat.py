@@ -730,10 +730,111 @@ def _build_work_iq_blocked_error(status: str) -> dict[str, str]:
     }
 
 
+_FOUNDRY_WORK_IQ_FALLBACK_MARKERS = (
+    "PROMPT_AGENT_RUNTIME_FAILED",
+    "WORKIQ_CONSENT_REQUIRED",
+    "WORKIQ_APPROVAL_REQUIRED",
+    "WORKIQ_NOT_USED",
+)
+
+
+def _should_retry_marketing_plan_with_graph_prefetch(plan_outcome: dict[str, object]) -> bool:
+    """Foundry Work IQ の失敗が graph_prefetch fallback 対象か判定する。"""
+    if plan_outcome.get("success"):
+        return False
+    raw_events = plan_outcome.get("events")
+    if not isinstance(raw_events, list):
+        return False
+    event_strings = [event for event in raw_events if isinstance(event, str)]
+    return any(marker in event for marker in _FOUNDRY_WORK_IQ_FALLBACK_MARKERS for event in event_strings)
+
+
 def _extract_bearer_token(header_value: str) -> str:
     """Authorization ヘッダーから bearer token を安全に取り出す。"""
     value = _sanitize_optional_text(header_value)
     return value.split(" ", 1)[1] if value.lower().startswith("bearer ") else ""
+
+
+async def _retry_marketing_plan_with_graph_prefetch(
+    *,
+    user_input: str,
+    analysis_markdown: str,
+    conversation_id: str,
+    model_settings: dict | None,
+    workflow_settings: WorkflowSettings | None,
+    work_iq_session: WorkIQSessionMetadata,
+    work_iq_access_token: str,
+    work_iq_graph_access_token: str,
+    user_time_zone: str,
+) -> dict[str, object] | None:
+    """Foundry Work IQ 失敗時に graph_prefetch へ安全に退避する。"""
+    source_scope = work_iq_session.get("source_scope")
+    if not isinstance(source_scope, list) or not source_scope:
+        return None
+    if not _sanitize_optional_text(work_iq_graph_access_token):
+        return None
+
+    fallback_events = [
+        format_sse(
+            SSEEventType.TOOL_EVENT,
+            _build_work_iq_tool_event_data(
+                work_iq_session,
+                "running",
+                work_iq_runtime="graph_prefetch",
+            ),
+        )
+    ]
+
+    try:
+        logger.warning(
+            "Foundry Work IQ marketing-plan failure detected. Falling back to graph_prefetch for conversation %s.",
+            conversation_id,
+        )
+        work_iq_result = await generate_workplace_context_brief(
+            user_input=user_input,
+            source_scope=list(source_scope),
+            access_token=work_iq_graph_access_token,
+            user_time_zone=user_time_zone,
+        )
+        await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
+        current_status = _sanitize_optional_text(work_iq_session.get("status")) or "completed"
+        fallback_events.append(
+            format_sse(
+                SSEEventType.TOOL_EVENT,
+                _build_work_iq_tool_event_data(
+                    work_iq_session,
+                    current_status,
+                    work_iq_runtime="graph_prefetch",
+                ),
+            )
+        )
+        fallback_workflow_settings = dict(workflow_settings or {})
+        fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_input = _build_marketing_plan_prompt(
+            user_input,
+            analysis_markdown,
+            work_iq_session,
+            "graph_prefetch",
+        )
+    except ValueError as exc:
+        logger.warning("graph_prefetch fallback preparation failed: %s", exc)
+        return None
+    except Exception as exc:
+        logger.warning("graph_prefetch fallback prefetch failed: %s", exc)
+        return None
+
+    fallback_outcome = await _execute_agent_with_runtime(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input=fallback_input,
+        conversation_id=conversation_id,
+        model_settings=model_settings,
+        workflow_settings=fallback_workflow_settings,
+        work_iq_session=work_iq_session,
+        work_iq_access_token="",
+    )
+    fallback_outcome["events"] = fallback_events + list(fallback_outcome.get("events", []))
+    return fallback_outcome
 
 
 async def _apply_work_iq_result_to_session(
@@ -3936,6 +4037,25 @@ async def workflow_event_generator(
         work_iq_session=work_iq_session,
         work_iq_access_token=work_iq_access_token,
     )
+    if (
+        work_iq_session
+        and work_iq_session.get("enabled")
+        and work_iq_runtime == "foundry_tool"
+        and _should_retry_marketing_plan_with_graph_prefetch(plan_outcome)
+    ):
+        fallback_outcome = await _retry_marketing_plan_with_graph_prefetch(
+            user_input=user_input,
+            analysis_markdown=analysis_outcome["text"],
+            conversation_id=conversation_id,
+            model_settings=model_settings,
+            workflow_settings=workflow_settings,
+            work_iq_session=work_iq_session,
+            work_iq_access_token=work_iq_access_token,
+            work_iq_graph_access_token=work_iq_graph_access_token,
+            user_time_zone=user_time_zone,
+        )
+        if fallback_outcome is not None and fallback_outcome.get("success"):
+            plan_outcome = fallback_outcome
     for event in plan_outcome["events"]:
         yield event
     if not plan_outcome["success"]:
