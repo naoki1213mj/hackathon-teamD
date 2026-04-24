@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from agent_framework import tool
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from openai import APIConnectionError, APIStatusError, APITimeoutError, InternalServerError, RateLimitError
 
 from src.agent_client import get_shared_credential
 from src.config import get_settings
@@ -134,6 +135,8 @@ _gpt_image_clients: dict[str, object | None] = {}
 # Azure AD token provider scope（resource endpoint 用）
 _COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 _GPT_IMAGE_TIMEOUT_SECONDS = 120
+_GPT_IMAGE_MAX_ATTEMPTS = 3
+_GPT_IMAGE_RETRY_BACKOFF_SECONDS = 2.0
 _MAI_REQUEST_TIMEOUT_SECONDS = 90
 _MAI_TOTAL_TIMEOUT_SECONDS = 240
 _MAI_RATE_LIMIT_INTERVAL_SECONDS = 65.0
@@ -204,6 +207,16 @@ def _extract_retry_after_seconds(headers: object) -> float | None:
     except ValueError:
         return None
     return retry_after if retry_after >= 0 else None
+
+
+def _compute_gpt_retry_delay(exc: Exception, attempt: int) -> float:
+    """GPT 画像生成の再試行待機秒数を決める。"""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    retry_after = _extract_retry_after_seconds(headers)
+    if retry_after is not None:
+        return max(retry_after, 1.0)
+    return _GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt
 
 
 def _get_gpt_image_client(account_endpoint: str | None = None):
@@ -328,20 +341,70 @@ async def _generate_image_gpt(
                 output_format="png",
             )
 
-        response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=_GPT_IMAGE_TIMEOUT_SECONDS)
+        for attempt in range(1, _GPT_IMAGE_MAX_ATTEMPTS + 1):
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(_sync_generate),
+                    timeout=_GPT_IMAGE_TIMEOUT_SECONDS,
+                )
+                image_items = getattr(response, "data", None) or []
+                first_item = image_items[0] if image_items else None
+                b64_data = getattr(first_item, "b64_json", None) if first_item is not None else None
+                if not b64_data:
+                    logger.warning("GPT 画像データなし。deployment=%s, response_type=%s", deployment, type(response).__name__)
+                    return _FALLBACK_IMAGE
 
-        image_items = getattr(response, "data", None) or []
-        first_item = image_items[0] if image_items else None
-        b64_data = getattr(first_item, "b64_json", None) if first_item is not None else None
-        if not b64_data:
-            logger.warning("GPT 画像データなし。deployment=%s, response_type=%s", deployment, type(response).__name__)
-            return _FALLBACK_IMAGE
-
-        logger.info("GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s", image_model, deployment, size, quality)
-        return f"data:image/png;base64,{b64_data}"
-    except TimeoutError:
-        logger.warning("画像生成タイムアウト（%d秒）。フォールバック画像を返します", _GPT_IMAGE_TIMEOUT_SECONDS)
-        return _FALLBACK_IMAGE
+                logger.info(
+                    "GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s, attempt=%d",
+                    image_model,
+                    deployment,
+                    size,
+                    quality,
+                    attempt,
+                )
+                return f"data:image/png;base64,{b64_data}"
+            except (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError) as exc:
+                if attempt < _GPT_IMAGE_MAX_ATTEMPTS:
+                    wait_seconds = _compute_gpt_retry_delay(exc, attempt)
+                    logger.warning(
+                        "GPT 画像生成の一時エラー。%.1f 秒待って再試行します (attempt=%d/%d, type=%s)",
+                        wait_seconds,
+                        attempt,
+                        _GPT_IMAGE_MAX_ATTEMPTS,
+                        type(exc).__name__,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                logger.warning("GPT 画像生成に失敗。フォールバック画像を返します: %s", exc)
+                return _FALLBACK_IMAGE
+            except APIStatusError as exc:
+                status_code = getattr(exc, "status_code", None)
+                if status_code is not None and status_code >= 500 and attempt < _GPT_IMAGE_MAX_ATTEMPTS:
+                    wait_seconds = _compute_gpt_retry_delay(exc, attempt)
+                    logger.warning(
+                        "GPT 画像生成が %s を返したため %.1f 秒待って再試行します (attempt=%d/%d)",
+                        status_code,
+                        wait_seconds,
+                        attempt,
+                        _GPT_IMAGE_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                logger.warning("GPT 画像生成に失敗。フォールバック画像を返します: %s", exc)
+                return _FALLBACK_IMAGE
+            except TimeoutError:
+                if attempt < _GPT_IMAGE_MAX_ATTEMPTS:
+                    wait_seconds = _GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt
+                    logger.warning(
+                        "GPT 画像生成タイムアウト。%.1f 秒待って再試行します (attempt=%d/%d)",
+                        wait_seconds,
+                        attempt,
+                        _GPT_IMAGE_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                logger.warning("画像生成タイムアウト（%d秒）。フォールバック画像を返します", _GPT_IMAGE_TIMEOUT_SECONDS)
+                return _FALLBACK_IMAGE
     except (ValueError, OSError) as exc:
         logger.warning("画像生成に失敗。フォールバック画像を返します: %s", exc)
         return _FALLBACK_IMAGE

@@ -8,6 +8,7 @@ import urllib.error
 from unittest.mock import MagicMock
 
 import pytest
+from openai import APIConnectionError, RateLimitError
 
 from src import config as config_module
 from src.agents.data_search import search_customer_reviews, search_sales_history
@@ -418,6 +419,111 @@ class TestBrochureGenTools:
         assert bg._extract_retry_after_seconds({"Retry-After": "3"}) == 3.0
         assert bg._extract_retry_after_seconds({"Retry-After": "-1"}) is None
         assert bg._extract_retry_after_seconds({}) is None
+
+    def test_compute_gpt_retry_delay_prefers_retry_after(self):
+        """GPT 画像生成 retry は Retry-After を優先する"""
+        import src.agents.brochure_gen as bg
+
+        response = MagicMock()
+        response.headers = {"Retry-After": "4"}
+        exc = RateLimitError("rate limited", response=response, body=None)
+
+        assert bg._compute_gpt_retry_delay(exc, 2) == 4.0
+
+    @pytest.mark.asyncio
+    async def test_generate_image_gpt_retries_on_rate_limit(self, monkeypatch):
+        """GPT 画像生成は 429 の一時失敗時に再試行する"""
+        import src.agents.brochure_gen as bg
+
+        class _ResponseItem:
+            b64_json = "abc123"
+
+        class _Response:
+            data = [_ResponseItem()]
+
+        response = MagicMock()
+        response.headers = {"Retry-After": "0"}
+        mock_client = MagicMock()
+        mock_client.images.generate.side_effect = [
+            RateLimitError("rate limited", response=response, body=None),
+            _Response(),
+        ]
+
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: mock_client,
+        )
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
+        bg.set_current_image_settings({"image_model": "gpt-image-2", "image_quality": "medium"})
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(bg.asyncio, "sleep", _fake_sleep)
+
+        result = await bg._generate_image("test prompt")
+
+        assert result == "data:image/png;base64,abc123"
+        assert sleep_calls == [1.0]
+        assert mock_client.images.generate.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generate_image_gpt_retries_on_connection_error(self, monkeypatch):
+        """GPT 画像生成は接続エラー時も再試行する"""
+        import src.agents.brochure_gen as bg
+
+        class _ResponseItem:
+            b64_json = "xyz789"
+
+        class _Response:
+            data = [_ResponseItem()]
+
+        request = MagicMock()
+        mock_client = MagicMock()
+        mock_client.images.generate.side_effect = [
+            APIConnectionError(message="temporary", request=request),
+            _Response(),
+        ]
+
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: mock_client,
+        )
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
+        bg.set_current_image_settings({"image_model": "gpt-image-2", "image_quality": "medium"})
+
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(bg.asyncio, "sleep", _fake_sleep)
+
+        result = await bg._generate_image("test prompt")
+
+        assert result == "data:image/png;base64,xyz789"
+        assert sleep_calls == [2.0]
+        assert mock_client.images.generate.call_count == 2
 
     @pytest.mark.asyncio
     async def test_generate_image_mai_retries_on_429(self, monkeypatch):
