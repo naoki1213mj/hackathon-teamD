@@ -111,6 +111,10 @@ def _is_approval_response(response_text: str) -> bool:
 
 # 制御文字除去パターン（改行は許可）
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
+_RESPONSES_CITATION_RE = re.compile(
+    r"[\s\uE000-\uF8FF]*cite[\uE000-\uF8FF]*(?:turn\d+[a-z_]+\d+(?:\s*,?\s*turn\d+[a-z_]+\d+)*)[\s\uE000-\uF8FF]*",
+    re.IGNORECASE,
+)
 _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
@@ -353,6 +357,15 @@ def _sanitize_optional_text(value: str | None) -> str:
     if value is None:
         return ""
     return _CONTROL_CHAR_RE.sub("", value).strip()
+
+
+def _strip_response_citation_markers(value: str) -> str:
+    """Responses/Web Search citation marker を本文から除去する。"""
+    without_markers = _RESPONSES_CITATION_RE.sub(" ", value)
+    without_markers = re.sub(r"[\uE000-\uF8FF]", "", without_markers)
+    without_markers = re.sub(r"[ \t]+", " ", without_markers)
+    without_markers = re.sub(r" *\n *", "\n", without_markers)
+    return without_markers.strip()
 
 
 def _extract_oauth_consent_link(oauth_consent_request: object) -> str:
@@ -1259,7 +1272,7 @@ def _extract_message_text(message: object) -> str:
         text = getattr(content, "text", None)
         if isinstance(text, str) and text.strip():
             text_parts.append(text)
-    return "".join(text_parts).strip()
+    return _strip_response_citation_markers("".join(text_parts))
 
 
 def _extract_result_text(result: object) -> str:
@@ -1269,7 +1282,7 @@ def _extract_result_text(result: object) -> str:
 
     output_text = getattr(result, "output_text", None)
     if isinstance(output_text, str) and output_text.strip():
-        return output_text.strip()
+        return _strip_response_citation_markers(output_text)
 
     direct_text = _extract_message_text(result)
     if direct_text:
@@ -1296,7 +1309,7 @@ def _extract_result_text(result: object) -> str:
         if message_text:
             return message_text
 
-    return str(result).strip()
+    return _strip_response_citation_markers(str(result))
 
 
 def _extract_total_tokens(result: object) -> int:

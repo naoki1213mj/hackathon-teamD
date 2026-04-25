@@ -122,6 +122,22 @@ class TestExtractResultText:
         result.get_outputs.return_value = [msg1, msg2]
         assert chat_module._extract_result_text(result) == "第2メッセージ"
 
+    def test_output_text_strips_foundry_citation_markers(self):
+        """Foundry/Web Search citation marker はユーザー表示前に除去する"""
+        result = MagicMock()
+        result.output_text = "需要が高い。 \ue200cite\ue202turn0search0\ue201"
+
+        assert chat_module._extract_result_text(result) == "需要が高い。"
+
+    def test_message_text_strips_multiple_foundry_citation_markers(self):
+        """複数 citation marker もまとめて除去する"""
+        content = MagicMock()
+        content.text = "市場は拡大中。 \ue200cite\ue202turn0search0, turn0search1\ue201"
+        result = MagicMock()
+        result.contents = [content]
+
+        assert chat_module._extract_result_text(result) == "市場は拡大中。"
+
 
 # --- _extract_brochure_html テスト ---
 
