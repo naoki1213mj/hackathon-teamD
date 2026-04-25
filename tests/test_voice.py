@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 import src.main as main_module
+from src import config as config_module
 from src.main import app
 
 client = TestClient(app)
@@ -11,10 +12,14 @@ client = TestClient(app)
 def test_voice_config_returns_defaults_when_env_missing(monkeypatch):
     """Voice config は未設定時でも 200 を返し、接続先は空文字列になる"""
     monkeypatch.setattr(main_module, "_API_KEY", "")
+    monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
     monkeypatch.delenv("VOICE_AGENT_NAME", raising=False)
     monkeypatch.delenv("VOICE_SPA_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
     monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
+    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
     monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    monkeypatch.delenv("FOUNDRY_PROJECT_ENDPOINT", raising=False)
 
     response = client.get("/api/voice-config")
 
@@ -35,6 +40,7 @@ def test_voice_config_returns_defaults_when_env_missing(monkeypatch):
 def test_voice_config_parses_project_endpoint(monkeypatch):
     """Voice config は Foundry project endpoint から接続情報を組み立てる"""
     monkeypatch.setattr(main_module, "_API_KEY", "")
+    monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
     monkeypatch.setenv("VOICE_AGENT_NAME", "travel-voice")
     monkeypatch.setenv("VOICE_SPA_CLIENT_ID", "client-id")
     monkeypatch.setenv("AZURE_TENANT_ID", "tenant-id")
@@ -46,6 +52,9 @@ def test_voice_config_parses_project_endpoint(monkeypatch):
     response = client.get("/api/voice-config")
 
     assert response.status_code == 200
+    assert response.json()["agent_name"] == "travel-voice"
+    assert response.json()["client_id"] == "client-id"
+    assert response.json()["tenant_id"] == "tenant-id"
     assert response.json()["resource_name"] == "travelfoundry"
     assert response.json()["project_name"] == "teamd"
     assert response.json()["endpoint"] == "wss://travelfoundry.services.ai.azure.com/voice-live/realtime"

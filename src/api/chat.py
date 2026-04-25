@@ -1,6 +1,7 @@
 """SSE チャットエンドポイント。Workflow の結果を SSE ストリームで返す。"""
 
 import asyncio
+import hmac
 import inspect
 import json
 import logging
@@ -1195,6 +1196,11 @@ def _extract_manager_approval_token(request: Request, body_token: str | None = N
     )
 
 
+def _is_manager_approval_token_valid(callback_token: str, expected_token: str) -> bool:
+    """上司承認 callback token を定数時間比較で検証する。"""
+    return bool(expected_token and callback_token and hmac.compare_digest(callback_token, expected_token))
+
+
 def _record_sse_event(collected_events: list[dict], event: str, start: float) -> None:
     """SSE 文字列を保存用イベント dict に変換して追加する。"""
     try:
@@ -2002,6 +2008,14 @@ def _is_retryable_agent_error(exc: Exception) -> bool:
     )
 
 
+def _is_foundry_prompt_agent_unavailable(exc: Exception) -> bool:
+    """Foundry Prompt Agent 自体の未設定だけ legacy fallback を許可する。"""
+    if not isinstance(exc, ValueError):
+        return False
+    message = str(exc)
+    return "AZURE_AI_PROJECT_ENDPOINT" in message or "Foundry Agent が未作成" in message
+
+
 def _is_code_interpreter_404(exc: Exception) -> bool:
     """Code Interpreter の 404 エラーかを判定する。
 
@@ -2091,12 +2105,7 @@ async def _execute_agent(
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
-            if (
-                agent_name == "marketing-plan-agent"
-                and marketing_plan_runtime == "foundry_preprovisioned"
-                # ユーザートークンがない場合（WorkIQ OFF）は Foundry の OBO が失敗するため legacy path を使う
-                and _sanitize_optional_text(work_iq_access_token)
-            ):
+            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
                 from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
 
                 work_iq_enabled_for_prompt = bool(
@@ -2157,9 +2166,9 @@ async def _execute_agent(
                         error_message=str(exc),
                     )
                 )
-                # Foundry 設定・プロビジョニング不備（ValueError）の場合は初回のみ
+                # Foundry 設定・プロビジョニング不備の場合は初回のみ
                 # Agent Framework にフォールバックしてリトライ回数を消費しない
-                if isinstance(exc, ValueError) and attempt == 1:
+                if attempt == 1 and _is_foundry_prompt_agent_unavailable(exc):
                     logger.warning(
                         "Foundry marketing-plan-agent が利用できないため Agent Framework にフォールバックします: %s",
                         exc,
@@ -4450,7 +4459,7 @@ async def get_manager_approval_request(thread_id: str, request: Request) -> JSON
 
     callback_token = _extract_manager_approval_token(request)
     expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
-    if not expected_token or callback_token != expected_token:
+    if not _is_manager_approval_token_valid(callback_token, expected_token):
         return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
 
     workflow_settings = context.get("workflow_settings") or {}
@@ -4494,7 +4503,7 @@ async def manager_approval_callback(
 
     callback_token = _extract_manager_approval_token(request, body.callback_token)
     expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
-    if not expected_token or callback_token != expected_token:
+    if not _is_manager_approval_token_valid(callback_token, expected_token):
         return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
 
     _, allow_cross_owner = _resolve_context_owner_lookup(context)

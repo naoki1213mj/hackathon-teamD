@@ -146,6 +146,8 @@ REST API と SSE イベントの仕様です。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
 - `IMPROVEMENT_MCP_ENDPOINT` が設定されている場合、評価フィードバックでは保存済み評価結果・規制要約・差し戻し履歴をまとめて APIM 配下の MCP `generate_improvement_brief` に渡し、成功時は `tool_event` を 1 件返します。
 - Work IQ の raw context は SSE や会話履歴には保存されず、`tool_event.source="workiq"` の status と brief summary / source metadata だけが保存されます。バックエンドは `metadata.work_iq_session` の status を継続保存するため、`restoreConversation()` 後も Work IQ の UI 表示は同じ状態に戻ります。
+- Foundry / Web Search 由来の citation placeholder（例: `citeturn0search0`）は、Agent2 の結果抽出時点で除去されます。SSE、承認待ち payload、会話履歴、下流 Agent3/4 には正規化済みの企画書 Markdown だけが渡ります。
+- Foundry が返す Work IQ 認可リンクは、フロントエンドで `https://login.microsoftonline.com` または `https://login.microsoft.com` の HTTPS URL に限定してから遷移します。それ以外の URL は `WORKIQ_AUTH_REDIRECT_BLOCKED` として停止します。
 - フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
 - 2 回目以降の上司承認待ちでは、`GET /api/conversations/{id}` のイベント列から未確定ラウンドを復元し、直前の確定版を `pendingVersion` として保持します。
 

@@ -14,7 +14,7 @@ flowchart TD
 
     api --> flow[FastAPI Orchestration]
     api -.-> apimMcp[APIM improvement-mcp]
-    flow -. default: connector tools .-> m365[Microsoft 365 Connectors]
+    flow -. default: Foundry Work IQ MCP .-> m365[Microsoft 365 Connectors]
     flow -. rollback only .-> workiq[Microsoft Graph Copilot Chat API]
     apimMcp --> mcpFunc[Azure Functions MCP]
     mcpFunc --> mcpTool[generate_improvement_brief]
@@ -49,7 +49,7 @@ flowchart TD
 
     subgraph media[Media Services]
         direction LR
-        gptImg[GPT Image 1.5]
+        gptImg[GPT Image 2 / 1.5]
         maiImg[MAI-Image-2]
         avatar[Speech / Photo Avatar]
         cu[Content Understanding]
@@ -73,10 +73,10 @@ flowchart TD
 
 | Runtime | 既定 | 実装 |
 | --- | --- | --- |
-| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行し、`source_scope` に応じて read-only の Microsoft 365 connector を動的 overlay する |
+| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行する。ブラウザが取得した `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、Prompt Agent に添付済みの Work IQ MCP connection を per-user で実行する。`source_scope` は connector 動的 overlay ではなく、instructions / UI / metadata のガイダンス |
 | `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
 
-- `source_scope` ごとの connector は `meeting_notes` → Teams、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint です。
+- `source_scope` ごとの guidance は `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive です。実際の利用可否は事前作成済み Prompt Agent に添付した Work IQ MCP connection と tenant-wide enablement に依存します。
 - フロントエンドは Work IQ 有効化時の auth preflight で `auth_required` / `consent_required` / `redirecting` を先に反映します。
 - バックエンドは `work_iq_session` の status / source scope / sanitized brief metadata を会話 metadata に保存するため、会話復元後も Work IQ UI 状態が一致します。
 

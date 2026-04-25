@@ -137,6 +137,7 @@ _COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 _GPT_IMAGE_TIMEOUT_SECONDS = 120
 _GPT_IMAGE_MAX_ATTEMPTS = 3
 _GPT_IMAGE_RETRY_BACKOFF_SECONDS = 2.0
+_GPT_IMAGE_MAX_RETRY_DELAY_SECONDS = 30.0
 _MAI_REQUEST_TIMEOUT_SECONDS = 90
 _MAI_TOTAL_TIMEOUT_SECONDS = 240
 _MAI_RATE_LIMIT_INTERVAL_SECONDS = 65.0
@@ -215,8 +216,8 @@ def _compute_gpt_retry_delay(exc: Exception, attempt: int) -> float:
     headers = getattr(response, "headers", None)
     retry_after = _extract_retry_after_seconds(headers)
     if retry_after is not None:
-        return max(retry_after, 1.0)
-    return _GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt
+        return min(max(retry_after, 1.0), _GPT_IMAGE_MAX_RETRY_DELAY_SECONDS)
+    return min(_GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt, _GPT_IMAGE_MAX_RETRY_DELAY_SECONDS)
 
 
 def _get_gpt_image_client(account_endpoint: str | None = None):
@@ -229,8 +230,8 @@ def _get_gpt_image_client(account_endpoint: str | None = None):
     endpoint = account_endpoint or _resolve_ai_account_endpoint(settings["project_endpoint"])
     if not endpoint:
         logger.info("project_endpoint 未設定、画像生成は無効")
-        _gpt_image_clients[cache_key] = None
         return None
+    client = None
     try:
         from openai import AzureOpenAI
 
@@ -245,11 +246,9 @@ def _get_gpt_image_client(account_endpoint: str | None = None):
         logger.info("GPT 画像クライアント作成: azure_endpoint=%s", endpoint)
     except (ImportError, ValueError, OSError) as exc:
         logger.warning("画像クライアント初期化失敗: %s", exc)
-        _gpt_image_clients[cache_key] = None
     except Exception as exc:
         logger.exception("画像クライアント初期化で予期しないエラー: %s", exc)
-        _gpt_image_clients[cache_key] = None
-    return _gpt_image_clients[cache_key]
+    return client
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
@@ -394,7 +393,10 @@ async def _generate_image_gpt(
                 return _FALLBACK_IMAGE
             except TimeoutError:
                 if attempt < _GPT_IMAGE_MAX_ATTEMPTS:
-                    wait_seconds = _GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt
+                    wait_seconds = min(
+                        _GPT_IMAGE_RETRY_BACKOFF_SECONDS * attempt,
+                        _GPT_IMAGE_MAX_RETRY_DELAY_SECONDS,
+                    )
                     logger.warning(
                         "GPT 画像生成タイムアウト。%.1f 秒待って再試行します (attempt=%d/%d)",
                         wait_seconds,
@@ -626,9 +628,11 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
     """
     async with trace_tool_invocation("analyze_existing_brochure", agent_name="brochure-gen-agent"):
         # パストラバーサル防止: data/ ディレクトリ内のみアクセスを許可
-        allowed_dir = Path(__file__).resolve().parent.parent.parent / "data"
+        allowed_dir = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
         resolved = Path(pdf_path).resolve()
-        if not str(resolved).startswith(str(allowed_dir)):
+        try:
+            resolved.relative_to(allowed_dir)
+        except ValueError:
             return json.dumps({"error": "指定されたパスはアクセスが許可されていません"}, ensure_ascii=False)
         if not resolved.exists():
             return json.dumps({"error": f"ファイルが見つかりません: {pdf_path}"}, ensure_ascii=False)

@@ -23,8 +23,8 @@ applyTo: 'src/**/*.py, tests/**/*.py'
 ### Foundry SDK 注意点
 
 - `AIProjectClient.connections.get_default()` が返すオブジェクトの `credentials` は `ApiKeyCredentials` 型で `isinstance(creds, dict)` は False。`hasattr(creds, "get")` で判定すること
-- Foundry project endpoint は legacy `images.generate()` をサポートしない。画像生成は Responses API + `image_generation` ツールを使う
-- `x-ms-oai-image-generation-deployment` ヘッダでデプロイ先を指定する
+- Foundry project endpoint そのものではなく AI Services account endpoint を使う。GPT 系画像生成は `AZURE_AI_PROJECT_ENDPOINT` から account endpoint を導出し、Azure OpenAI Images API (`AzureOpenAI.images.generate`) を Managed Identity で呼ぶ
+- 画像 deployment 名は `GPT_IMAGE_2_DEPLOYMENT_NAME` / `GPT_IMAGE_15_DEPLOYMENT_NAME` で上書きできる
 - 画像の base64 をツール出力に含めるとコンテキストウインドウを超過する。side-channel パターンで別途保存する
 - Azure AD トークンの audience は `https://ai.azure.com/.default`（`https://cognitiveservices.azure.com/.default` ではない）
 

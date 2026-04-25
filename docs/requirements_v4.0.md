@@ -37,7 +37,7 @@
 - FastAPI バックエンドによるオーケストレーション（Agent Framework SequentialBuilder は直接使用せず、FastAPI 内で独自に承認フロー・修正ルーティング・画像 side-channel を制御）
 - 業務 DB（Fabric Lakehouse + デモデータ）
 - レギュレーション文書リポジトリ（Foundry IQ Knowledge Base）
-- 画像生成（GPT Image 1.5 / MAI-Image-2 — UI から選択可能）
+- 画像生成（要件定義時は GPT Image 1.5 / MAI-Image-2。現行実装は README 記載どおり GPT Image 2 既定 + GPT Image 1.5 / MAI-Image-2 を UI から選択可能）
 - Azure API Management AI Gateway（トークン管理・監視・負荷分散）
 - APIM AI Gateway の接続・ポリシー構成（`travel-ai-gateway` 接続、トークン制限、メトリクス、監視）
 - モデル配備側ガードレール + 軽量入力 / ツール応答ガードによるプロンプトインジェクション対策

@@ -5,12 +5,14 @@ import os
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from src.config import get_settings
+
 router = APIRouter(prefix="/api", tags=["voice"])
 
 
 def _get_foundry_voice_target() -> tuple[str, str, str]:
     """Voice Live 接続先に必要なリソース名・プロジェクト名・エンドポイントを返す。"""
-    project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    project_endpoint = get_settings()["project_endpoint"].strip()
     if not project_endpoint:
         return "", "", ""
 
@@ -43,9 +45,10 @@ async def get_voice_token() -> JSONResponse:
 @router.get("/voice-config")
 async def get_voice_config() -> JSONResponse:
     """Voice Live の MSAL 設定情報を返す。"""
+    settings = get_settings()
     agent_name = os.environ.get("VOICE_AGENT_NAME", "travel-voice-orchestrator")
-    client_id = os.environ.get("VOICE_SPA_CLIENT_ID", "")
-    tenant_id = os.environ.get("AZURE_TENANT_ID", "")
+    client_id = settings["entra_client_id"].strip()
+    tenant_id = settings["entra_tenant_id"].strip()
     resource_name, project_name, endpoint = _get_foundry_voice_target()
 
     return JSONResponse(

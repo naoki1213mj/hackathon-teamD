@@ -18,7 +18,7 @@
     → [承認ステップ]
     → Agent3a (規制チェック: Foundry IQ + Web Search)
     → Agent3b (企画書修正: チェック結果を反映)
-    → Agent4 (販促物生成: GPT Image 1.5 / MAI-Image-2 + Content Understanding)
+    → Agent4 (販促物生成: GPT Image 2 既定 / GPT Image 1.5 / MAI-Image-2 + Content Understanding)
     → Agent5 (動画生成: Photo Avatar)
   → モデル配備側のガードレール + 軽量ローカル入力/ツール応答ガード → 成果物表示
   → Agent6 (品質レビュー: GitHubCopilotAgent) ← オプショナル
@@ -36,7 +36,7 @@
 | バックエンド | FastAPI + uvicorn | Python 3.14 |
 | パッケージ管理 | uv | 最新 |
 | 推論モデル | gpt-5.4-mini | GA (2026-03-17~) |
-| 画像生成 | GPT Image 1.5 / MAI-Image-2 | GA（UI から選択可能） |
+| 画像生成 | GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 | GA（UI から選択可能） |
 | エージェント実装 | Microsoft Agent Framework | 1.0.0 (GA) |
 | オーケストレーション | FastAPI 直接オーケストレーション | `src/api/chat.py` で実装 |
 | データ | Fabric Lakehouse | Delta Parquet + SQL EP |
@@ -100,6 +100,7 @@
 
 - 既定: `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`
 - connector 対応: `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive
+- `foundry_tool` ではブラウザの `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、事前作成済み Prompt Agent に添付された Work IQ MCP connection を `tool_choice={"type":"mcp","server_label":"mcp_M365Copilot"}` で最低 1 回使わせる
 - rollback: `WORKIQ_RUNTIME=graph_prefetch` を指定すると Microsoft Graph Copilot Chat API で短い brief を先読みする
 
 ---
@@ -144,6 +145,8 @@
 | `generate_banner_image(prompt, platform)` | SNS バナー画像生成（Instagram/Twitter/Facebook サイズ対応） | ✅ GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 — UI から選択 | 可視 SVG プレースホルダー |
 
 **出力形式**: 顧客向け HTML ブローシャ（Tailwind CSS / レスポンシブ / 旅行業登録番号フッター付き）+ Base64 画像 data URI
+
+**画像生成ランタイム補足**: GPT 系画像モデルは `AZURE_AI_PROJECT_ENDPOINT` から AI Services account endpoint を導出し、Azure OpenAI Images API を Managed Identity で呼び出す。429 / timeout / 5xx / connection error は上限付き retry/backoff し、最終失敗時は透明 PNG ではなく可視 SVG placeholder を返す。MAI 経路は `IMAGE_PROJECT_ENDPOINT_MAI` を使い、429 は `Retry-After` を尊重して直列化する。
 
 **顧客向けルール**:
 

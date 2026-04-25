@@ -7,6 +7,7 @@ import json
 import urllib.error
 from unittest.mock import MagicMock
 
+import openai
 import pytest
 from openai import APIConnectionError, RateLimitError
 
@@ -288,7 +289,33 @@ class TestBrochureGenTools:
 
         result = bg._get_gpt_image_client()
         assert result is None
-        assert bg._gpt_image_clients == {"__default__": None}
+        assert bg._gpt_image_clients == {}
+
+    def test_get_gpt_image_client_does_not_cache_transient_init_failure(self, monkeypatch):
+        """初期化失敗はキャッシュせず、次回の成功を許可する"""
+        import src.agents.brochure_gen as bg
+
+        calls = {"count": 0}
+
+        class _FakeAzureOpenAI:
+            def __init__(self, **kwargs):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise OSError("temporary init failure")
+                self.kwargs = kwargs
+
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
+        monkeypatch.setattr(openai, "AzureOpenAI", _FakeAzureOpenAI)
+        monkeypatch.setattr(bg, "get_shared_credential", lambda: object())
+        monkeypatch.setattr(bg, "get_bearer_token_provider", lambda credential, scope: "token-provider")
+
+        first = bg._get_gpt_image_client("https://example.services.ai.azure.com")
+        second = bg._get_gpt_image_client("https://example.services.ai.azure.com")
+
+        assert first is None
+        assert isinstance(second, _FakeAzureOpenAI)
+        assert calls["count"] == 2
+        assert bg._gpt_image_clients["https://example.services.ai.azure.com"] is second
 
     def test_get_gpt_image_client_cached(self, monkeypatch):
         """2 回目以降はキャッシュされた結果を返す"""
@@ -429,6 +456,16 @@ class TestBrochureGenTools:
         exc = RateLimitError("rate limited", response=response, body=None)
 
         assert bg._compute_gpt_retry_delay(exc, 2) == 4.0
+
+    def test_compute_gpt_retry_delay_caps_retry_after(self):
+        """極端な Retry-After は UI 待機を長時間ブロックしないよう上限をかける"""
+        import src.agents.brochure_gen as bg
+
+        response = MagicMock()
+        response.headers = {"Retry-After": "999"}
+        exc = RateLimitError("rate limited", response=response, body=None)
+
+        assert bg._compute_gpt_retry_delay(exc, 2) == bg._GPT_IMAGE_MAX_RETRY_DELAY_SECONDS
 
     @pytest.mark.asyncio
     async def test_generate_image_gpt_retries_on_rate_limit(self, monkeypatch):
@@ -614,6 +651,30 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         result = await bg.analyze_existing_brochure("../../etc/passwd")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "許可されていません" in parsed["error"]
+
+    @pytest.mark.asyncio
+    async def test_analyze_existing_brochure_rejects_sibling_data_prefix(self, tmp_path, monkeypatch):
+        """data と同じ prefix の sibling directory は許可しない"""
+        import src.agents.brochure_gen as bg
+
+        _disable_azd_env(monkeypatch)
+        repo_root = tmp_path / "repo"
+        allowed_dir = repo_root / "data"
+        sibling_dir = repo_root / "data_evil"
+        allowed_dir.mkdir(parents=True)
+        sibling_dir.mkdir()
+        sibling_pdf = sibling_dir / "brochure.pdf"
+        sibling_pdf.write_bytes(b"%PDF-1.4")
+
+        fake_module_file = repo_root / "src" / "agents" / "brochure_gen.py"
+        fake_module_file.parent.mkdir(parents=True)
+        fake_module_file.write_text("", encoding="utf-8")
+        monkeypatch.setattr(bg, "__file__", str(fake_module_file))
+
+        result = await bg.analyze_existing_brochure(str(sibling_pdf))
         parsed = json.loads(result)
         assert "error" in parsed
         assert "許可されていません" in parsed["error"]

@@ -162,6 +162,29 @@ function getAuthRedirectUrl(payload: Record<string, unknown>): string {
   return ''
 }
 
+function isAllowedAuthRedirectUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    const hostname = url.hostname.toLowerCase()
+    return url.protocol === 'https:'
+      && (
+        hostname === 'login.microsoftonline.com'
+        || hostname.endsWith('.login.microsoftonline.com')
+        || hostname === 'login.microsoft.com'
+        || hostname.endsWith('.login.microsoft.com')
+      )
+  } catch {
+    return false
+  }
+}
+
+function buildBlockedAuthRedirectError(): ErrorData {
+  return {
+    message: 'Work IQ の認証リンクが許可された Microsoft ログイン URL ではないためブロックしました。',
+    code: 'WORKIQ_AUTH_REDIRECT_BLOCKED',
+  }
+}
+
 const initialState: PipelineState = {
   status: 'idle',
   conversationId: null,
@@ -1019,6 +1042,17 @@ export function useSSE() {
         && rawToolEvent.source === 'workiq'
         && (rawToolEvent.status === 'auth_required' || rawToolEvent.status === 'consent_required')
       ) {
+        if (!isAllowedAuthRedirectUrl(consentLink)) {
+          setState(prev => ({
+            ...prev,
+            error: buildBlockedAuthRedirectError(),
+            status: 'error',
+            managerApprovalPolling: false,
+            backgroundUpdatesPending: false,
+            pendingVersion: null,
+          }))
+          return
+        }
         window.location.assign(consentLink)
         return
       }
@@ -1118,6 +1152,17 @@ export function useSSE() {
       const rawError = data as Record<string, unknown>
       const consentLink = getAuthRedirectUrl(rawError)
       if (consentLink && rawError.code === 'WORKIQ_AUTH_REQUIRED') {
+        if (!isAllowedAuthRedirectUrl(consentLink)) {
+          setState(prev => ({
+            ...prev,
+            error: buildBlockedAuthRedirectError(),
+            status: 'error',
+            managerApprovalPolling: false,
+            backgroundUpdatesPending: false,
+            pendingVersion: null,
+          }))
+          return
+        }
         window.location.assign(consentLink)
         return
       }

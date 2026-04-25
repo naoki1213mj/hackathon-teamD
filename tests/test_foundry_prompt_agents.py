@@ -160,7 +160,7 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_tool_when_provid
     assert tools[1]["server_label"] == "mcp_M365Copilot"
 
 
-def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_required_tool_choice(monkeypatch) -> None:
+def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_choice(monkeypatch) -> None:
     """Work IQ 有効時も docs-backed な agent_reference 経路を使う。"""
     responses_client = _FakeResponsesClient()
     fake_client = _FakeProjectClient(
@@ -190,7 +190,7 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_required_tool
     assert "ユーザー入力:\ntest input" in kwargs["input"]
     assert kwargs["extra_body"] == {
         "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
-        "tool_choice": "required",
+        "tool_choice": {"type": "mcp", "server_label": "mcp_M365Copilot"},
     }
     assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]
     assert "instructions" not in kwargs

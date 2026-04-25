@@ -282,22 +282,20 @@ class TestMarketingPlanRuntimeSettings:
 
 
 @pytest.mark.asyncio
-async def test_execute_agent_uses_legacy_marketing_agent_when_foundry_token_is_missing(monkeypatch) -> None:
-    """Work IQ OFF では foundry_preprovisioned を避けて legacy Agent2 を使う。"""
+async def test_execute_agent_uses_foundry_prompt_agent_when_work_iq_is_off(monkeypatch) -> None:
+    """Work IQ OFF でも foundry_preprovisioned は Prompt Agent 経路を使う。"""
 
     captured: dict[str, object] = {}
 
-    class _FakeLegacyAgent:
-        async def run(self, user_input: str):
-            captured["user_input"] = user_input
-            return SimpleNamespace(output_text="legacy output")
-
     def fake_create_marketing_plan_agent(model_settings: dict | None = None):
-        captured["model_settings"] = model_settings
-        return _FakeLegacyAgent()
+        del model_settings
+        raise AssertionError("Legacy marketing agent should not run while Foundry prompt agent is configured")
 
-    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
-        raise AssertionError("Foundry prompt agent should not run without a delegated Work IQ token")
+    def fake_run_marketing_plan_prompt_agent(user_input: str, model_settings: dict | None = None, **kwargs):
+        captured["user_input"] = user_input
+        captured["model_settings"] = model_settings
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(output_text="foundry output")
 
     monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
     monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
@@ -306,23 +304,65 @@ async def test_execute_agent_uses_legacy_marketing_agent_when_foundry_token_is_m
         agent_name="marketing-plan-agent",
         agent_step=2,
         user_input="沖縄プラン",
-        conversation_id="conv-legacy",
+        conversation_id="conv-foundry-no-workiq",
         model_settings={"model": "gpt-5-4-mini"},
         workflow_settings={"marketing_plan_runtime": "foundry_preprovisioned"},
         work_iq_access_token="",
     )
 
     assert outcome["success"] is True
-    assert outcome["text"] == "legacy output"
+    assert outcome["text"] == "foundry output"
     assert captured == {
         "user_input": "沖縄プラン",
         "model_settings": {"model": "gpt-5-4-mini"},
+        "kwargs": {
+            "work_iq": {"enabled": False, "source_scope": []},
+            "work_iq_access_token": "",
+        },
     }
     parsed = [_parse_sse(event) for event in outcome["events"]]
-    assert not any(
+    assert any(
         event_name == chat_module.SSEEventType.TOOL_EVENT
         and payload.get("tool") == "foundry_prompt_agent"
         and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_does_not_fallback_when_work_iq_token_is_missing(monkeypatch) -> None:
+    """Work IQ ON の delegated token 欠落は legacy fallback で隠さない。"""
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        del model_settings
+        raise AssertionError("Legacy marketing agent should not run when Work IQ auth is missing")
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        raise ValueError("Work IQ is enabled for the Foundry marketing-plan path, but no delegated access token was supplied.")
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="沖縄プラン",
+        conversation_id="conv-workiq-missing-token",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={
+            "marketing_plan_runtime": "foundry_preprovisioned",
+            "work_iq_runtime": "foundry_tool",
+        },
+        work_iq_session={"enabled": True, "source_scope": ["emails"]},
+        work_iq_access_token="",
+    )
+
+    assert outcome["success"] is False
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and "no delegated access token" in str(payload.get("error_message", ""))
         for event_name, payload in parsed
     )
 

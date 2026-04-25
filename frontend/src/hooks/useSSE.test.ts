@@ -1295,7 +1295,7 @@ describe('buildRestoredPipelineState', () => {
         agent: 'marketing-plan-agent',
         provider: 'foundry',
         source: 'workiq',
-        consentLink: 'https://login.example.com/consent',
+        consentLink: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
       })
     })
 
@@ -1305,7 +1305,7 @@ describe('buildRestoredPipelineState', () => {
       await result.current.sendMessage('沖縄プランを企画して')
     })
 
-    expect(assignSpy).toHaveBeenCalledWith('https://login.example.com/consent')
+    expect(assignSpy).toHaveBeenCalledWith('https://login.microsoftonline.com/common/oauth2/v2.0/authorize')
     vi.unstubAllGlobals()
   })
 
@@ -1316,7 +1316,7 @@ describe('buildRestoredPipelineState', () => {
       handlers.error?.({
         message: 'Foundry Work IQ の同意が必要です。',
         code: 'WORKIQ_AUTH_REQUIRED',
-        consentLink: 'https://login.example.com/error-consent',
+        consentLink: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?prompt=consent',
       })
     })
 
@@ -1326,8 +1326,57 @@ describe('buildRestoredPipelineState', () => {
       await result.current.sendMessage('沖縄プランを企画して')
     })
 
-    expect(assignSpy).toHaveBeenCalledWith('https://login.example.com/error-consent')
+    expect(assignSpy).toHaveBeenCalledWith('https://login.microsoftonline.com/common/oauth2/v2.0/authorize?prompt=consent')
     expect(result.current.state.status).not.toBe('error')
+    vi.unstubAllGlobals()
+  })
+
+  it('blocks unsafe Work IQ auth redirects from tool events', async () => {
+    const assignSpy = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign: assignSpy })
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.tool_event?.({
+        tool: 'workiq_foundry_tool',
+        status: 'auth_required',
+        agent: 'marketing-plan-agent',
+        provider: 'foundry',
+        source: 'workiq',
+        consentLink: 'https://evil.example/consent',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(assignSpy).not.toHaveBeenCalled()
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error?.code).toBe('WORKIQ_AUTH_REDIRECT_BLOCKED')
+    vi.unstubAllGlobals()
+  })
+
+  it('blocks non-https Work IQ auth redirects from errors', async () => {
+    const assignSpy = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign: assignSpy })
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.error?.({
+        message: 'Foundry Work IQ の同意が必要です。',
+        code: 'WORKIQ_AUTH_REQUIRED',
+        consentLink: 'javascript:alert(1)',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(assignSpy).not.toHaveBeenCalled()
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error?.code).toBe('WORKIQ_AUTH_REDIRECT_BLOCKED')
     vi.unstubAllGlobals()
   })
 
