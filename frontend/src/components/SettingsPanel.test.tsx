@@ -77,6 +77,70 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('button', { name: /Work IQ/ })).toBeTruthy()
   })
 
+  it('passes GPT-5.5 through when the deployment-backed model is selected', () => {
+    const onChange = vi.fn()
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="off"
+        onChange={onChange}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /モデル設定/ }))
+
+    const modelSelect = screen.getByLabelText('モデル')
+    expect(screen.getByRole('option', { name: 'GPT-5.5 (requires deployment)' })).toHaveValue('gpt-5.5')
+
+    fireEvent.change(modelSelect, { target: { value: 'gpt-5.5' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_SETTINGS,
+      model: 'gpt-5.5',
+    })
+  })
+
+  it('resets GPT-5.5 model settings back to the safe default without touching other sections', () => {
+    const onChange = vi.fn()
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      model: 'gpt-5.5',
+      temperature: 1.4,
+      maxTokens: 8192,
+      imageModel: 'MAI-Image-2' as const,
+      managerApprovalEnabled: true,
+      managerEmail: 'manager@example.com',
+    }
+
+    render(
+      <SettingsPanel
+        settings={settings}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="off"
+        onChange={onChange}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /モデル設定/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'デフォルトに戻す' }))
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...settings,
+      model: DEFAULT_SETTINGS.model,
+      marketingPlanRuntime: DEFAULT_SETTINGS.marketingPlanRuntime,
+      temperature: DEFAULT_SETTINGS.temperature,
+      maxTokens: DEFAULT_SETTINGS.maxTokens,
+      topP: DEFAULT_SETTINGS.topP,
+      iqSearchResults: DEFAULT_SETTINGS.iqSearchResults,
+      iqScoreThreshold: DEFAULT_SETTINGS.iqScoreThreshold,
+    })
+  })
+
   it('shows only the selected manager settings section', () => {
     render(
       <SettingsPanel

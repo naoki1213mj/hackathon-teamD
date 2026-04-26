@@ -35,7 +35,7 @@
 | フロントエンド | React + TypeScript + Vite + Tailwind CSS | React 19.2 / Vite 8 / Tailwind CSS 4.2 / TypeScript 5.9 |
 | バックエンド | FastAPI + uvicorn | Python 3.14 |
 | パッケージ管理 | uv | 最新 |
-| 推論モデル | gpt-5.4-mini | GA (2026-03-17~) |
+| 推論モデル | gpt-5.4-mini（既定）/ gpt-5.5（deployment 作成後に選択可） | gpt-5.4-mini: GA (2026-03-17~) / gpt-5.5: GA (2026-04-24~) |
 | 画像生成 | GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 | GA（UI から選択可能） |
 | エージェント実装 | Microsoft Agent Framework | 1.0.0 (GA) |
 | オーケストレーション | FastAPI 直接オーケストレーション | `src/api/chat.py` で実装 |

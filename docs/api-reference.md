@@ -107,7 +107,7 @@ REST API と SSE イベントの仕様です。
 | --- | --- | --- | --- |
 | `message` | `string` | 必須 | 1 文字以上 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `user_settings` | `object \| null` | 任意 | 会話途中でも変更可能なモデル設定。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
+| `user_settings` | `object \| null` | 任意 | 会話途中でも変更可能なモデル設定。`model`（`gpt-5-4-mini`、`gpt-5.5`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`。`gpt-5.5` は対象 Foundry account の deployment/quota が必要）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
 | `user_settings.image_settings` | `object \| null` | 任意 | 画像生成設定。`image_model`（`gpt-image-1.5` / `gpt-image-2` / `MAI-Image-2`）、`image_quality`（`low`/`medium`/`high`、GPT 系のみ）、`image_width`/`image_height`（MAI のみ、最小 768、w×h ≤ 1,048,576） |
 | `conversation_settings` | `object \| null` | 任意 | 新規会話時だけ受理する固定設定。現状は `work_iq_enabled` と `source_scope` を含む |
 | `settings` | `object \| null` | 任意 | 旧互換。`user_settings` / `conversation_settings` へ段階移行中 |

@@ -1,0 +1,5 @@
+# False positive: Graph permission CLI argument in historical postprovision code.
+1d0dab40f609691520955899b68ba8149e2f4537:scripts/postprovision.py:generic-api-key:284
+
+# False positive: documentation-only dummy API key example in historical agent guidance.
+ba723c63b66607ea6bf3c70b6917079e48f30572:.github/agents/se-gitops-ci-specialist.md:generic-api-key:92

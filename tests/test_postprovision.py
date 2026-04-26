@@ -677,6 +677,7 @@ def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
         ("https://example.test", "gpt-5.4"),
         ("https://example.test", "gpt-4-1-mini"),
         ("https://example.test", "gpt-4.1"),
+        ("https://example.test", "gpt-5.5"),
     ]
 
 
@@ -702,7 +703,83 @@ def test_sync_marketing_plan_agent_includes_requested_model_once(monkeypatch) ->
         "gpt-5.4",
         "gpt-4-1-mini",
         "gpt-4.1",
+        "gpt-5.5",
     ]
+
+
+def test_sync_marketing_plan_agent_skips_optional_gpt55_when_not_deployed(monkeypatch) -> None:
+    """optional な GPT-5.5 agent sync 失敗は既存 deployment の postprovision を壊さない。"""
+
+    captured: list[str] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        assert project_endpoint == "https://example.test"
+        captured.append(model_name)
+        if model_name == "gpt-5.5":
+            raise ValueError("model deployment not found")
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is True
+    assert captured == [
+        "gpt-5-4-mini",
+        "gpt-5.4",
+        "gpt-4-1-mini",
+        "gpt-4.1",
+        "gpt-5.5",
+    ]
+
+
+def test_sync_marketing_plan_agent_skips_optional_gpt55_azure_http_error(monkeypatch) -> None:
+    """Azure SDK 由来の未デプロイ応答でも optional GPT-5.5 は既存同期を壊さない。"""
+
+    captured: list[str] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        assert project_endpoint == "https://example.test"
+        captured.append(model_name)
+        if model_name == "gpt-5.5":
+            raise postprovision_module.HttpResponseError(message="Deployment not found")
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is True
+    assert captured == [
+        "gpt-5-4-mini",
+        "gpt-5.4",
+        "gpt-4-1-mini",
+        "gpt-4.1",
+        "gpt-5.5",
+    ]
+
+
+def test_sync_marketing_plan_agent_fails_when_requested_gpt55_is_not_deployed(monkeypatch) -> None:
+    """明示選択された GPT-5.5 は optional 扱いせず、未デプロイなら postprovision 失敗にする。"""
+
+    captured: list[str] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        assert project_endpoint == "https://example.test"
+        captured.append(model_name)
+        if model_name == "gpt-5.5":
+            raise ValueError("model deployment not found")
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5.5")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is False
+    assert captured == ["gpt-5.5"]
 
 
 def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:

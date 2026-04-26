@@ -60,6 +60,47 @@ class TestExtractTerminalToolEvents:
         assert payload["error_message"] == "OpenAI rejected request: Invalid data: field is required"
 
 
+class TestNormalizeModelSettings:
+    """_normalize_model_settings のテスト"""
+
+    def test_preserves_gpt55_model_and_supported_image_settings(self) -> None:
+        """GPT-5.5 は deployment 名としてそのままバックエンド設定に残す。"""
+
+        normalized = chat_module._normalize_model_settings(
+            {
+                "model": "gpt-5.5",
+                "temperature": 0.4,
+                "max_tokens": 4096,
+                "top_p": 0.9,
+                "iq_search_results": 8,
+                "iq_score_threshold": 0.25,
+                "image_settings": {
+                    "image_model": "gpt-image-2",
+                    "image_quality": "high",
+                    "image_width": 1024,
+                    "image_height": 1024,
+                    "unexpected": "ignored",
+                },
+                "unexpected": "ignored",
+            }
+        )
+
+        assert normalized == {
+            "model": "gpt-5.5",
+            "temperature": 0.4,
+            "max_tokens": 4096,
+            "top_p": 0.9,
+            "iq_search_results": 8,
+            "iq_score_threshold": 0.25,
+            "image_settings": {
+                "image_model": "gpt-image-2",
+                "image_quality": "high",
+                "image_width": 1024,
+                "image_height": 1024,
+            },
+        }
+
+
 # --- _extract_result_text テスト ---
 
 

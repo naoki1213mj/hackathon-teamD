@@ -24,12 +24,14 @@ from urllib.parse import urlparse
 
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import PromptAgentDefinition
-from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_MARKETING_PLAN_BASE_MODELS = ("gpt-5-4-mini", "gpt-5.4", "gpt-4-1-mini", "gpt-4.1")
+_MARKETING_PLAN_OPTIONAL_MODELS = ("gpt-5.5",)
 _MCP_SERVER_DIR = _REPO_ROOT / "mcp_server"
 _FUNCTION_RUNTIME = "python"
 _FUNCTION_RUNTIME_VERSION = "3.13"
@@ -1621,12 +1623,23 @@ def sync_marketing_plan_agent(project_endpoint: str) -> bool:
 
     requested_model = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
     model_names: list[str] = []
-    for model_name in (requested_model, "gpt-5-4-mini", "gpt-5.4", "gpt-4-1-mini", "gpt-4.1"):
+    for model_name in (requested_model, *_MARKETING_PLAN_BASE_MODELS):
         normalized = model_name.strip()
         if normalized and normalized not in model_names:
             model_names.append(normalized)
     try:
         results = [sync_agent(project_endpoint, model_name) for model_name in model_names]
+        for model_name in _MARKETING_PLAN_OPTIONAL_MODELS:
+            normalized = model_name.strip()
+            if not normalized or normalized in model_names:
+                continue
+            try:
+                if sync_agent(project_endpoint, normalized):
+                    logger.info("optional marketing-plan Agent を同期しました: model=%s", normalized)
+                else:
+                    logger.info("optional marketing-plan Agent は未同期です: model=%s", normalized)
+            except (HttpResponseError, RuntimeError, ValueError) as exc:
+                logger.info("optional marketing-plan Agent をスキップしました: model=%s, reason=%s", normalized, exc)
         return all(results)
     except ClientAuthenticationError as exc:
         logger.warning("marketing-plan Agent の認証に失敗しました: %s", exc)
