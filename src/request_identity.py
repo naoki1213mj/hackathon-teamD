@@ -8,7 +8,7 @@ from typing import Literal, TypedDict
 
 from fastapi import Request
 
-from src.config import AppSettings, get_settings, is_production_environment
+from src.config import AppSettings, get_settings
 
 IdentityErrorCode = Literal["missing_token", "invalid_token", "identity_mismatch", "untrusted_token"]
 _TRUE_VALUES = {"1", "true", "yes", "y", "on", "enabled"}
@@ -88,7 +88,7 @@ def _setting(settings: AppSettings, key: str) -> str:
 def owner_authentication_required(settings: AppSettings | None = None) -> bool:
     """owner-scoped API で認証済み identity が必要かを返す。"""
     resolved = settings or get_settings()
-    return is_production_environment() or _parse_bool_setting(_setting(resolved, "require_authenticated_owner"))
+    return _parse_bool_setting(_setting(resolved, "require_authenticated_owner"))
 
 
 def _has_trusted_auth_boundary(request: Request, settings: AppSettings) -> bool:

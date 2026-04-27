@@ -185,7 +185,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認通知 workflow。signed URL なので secret として扱う |
 | `TRUST_AUTH_HEADER_CLAIMS` | 任意 | 署名検証済み upstream auth がある場合だけ bearer claims を信頼する。通常は `false` |
 | `TRUSTED_AUTH_HEADER_NAME` / `TRUSTED_AUTH_HEADER_VALUE` | 任意 | upstream が検証済み request に付ける境界ヘッダー |
-| `REQUIRE_AUTHENTICATED_OWNER` | 任意 | development でも owner-scoped API に認証を強制する場合だけ `true` |
+| `REQUIRE_AUTHENTICATED_OWNER` | 任意 | owner-scoped API に認証を強制する場合だけ `true`。未設定なら本番相当環境でも Work IQ off の通常チャットは匿名 owner で開始可能 |
 | `SERVE_STATIC` | 任意 | コンテナ内フロントエンド配信 (`true`) |
 | `API_KEY` | 任意 | API エンドポイント保護 |
 
@@ -199,7 +199,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 - 評価ログと継続監視は privacy gate です。`ENABLE_EVALUATION_LOGGING=true` なしでは Foundry へ送信せず、`ENABLE_CONTINUOUS_MONITORING=true` だけでは有効になりません。送信 payload は raw prompt / Work IQ content / transcript / bearer token / brochure HTML を含めない最小化済みデータです。
 - `ENABLE_COST_METRICS=true` で表示される cost は token usage からの推定であり、Azure Cost Management の課金確定値ではありません。
 - Work IQ の `foundry_tool` 経路は既定ですが、ユーザーの `https://ai.azure.com/user_impersonation` token と tenant consent がない場合は fail-closed です。`graph_prefetch` は明示 rollback のみです。
-- owner-scoped API（会話、source ingestion）は本番相当環境で認証済み owner boundary を要求します。Bearer claim は信頼済み upstream 境界がある場合だけ使ってください。
+- owner-scoped API（会話、source ingestion）は `REQUIRE_AUTHENTICATED_OWNER=true` のときだけ認証済み owner boundary を要求します。Bearer claim は信頼済み upstream 境界がある場合だけ使ってください。
 
 > Logic App の signed trigger URL は `&sp=...&sv=...&sig=...` を含みます。Container App secret や `azd env` へ反映するときは **URL 全体を 1 つの値として引用**し、途中で切れないようにしてください。
 >

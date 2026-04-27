@@ -180,9 +180,10 @@ def test_source_access_is_owner_scoped(monkeypatch):
     assert other_delete.status_code == 404
 
 
-def test_source_production_rejects_untrusted_bearer_claims(monkeypatch):
-    """本番 source owner 境界では未検証 bearer claims を拒否する。"""
+def test_source_rejects_untrusted_bearer_claims_when_auth_required(monkeypatch):
+    """owner 認証必須時は source owner 境界で未検証 bearer claims を拒否する。"""
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REQUIRE_AUTHENTICATED_OWNER", "true")
     monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
     monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
 

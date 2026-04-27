@@ -56,10 +56,28 @@ def test_untrusted_bearer_claims_are_anonymous_in_development(monkeypatch: pytes
     assert identity["oid"] == ""
 
 
-def test_owner_boundary_rejects_untrusted_bearer_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
-    """本番 owner 境界では未検証 bearer claims を fail-closed で拒否する。"""
+def test_owner_boundary_allows_anonymous_in_production_without_auth_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本番でも明示フラグなしなら未検証 bearer claims は匿名として扱う。"""
     _reset_identity_env(monkeypatch)
     monkeypatch.setenv("ENVIRONMENT", "production")
+    token = _make_bearer_token({"oid": "oid-123", "tid": "tid-123"})
+
+    identity = extract_request_identity(
+        _make_request({"Authorization": f"Bearer {token}"}),
+        enforce_owner_boundary=True,
+    )
+
+    assert identity["auth_mode"] == "anonymous"
+    assert identity["auth_error"] == "untrusted_token"
+
+
+def test_owner_boundary_rejects_untrusted_bearer_when_auth_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """明示的に owner 認証必須にした場合は未検証 bearer claims を fail-closed で拒否する。"""
+    _reset_identity_env(monkeypatch)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REQUIRE_AUTHENTICATED_OWNER", "true")
     token = _make_bearer_token({"oid": "oid-123", "tid": "tid-123"})
 
     with pytest.raises(RequestIdentityError) as exc_info:

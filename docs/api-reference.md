@@ -535,7 +535,7 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 
 owner boundary:
 
-- 本番相当環境、または `REQUIRE_AUTHENTICATED_OWNER=true` では認証済み Bearer token が必要です。
+- `REQUIRE_AUTHENTICATED_OWNER=true` では認証済み Bearer token が必要です。本番相当環境でも、このフラグが未設定なら Work IQ off の通常チャットは匿名 owner として開始できます。
 - JWT claim は `TRUST_AUTH_HEADER_CLAIMS=true` または `TRUSTED_AUTH_HEADER_NAME` / `TRUSTED_AUTH_HEADER_VALUE` で検証済み境界がある場合だけ信頼します。
 - tenant が `ENTRA_TENANT_ID` と一致しない場合は `IDENTITY_MISMATCH`、未検証 token は `AUTH_HEADER_UNTRUSTED` です。
 

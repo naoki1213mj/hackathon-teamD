@@ -5222,7 +5222,7 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
                             )
             except (ImportError, ValueError, OSError) as exc:
                 logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
-            except RuntimeError, TypeError:
+            except (RuntimeError, TypeError):
                 logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
 
     return StreamingResponse(
@@ -5338,7 +5338,7 @@ async def approve(
             )
         except (ValueError, OSError) as exc:
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
-        except RuntimeError, TypeError:
+        except (RuntimeError, TypeError):
             logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
 
         for update_job in background_update_jobs:

@@ -174,10 +174,11 @@ def test_evaluate_endpoint_does_not_log_to_foundry_by_default(monkeypatch):
     assert calls == []
 
 
-def test_evaluate_production_rejects_untrusted_owner_claims(monkeypatch):
-    """会話へ保存する評価は本番で未検証 bearer claims を拒否する。"""
+def test_evaluate_rejects_untrusted_owner_claims_when_auth_required(monkeypatch):
+    """owner 認証必須時は会話へ保存する評価で未検証 bearer claims を拒否する。"""
     monkeypatch.setattr("src.config._get_azd_env_values", lambda: {})
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REQUIRE_AUTHENTICATED_OWNER", "true")
     monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
     monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
 

@@ -233,7 +233,7 @@ rebuilt `workiq-dev` tenant では、次までは完了済みです。
 | Continuous monitoring | Evaluation logging + `ENABLE_CONTINUOUS_MONITORING=true` + sample rate > 0 | App Insights custom metrics / Foundry logging が sampled async で送られ、API 応答をブロックしない |
 | Cost metrics | `ENABLE_COST_METRICS=true` + App Insights | `done.metrics.estimated_cost_usd` は token usage からの概算。請求確定値ではない |
 
-owner-scoped API は本番相当環境で認証済み owner boundary を要求します。Bearer claims は署名検証済み upstream auth/proxy がある場合だけ `TRUST_AUTH_HEADER_CLAIMS` または trusted header で信頼してください。
+owner-scoped API は `REQUIRE_AUTHENTICATED_OWNER=true` のときだけ認証済み owner boundary を要求します。Bearer claims は署名検証済み upstream auth/proxy がある場合だけ `TRUST_AUTH_HEADER_CLAIMS` または trusted header で信頼してください。
 
 ## 5. 認証と権限
 

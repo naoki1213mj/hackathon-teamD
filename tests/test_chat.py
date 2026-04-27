@@ -50,9 +50,26 @@ def test_chat_blocks_obvious_prompt_injection():
     assert "INPUT_GUARD_BLOCKED" in response.text
 
 
-def test_chat_production_rejects_untrusted_bearer_claims(monkeypatch):
-    """本番 chat owner 境界では未検証 bearer claims を拒否する。"""
+def test_chat_production_allows_work_iq_off_without_auth_requirement(monkeypatch):
+    """Work IQ off の通常チャットは本番でも明示フラグなしなら匿名で開始できる。"""
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
+    monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
+    monkeypatch.delenv("REQUIRE_AUTHENTICATED_OWNER", raising=False)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "テスト入力"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_chat_rejects_untrusted_bearer_claims_when_auth_required(monkeypatch):
+    """owner 認証必須フラグが有効な場合は未検証 bearer claims を拒否する。"""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REQUIRE_AUTHENTICATED_OWNER", "true")
     monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
     monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
 

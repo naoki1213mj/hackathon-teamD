@@ -194,7 +194,7 @@ def _get_azd_env_values() -> dict[str, str]:
             text=True,
             timeout=5,
         )
-    except OSError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return {}
 
     if result.returncode != 0:
