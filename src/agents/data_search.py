@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import struct
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from agent_framework import tool
 from azure.core.exceptions import ClientAuthenticationError
@@ -13,7 +15,7 @@ from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 from pydantic import BaseModel
 
 from src.config import get_settings
-from src.tool_telemetry import trace_tool_invocation
+from src.tool_telemetry import build_tool_event_data, emit_tool_event, redact_sensitive_text, trace_tool_invocation
 
 try:
     import pyodbc
@@ -23,6 +25,141 @@ except ImportError:
     _HAS_PYODBC = False
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_evidence_quote(value: object, *, max_length: int = 220) -> str:
+    normalized = redact_sensitive_text(str(value or "").replace("\n", " ").strip())
+    return f"{normalized[: max_length - 1]}…" if len(normalized) > max_length else normalized
+
+
+def _emit_evidence_event(
+    tool_name: str,
+    *,
+    evidence: list[dict[str, object]],
+    charts: list[dict[str, object]] | None = None,
+) -> None:
+    """ツール結果から生成した安全な根拠メタデータを追加送信する。"""
+    emit_tool_event(
+        build_tool_event_data(
+            tool_name,
+            "completed",
+            agent_name="data-search-agent",
+            source="local",
+            provider="local",
+            evidence=evidence,
+            charts=charts,
+        )
+    )
+
+
+def _sales_evidence(results: list[dict[str, Any]], *, source: str, season: str | None, region: str | None) -> list[dict[str, object]]:
+    if not results:
+        return [
+            {
+                "id": f"{source}-sales-empty",
+                "title": "販売履歴検索",
+                "source": source,
+                "quote": "条件に一致する販売履歴は見つかりませんでした。",
+                "retrieved_at": _utc_now_iso(),
+                "metadata": {"rows": 0, "season": season or "", "region": region or ""},
+            }
+        ]
+    total_revenue = sum(int(row.get("revenue") or 0) for row in results)
+    total_bookings = sum(int(row.get("booking_count") or 0) for row in results)
+    top = max(results, key=lambda row: int(row.get("revenue") or 0))
+    return [
+        {
+            "id": f"{source}-sales-summary",
+            "title": "販売履歴サマリ",
+            "source": source,
+            "quote": _safe_evidence_quote(
+                f"{top.get('plan_name', '対象プラン')} が売上上位。合計売上 {total_revenue:,} 円、予約 {total_bookings} 件。"
+            ),
+            "relevance": 0.9,
+            "retrieved_at": _utc_now_iso(),
+            "metadata": {
+                "rows": len(results),
+                "season": season or "",
+                "region": region or "",
+                "top_destination": str(top.get("destination", "")),
+            },
+        }
+    ]
+
+
+def _sales_charts(results: list[dict[str, Any]], *, source: str) -> list[dict[str, object]]:
+    if not results:
+        return []
+    rows = sorted(results, key=lambda row: int(row.get("revenue") or 0), reverse=True)[:5]
+    return [
+        {
+            "chart_type": "bar",
+            "title": "販売履歴 売上上位",
+            "x_label": "プラン",
+            "y_label": "売上",
+            "series": ["revenue", "booking_count"],
+            "data": [
+                {
+                    "plan": str(row.get("plan_name", ""))[:40],
+                    "revenue": int(row.get("revenue") or 0),
+                    "booking_count": int(row.get("booking_count") or 0),
+                }
+                for row in rows
+            ],
+            "metadata": {"source": source},
+        }
+    ]
+
+
+def _review_evidence(results: list[dict[str, Any]], *, source: str, plan_name: str | None, min_rating: int | None) -> list[dict[str, object]]:
+    if not results:
+        return [
+            {
+                "id": f"{source}-reviews-empty",
+                "title": "顧客レビュー検索",
+                "source": source,
+                "quote": "条件に一致する顧客レビューは見つかりませんでした。",
+                "retrieved_at": _utc_now_iso(),
+                "metadata": {"rows": 0, "plan_filter": plan_name or "", "min_rating": min_rating or 0},
+            }
+        ]
+    top_reviews = sorted(results, key=lambda row: int(row.get("rating") or 0), reverse=True)[:3]
+    return [
+        {
+            "id": f"{source}-review-{index + 1}",
+            "title": str(row.get("plan_name", "顧客レビュー"))[:80],
+            "source": source,
+            "quote": _safe_evidence_quote(row.get("comment", "")),
+            "relevance": min(max(float(row.get("rating") or 0) / 5, 0), 1),
+            "retrieved_at": _utc_now_iso(),
+            "metadata": {"rating": int(row.get("rating") or 0), "plan_filter": plan_name or "", "min_rating": min_rating or 0},
+        }
+        for index, row in enumerate(top_reviews)
+    ]
+
+
+def _review_charts(results: list[dict[str, Any]], *, source: str) -> list[dict[str, object]]:
+    if not results:
+        return []
+    buckets: dict[int, int] = {}
+    for row in results:
+        rating = int(row.get("rating") or 0)
+        buckets[rating] = buckets.get(rating, 0) + 1
+    return [
+        {
+            "chart_type": "bar",
+            "title": "顧客レビュー 評価分布",
+            "x_label": "評価",
+            "y_label": "件数",
+            "series": ["count"],
+            "data": [{"rating": f"{rating}★", "count": count} for rating, count in sorted(buckets.items())],
+            "metadata": {"source": source},
+        }
+    ]
 
 
 # --- Fabric Data Agent 連携 ---
@@ -90,7 +227,7 @@ async def _query_data_agent(question: str) -> str | None:
             # クリーンアップ
             try:
                 client.beta.threads.delete(thread.id)
-            except ValueError, OSError:
+            except (ValueError, OSError):
                 pass
             return None
 
@@ -106,7 +243,7 @@ async def _query_data_agent(question: str) -> str | None:
         # クリーンアップ
         try:
             client.beta.threads.delete(thread.id)
-        except ValueError, OSError:
+        except (ValueError, OSError):
             pass
 
         answer = "\n".join(answer_parts).strip()
@@ -424,10 +561,37 @@ async def query_data_agent(question: str) -> str:
     async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
         result = await _query_data_agent(question)
         if result:
+            _emit_evidence_event(
+                "query_data_agent",
+                evidence=[
+                    {
+                        "id": "fabric-data-agent-answer",
+                        "title": "Fabric Data Agent 回答",
+                        "source": "fabric",
+                        "quote": _safe_evidence_quote(result),
+                        "relevance": 0.85,
+                        "retrieved_at": _utc_now_iso(),
+                        "metadata": {"runtime": "fabric_data_agent"},
+                    }
+                ],
+            )
             return json.dumps(
                 {"source": "Fabric Data Agent", "answer": result},
                 ensure_ascii=False,
             )
+        _emit_evidence_event(
+            "query_data_agent",
+            evidence=[
+                {
+                    "id": "fabric-data-agent-unavailable",
+                    "title": "Fabric Data Agent フォールバック",
+                    "source": "local",
+                    "quote": "Fabric Data Agent が利用できないため、ローカル検索ツールへのフォールバックを案内しました。",
+                    "retrieved_at": _utc_now_iso(),
+                    "metadata": {"runtime": "fallback"},
+                }
+            ],
+        )
         return json.dumps(
             {
                 "source": "fallback",
@@ -455,6 +619,11 @@ async def search_sales_history(
         results = _get_sales_data_from_fabric(season=season, region=region)
         if results:
             logger.info("Fabric SQL から販売データ %d 件取得", len(results))
+            _emit_evidence_event(
+                "search_sales_history",
+                evidence=_sales_evidence(results, source="fabric", season=season, region=region),
+                charts=_sales_charts(results, source="fabric"),
+            )
             return json.dumps(results, ensure_ascii=False, default=str)
 
         logger.info("CSV フォールバックで販売データを取得")
@@ -463,6 +632,11 @@ async def search_sales_history(
             results = [r for r in results if r["season"] == season]
         if region:
             results = [r for r in results if region in r["destination"]]
+        _emit_evidence_event(
+            "search_sales_history",
+            evidence=_sales_evidence(results, source="local", season=season, region=region),
+            charts=_sales_charts(results, source="local"),
+        )
         return json.dumps(results, ensure_ascii=False)
 
 
@@ -482,6 +656,11 @@ async def search_customer_reviews(
         results = _get_reviews_from_fabric(plan_name=plan_name, min_rating=min_rating)
         if results:
             logger.info("Fabric SQL からレビュー %d 件取得", len(results))
+            _emit_evidence_event(
+                "search_customer_reviews",
+                evidence=_review_evidence(results, source="fabric", plan_name=plan_name, min_rating=min_rating),
+                charts=_review_charts(results, source="fabric"),
+            )
             return json.dumps(results, ensure_ascii=False, default=str)
 
         logger.info("CSV フォールバックでレビューデータを取得")
@@ -490,6 +669,11 @@ async def search_customer_reviews(
             results = [r for r in results if plan_name in r["plan_name"]]
         if min_rating is not None:
             results = [r for r in results if r["rating"] >= min_rating]
+        _emit_evidence_event(
+            "search_customer_reviews",
+            evidence=_review_evidence(results, source="local", plan_name=plan_name, min_rating=min_rating),
+            charts=_review_charts(results, source="local"),
+        )
         return json.dumps(results, ensure_ascii=False)
 
 

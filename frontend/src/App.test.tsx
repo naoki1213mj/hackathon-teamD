@@ -722,6 +722,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refine now' }))
 
     expect(sendMessage).toHaveBeenCalledWith('eval feedback', {
+      conversationId: 'conv-refine-context',
       refineContext: {
         source: 'evaluation',
         artifactVersion: 2,

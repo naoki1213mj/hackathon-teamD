@@ -3,6 +3,7 @@
  */
 
 import type { ImageContent, TextContent } from '../hooks/useSSE'
+import { sanitizeImageUrl, sanitizeLinkUrl } from './safe-url'
 
 function findLastContent(
   contents: TextContent[],
@@ -27,14 +28,13 @@ function sanitizeHtmlForExport(html: string): string {
   documentFragment.querySelectorAll('*').forEach(node => {
     Array.from(node.attributes).forEach(attribute => {
       const attributeName = attribute.name.toLowerCase()
-      const attributeValue = attribute.value.trim().toLowerCase()
       if (attributeName.startsWith('on')) {
         node.removeAttribute(attribute.name)
       }
-      if (
-        (attributeName === 'href' || attributeName === 'src') &&
-        (attributeValue.startsWith('javascript:') || attributeValue.startsWith('data:text/html'))
-      ) {
+      if (attributeName === 'href' && !sanitizeLinkUrl(attribute.value)) {
+        node.removeAttribute(attribute.name)
+      }
+      if (attributeName === 'src' && !sanitizeImageUrl(attribute.value)) {
         node.removeAttribute(attribute.name)
       }
     })
@@ -55,9 +55,12 @@ function downloadBlob(content: string, filename: string, mimeType: string) {
   URL.revokeObjectURL(url)
 }
 
-function downloadDataUrl(dataUrl: string, filename: string) {
+function downloadImageUrl(imageUrl: string, filename: string) {
+  const safeUrl = sanitizeImageUrl(imageUrl)
+  if (!safeUrl) return
+
   const a = document.createElement('a')
-  a.href = dataUrl
+  a.href = safeUrl
   a.download = filename
   document.body.appendChild(a)
   a.click()
@@ -81,7 +84,7 @@ export function exportBrochureHtml(contents: TextContent[]) {
 
 /** 画像を PNG としてダウンロード */
 export function exportImage(image: ImageContent, index: number) {
-  downloadDataUrl(image.url, `image-${index + 1}.png`)
+  downloadImageUrl(image.url, `image-${index + 1}.png`)
 }
 
 /** 全成果物を JSON で一括エクスポート */

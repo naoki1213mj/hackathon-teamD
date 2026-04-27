@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Literal, TypedDict
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 JsonScalar = str | int | float | bool | None
 JsonObject = dict[str, JsonScalar]
+_HTML_TAG_PATTERN = re.compile(r"<[^>]*>")
+_SCRIPT_STYLE_PATTERN = re.compile(r"<(script|style)[\s\S]*?</\1>", re.IGNORECASE)
+_MAX_SOURCE_PREVIEW_CHARS = 280
 
 
 class EvidenceItemPayload(TypedDict, total=False):
@@ -71,6 +75,8 @@ class WorkIQSourceMetadataPayload(TypedDict, total=False):
     count: int
     connector: str
     status: str
+    summary: str
+    preview: str
     confidence: float
     latest_timestamp: str
     evidence_ids: list[str]
@@ -103,6 +109,10 @@ class PipelineMetricsPayload(TypedDict, total=False):
     cache_hits: int
     cache_misses: int
     agent_latencies: dict[str, float]
+    agent_tokens: dict[str, int]
+    agent_prompt_tokens: dict[str, int]
+    agent_completion_tokens: dict[str, int]
+    agent_estimated_costs_usd: dict[str, float]
     tool_latencies: dict[str, float]
     evidence: list[EvidenceItemPayload]
     charts: list[ChartSpecPayload]
@@ -119,6 +129,38 @@ def _trimmed(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
 
+_SENSITIVE_QUERY_KEYS = {
+    "api_key",
+    "apikey",
+    "code",
+    "ocp-apim-subscription-key",
+    "secret",
+    "sig",
+    "subscription-key",
+    "token",
+    "x-functions-key",
+}
+_SENSITIVE_METADATA_KEY_RE = re.compile(
+    r"(\bauth\b|authorization|bearer|token|secret|password|api[_-]?key|prompt|transcript|raw(?:[_-]?content)?|work[_-]?iq[_-]?raw|html(?:[_-]?content)?)",
+    re.IGNORECASE,
+)
+_SECRET_VALUE_RE = re.compile(
+    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]+|\bauthorization\s*:\s*bearer\s+[a-z0-9._~+/=-]+|\bauthorization\s*:\s*[^\s,;]+|\bapi[_-]?key\s*[:=]\s*[^\s,;]+|\b(?:access[_-]?)?token\s*[:=]\s*[^\s,;]+)"
+)
+_HTML_CONTENT_RE = re.compile(r"<\s*(?:!doctype|html|body|script|style|iframe|article|section|div|p|h[1-6]|img)\b", re.IGNORECASE)
+_MAX_DISPLAY_TEXT_LENGTH = 240
+
+
+def _safe_display_text(value: object) -> str | None:
+    raw_value = _trimmed(value)
+    if not raw_value:
+        return None
+    if _HTML_CONTENT_RE.search(raw_value):
+        return "[redacted html]"
+    redacted = _SECRET_VALUE_RE.sub("[redacted]", raw_value)
+    return f"{redacted[: _MAX_DISPLAY_TEXT_LENGTH - 1]}…" if len(redacted) > _MAX_DISPLAY_TEXT_LENGTH else redacted
+
+
 def _safe_https_url(value: object) -> str | None:
     raw_value = _trimmed(value)
     if not raw_value:
@@ -126,6 +168,9 @@ def _safe_https_url(value: object) -> str | None:
     parsed = urlparse(raw_value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
+    for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+        if key.strip().lower() in _SENSITIVE_QUERY_KEYS:
+            return None
     return raw_value
 
 
@@ -136,9 +181,25 @@ def _metadata_dict(value: object) -> JsonObject | None:
     for key, item in value.items():
         if not isinstance(key, str) or not key:
             continue
-        if isinstance(item, str | int | float | bool) or item is None:
+        if _SENSITIVE_METADATA_KEY_RE.search(key):
+            continue
+        if isinstance(item, str):
+            safe_item = _safe_display_text(item)
+            if safe_item is not None:
+                metadata[key] = safe_item
+        elif isinstance(item, int | float | bool) or item is None:
             metadata[key] = item
     return metadata or None
+
+
+def _sanitized_preview_text(value: object) -> str | None:
+    """職場コンテキストの短い表示用 text を安全な形へ整える。"""
+    normalized = _SCRIPT_STYLE_PATTERN.sub("", _trimmed(value))
+    normalized = re.sub(r"\s+", " ", _HTML_TAG_PATTERN.sub("", normalized)).strip()
+    if not normalized:
+        return None
+    redacted = _SECRET_VALUE_RE.sub("[redacted]", normalized)
+    return redacted[:_MAX_SOURCE_PREVIEW_CHARS]
 
 
 class EvidenceItem(_SchemaModel):
@@ -156,6 +217,11 @@ class EvidenceItem(_SchemaModel):
     def _normalize_url(cls, value: object) -> str | None:
         return _safe_https_url(value)
 
+    @field_validator("title", "quote", mode="before")
+    @classmethod
+    def _normalize_display_text(cls, value: object) -> str | None:
+        return _safe_display_text(value)
+
     @field_validator("metadata", mode="before")
     @classmethod
     def _normalize_metadata(cls, value: object) -> JsonObject | None:
@@ -170,6 +236,30 @@ class ChartSpec(_SchemaModel):
     series: list[str] = Field(default_factory=list)
     data: list[JsonObject] = Field(default_factory=list)
     metadata: JsonObject | None = None
+
+    @field_validator("title", "x_label", "y_label", mode="before")
+    @classmethod
+    def _normalize_display_text(cls, value: object) -> str | None:
+        return _safe_display_text(value)
+
+    @field_validator("series", mode="before")
+    @classmethod
+    def _normalize_series(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [safe_item for item in value if (safe_item := _safe_display_text(item))]
+
+    @field_validator("data", mode="before")
+    @classmethod
+    def _normalize_data(cls, value: object) -> list[JsonObject]:
+        if not isinstance(value, list):
+            return []
+        rows: list[JsonObject] = []
+        for row in value:
+            safe_row = _metadata_dict(row)
+            if safe_row is not None:
+                rows.append(safe_row)
+        return rows
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -215,9 +305,16 @@ class WorkIQSourceMetadata(_SchemaModel):
     count: int | None = Field(default=None, ge=0)
     connector: str | None = None
     status: str | None = None
+    summary: str | None = None
+    preview: str | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     latest_timestamp: str | None = None
     evidence_ids: list[str] | None = None
+
+    @field_validator("summary", "preview", mode="before")
+    @classmethod
+    def _normalize_preview_text(cls, value: object) -> str | None:
+        return _sanitized_preview_text(value)
 
 
 class SourceIngestionState(_SchemaModel):
@@ -258,6 +355,10 @@ class PipelineMetrics(_SchemaModel):
     cache_hits: int | None = Field(default=None, ge=0)
     cache_misses: int | None = Field(default=None, ge=0)
     agent_latencies: dict[str, float] | None = None
+    agent_tokens: dict[str, int] | None = None
+    agent_prompt_tokens: dict[str, int] | None = None
+    agent_completion_tokens: dict[str, int] | None = None
+    agent_estimated_costs_usd: dict[str, float] | None = None
     tool_latencies: dict[str, float] | None = None
     evidence: list[EvidenceItem] | None = None
     charts: list[ChartSpec] | None = None
@@ -265,7 +366,7 @@ class PipelineMetrics(_SchemaModel):
     debug_events: list[DebugEvent] | None = None
     source_ingestion: list[SourceIngestionState] | None = None
 
-    @field_validator("agent_latencies", "tool_latencies", mode="before")
+    @field_validator("agent_latencies", "tool_latencies", "agent_estimated_costs_usd", mode="before")
     @classmethod
     def _normalize_latency_map(cls, value: object) -> dict[str, float] | None:
         if not isinstance(value, Mapping):
@@ -276,6 +377,23 @@ class PipelineMetrics(_SchemaModel):
                 continue
             try:
                 parsed = float(item)
+            except (TypeError, ValueError):
+                continue
+            if parsed >= 0:
+                normalized[key] = parsed
+        return normalized or None
+
+    @field_validator("agent_tokens", "agent_prompt_tokens", "agent_completion_tokens", mode="before")
+    @classmethod
+    def _normalize_token_map(cls, value: object) -> dict[str, int] | None:
+        if not isinstance(value, Mapping):
+            return None
+        normalized: dict[str, int] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                continue
+            try:
+                parsed = int(item)
             except (TypeError, ValueError):
                 continue
             if parsed >= 0:

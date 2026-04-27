@@ -67,6 +67,12 @@ export interface ImageContent {
   url: string
   alt: string
   agent: string
+  evidence?: EvidenceItem[]
+  charts?: ChartSpec[]
+  trace_events?: TraceEvent[]
+  debug_events?: DebugEvent[]
+  source_metadata?: WorkIqSourceMetadata[]
+  source_ingestion?: SourceIngestionState[]
 }
 
 export interface ApprovalRequest {
@@ -132,6 +138,8 @@ export interface ConversationDocument {
 export interface WorkIqState extends ConversationSettings {
   status: WorkIqUiStatus
   rawStatus?: string
+  sourceMetadata?: WorkIqSourceMetadata[]
+  briefSummary?: string
 }
 
 export interface PipelineState {
@@ -158,6 +166,7 @@ export interface PipelineState {
 }
 
 export interface SendMessageOptions extends ChatRequestOptions {
+  conversationId?: string
   resumeState?: {
     settings: ModelSettings
     conversationSettings: ConversationSettings
@@ -253,7 +262,15 @@ function cloneTextContents(textContents: TextContent[]): TextContent[] {
 }
 
 function cloneImages(images: ImageContent[]): ImageContent[] {
-  return images.map(item => ({ ...item }))
+  return images.map(item => ({
+    ...item,
+    evidence: item.evidence ? normalizeEvidenceItems(item.evidence) : undefined,
+    charts: item.charts ? normalizeChartSpecs(item.charts) : undefined,
+    trace_events: item.trace_events ? normalizeTraceEvents(item.trace_events) : undefined,
+    debug_events: item.debug_events ? normalizeDebugEvents(item.debug_events) : undefined,
+    source_metadata: item.source_metadata ? normalizeWorkIqSourceMetadata(item.source_metadata) : undefined,
+    source_ingestion: item.source_ingestion ? normalizeSourceIngestionStates(item.source_ingestion) : undefined,
+  }))
 }
 
 function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
@@ -264,6 +281,8 @@ function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
     charts: item.charts ? normalizeChartSpecs(item.charts) : undefined,
     trace_events: item.trace_events ? normalizeTraceEvents(item.trace_events) : undefined,
     debug_events: item.debug_events ? normalizeDebugEvents(item.debug_events) : undefined,
+    source_metadata: item.source_metadata ? normalizeWorkIqSourceMetadata(item.source_metadata) : undefined,
+    source_ingestion: item.source_ingestion ? normalizeSourceIngestionStates(item.source_ingestion) : undefined,
   }))
 }
 
@@ -276,6 +295,23 @@ function normalizeTextContentData(data: Record<string, unknown>): TextContent {
     content: String(data.content || ''),
     agent: String(data.agent || ''),
     content_type: data.content_type ? String(data.content_type) : undefined,
+    evidence: normalizeEvidenceItems(data.evidence),
+    charts: normalizeChartSpecs(data.charts),
+    trace_events: normalizeTraceEvents(data.trace_events),
+    debug_events: normalizeDebugEvents(data.debug_events),
+    source_metadata: normalizeWorkIqSourceMetadata(data.source_metadata),
+    source_ingestion: normalizeSourceIngestionStates(data.source_ingestion),
+  }
+}
+
+function normalizeImageContentData(data: Record<string, unknown>): ImageContent | null {
+  const url = String(data.url || '').trim()
+  if (!url) return null
+
+  return {
+    url,
+    alt: String(data.alt || ''),
+    agent: String(data.agent || ''),
     evidence: normalizeEvidenceItems(data.evidence),
     charts: normalizeChartSpecs(data.charts),
     trace_events: normalizeTraceEvents(data.trace_events),
@@ -352,11 +388,17 @@ function createWorkIqState(
   settings: ConversationSettings,
   status: WorkIqUiStatus = settings.workIqEnabled ? 'ready' : 'off',
   rawStatus?: string,
+  metadata?: {
+    sourceMetadata?: WorkIqSourceMetadata[]
+    briefSummary?: string
+  },
 ): WorkIqState {
   return {
     ...cloneConversationSettings(settings),
     status,
     rawStatus,
+    sourceMetadata: metadata?.sourceMetadata ? normalizeWorkIqSourceMetadata(metadata.sourceMetadata) : undefined,
+    briefSummary: normalizeWorkIqPreview(metadata?.briefSummary),
   }
 }
 
@@ -372,6 +414,16 @@ function toBoolean(value: unknown): boolean | null {
     if (normalized === 'false') return false
   }
   return null
+}
+
+function normalizeWorkIqPreview(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined
+  const normalized = String(value)
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return normalized ? normalized.slice(0, 280) : undefined
 }
 
 function normalizeWorkIqSource(value: unknown): WorkIqSourceScope | null {
@@ -450,9 +502,7 @@ function getWorkIqStateFromMetadata(metadata: Record<string, unknown>): WorkIqSt
   const conversationSettings = isRecord(metadata.conversation_settings) ? metadata.conversation_settings : null
   const nestedWorkIq = conversationSettings && isRecord(conversationSettings.work_iq) ? conversationSettings.work_iq : null
   const workIqSession = isRecord(metadata.work_iq_session) ? metadata.work_iq_session : null
-  const briefSourceMetadata = workIqSession && isRecord(workIqSession.brief_source_metadata)
-    ? workIqSession.brief_source_metadata
-    : null
+  const briefSourceMetadata = normalizeWorkIqSourceMetadata(workIqSession?.brief_source_metadata)
   const enabled = (
     toBoolean(workIqSession?.enabled)
     ?? toBoolean(nestedWorkIq?.enabled)
@@ -466,8 +516,7 @@ function getWorkIqStateFromMetadata(metadata: Record<string, unknown>): WorkIqSt
     ?? conversationSettings?.source_scope
     ?? conversationSettings?.work_iq_source_scope
     ?? metadata.work_iq_source_scope
-    ?? briefSourceMetadata?.source_scope
-    ?? briefSourceMetadata?.sources,
+    ?? briefSourceMetadata?.map(item => item.source),
   )
   const rawStatus = String(
     workIqSession?.status
@@ -486,6 +535,10 @@ function getWorkIqStateFromMetadata(metadata: Record<string, unknown>): WorkIqSt
     },
     normalizeWorkIqStatus(rawStatus, enabled),
     rawStatus || undefined,
+    {
+      sourceMetadata: briefSourceMetadata,
+      briefSummary: normalizeWorkIqPreview(workIqSession?.brief_summary),
+    },
   )
 }
 
@@ -506,7 +559,10 @@ function applyWorkIqToolEvent(current: WorkIqState, event: ToolEvent): WorkIqSta
     ? fallbackStatus
     : normalizeWorkIqStatus(rawStatus, true, fallbackStatus)
 
-  return createWorkIqState(nextSettings, nextStatus, rawStatus || current.rawStatus)
+  return createWorkIqState(nextSettings, nextStatus, rawStatus || current.rawStatus, {
+    sourceMetadata: event.source_metadata ?? current.sourceMetadata,
+    briefSummary: current.briefSummary,
+  })
 }
 
 function resolveToolEventVersion(state: PipelineState): number {
@@ -736,11 +792,11 @@ export function buildRestoredPipelineState(
         }
         break
       case 'image':
-        images.push({
-          url: String(data.url || ''),
-          alt: String(data.alt || ''),
-          agent: String(data.agent || ''),
-        })
+        {
+          const image = normalizeImageContentData(data)
+          if (!image) break
+          images.push(image)
+        }
         if (isBackgroundUpdate(data) && versions.length > 0) {
           versions[versions.length - 1] = createArtifactSnapshot({
             textContents,
@@ -1160,8 +1216,8 @@ export function useSSE() {
     },
     image: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      const image = data as ImageContent
-      if (!image.url?.trim()) return
+      const image = normalizeImageContentData(data as Record<string, unknown>)
+      if (!image) return
       setState(prev => {
         const images = [...prev.images, image]
         return {
@@ -1273,6 +1329,7 @@ export function useSSE() {
     activeRestoreRequestIdRef.current += 1
     const previousState = stateRef.current
     const existingConversationId = conversationIdRef.current
+    const requestedConversationId = existingConversationId ?? options?.conversationId ?? null
     const currentSettings = options?.resumeState?.settings ?? stateRef.current.settings
     const currentDraftConversationSettings = options?.resumeState?.conversationSettings ?? stateRef.current.draftConversationSettings
     const nextConversationSettings = existingConversationId
@@ -1280,8 +1337,9 @@ export function useSSE() {
       : currentDraftConversationSettings
     const requestOptions: ChatRequestOptions | undefined = options
       ? {
-          refineContext: options.refineContext,
-          authInteractionMode: options.authInteractionMode,
+          ...(options.refineContext ? { refineContext: options.refineContext } : {}),
+          ...(options.authInteractionMode ? { authInteractionMode: options.authInteractionMode } : {}),
+          ...(options.conversationId && !existingConversationId ? { conversationIsNew: true } : {}),
         }
       : undefined
     const shouldPersistPendingWorkIqRequest = !existingConversationId && nextConversationSettings.workIqEnabled
@@ -1331,7 +1389,7 @@ export function useSSE() {
       const requestStartResult = await connectSSE(
         message,
         handlers,
-        existingConversationId || undefined,
+        requestedConversationId || undefined,
         controller.signal,
         currentSettings,
         nextConversationSettings,

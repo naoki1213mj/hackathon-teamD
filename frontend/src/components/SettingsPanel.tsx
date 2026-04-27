@@ -4,6 +4,8 @@
 
 import { Building2, ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
+import type { WorkIqSourceMetadata } from '../lib/event-schemas'
+import { WorkIqSourceStatus } from './WorkIqSourceStatus'
 
 export type ImageModel = 'gpt-image-1.5' | 'gpt-image-2' | 'MAI-Image-2'
 
@@ -121,6 +123,8 @@ interface SettingsPanelProps {
   settings: ModelSettings
   conversationSettings: ConversationSettings
   workIqStatus: WorkIqUiStatus
+  workIqSourceMetadata?: WorkIqSourceMetadata[]
+  workIqBriefSummary?: string
   modelRouterAvailable?: boolean
   gpt55Available?: boolean
   workIqAvailable?: boolean
@@ -195,6 +199,8 @@ export function SettingsPanel({
   settings,
   conversationSettings,
   workIqStatus,
+  workIqSourceMetadata,
+  workIqBriefSummary,
   modelRouterAvailable,
   gpt55Available,
   workIqAvailable,
@@ -592,23 +598,14 @@ export function SettingsPanel({
                 )}
               </div>
 
-              {isWorkIqEnabled && (
-                <div className="space-y-2">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    {t('settings.workiq.sources')}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {conversationSettings.workIqSourceScope.map((source) => (
-                      <span
-                        key={source}
-                        className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
-                      >
-                        {t(`settings.workiq.source.${source}`)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <WorkIqSourceStatus
+                enabled={isWorkIqEnabled}
+                selectedSources={conversationSettings.workIqSourceScope}
+                status={effectiveWorkIqStatus}
+                sourceMetadata={workIqSourceMetadata}
+                briefSummary={workIqBriefSummary}
+                t={t}
+              />
             </div>
           )}
         </div>

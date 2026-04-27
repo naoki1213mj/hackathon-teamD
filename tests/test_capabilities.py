@@ -37,11 +37,17 @@ def test_capabilities_default_to_unavailable(monkeypatch):
         "GPT_55_DEPLOYMENT_NAME",
         "ENABLE_FOUNDRY_TRACING",
         "ENABLE_CONTINUOUS_MONITORING",
+        "CONTINUOUS_MONITORING_SAMPLE_RATE",
+        "ENABLE_EVALUATION_LOGGING",
         "ENABLE_COST_METRICS",
         "MCP_REGISTRY_ENDPOINT",
+        "ENABLE_SOURCE_INGESTION",
         "SOURCE_INGESTION_ENDPOINT",
         "ENABLE_VOICE_TALK_TO_START",
+        "ENABLE_MAI_TRANSCRIBE_1",
+        "MAI_TRANSCRIBE_1_ENDPOINT",
         "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
+        "MAI_TRANSCRIBE_1_API_PATH",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -50,6 +56,8 @@ def test_capabilities_default_to_unavailable(monkeypatch):
     assert snapshot["features"]["model_router"]["available"] is False
     assert snapshot["features"]["gpt_55"]["available"] is False
     assert snapshot["features"]["foundry_tracing"]["available"] is False
+    assert snapshot["features"]["evaluation_logging"]["available"] is False
+    assert snapshot["features"]["source_ingestion"]["available"] is False
     assert snapshot["features"]["work_iq"]["available"] is False
 
 
@@ -64,9 +72,15 @@ def test_capabilities_reflect_safe_configuration(monkeypatch):
     monkeypatch.setenv("ENABLE_GPT_55", "true")
     monkeypatch.setenv("ENABLE_FOUNDRY_TRACING", "true")
     monkeypatch.setenv("ENABLE_CONTINUOUS_MONITORING", "true")
+    monkeypatch.setenv("CONTINUOUS_MONITORING_SAMPLE_RATE", "1")
+    monkeypatch.setenv("ENABLE_EVALUATION_LOGGING", "true")
     monkeypatch.setenv("ENABLE_VOICE_TALK_TO_START", "true")
+    monkeypatch.setenv("ENABLE_MAI_TRANSCRIBE_1", "true")
+    monkeypatch.setenv("MAI_TRANSCRIBE_1_ENDPOINT", "https://transcribe.example")
     monkeypatch.setenv("MAI_TRANSCRIBE_1_DEPLOYMENT_NAME", "mai-transcribe-1")
+    monkeypatch.setenv("MAI_TRANSCRIBE_1_API_PATH", "/mai/v1/audio/transcriptions")
     monkeypatch.setenv("MCP_REGISTRY_ENDPOINT", "https://registry.example/mcp")
+    monkeypatch.setenv("ENABLE_SOURCE_INGESTION", "true")
     monkeypatch.setenv("SOURCE_INGESTION_ENDPOINT", "https://source.example/ingest")
 
     snapshot = build_capability_snapshot()
@@ -74,12 +88,50 @@ def test_capabilities_reflect_safe_configuration(monkeypatch):
     assert snapshot["features"]["model_router"]["available"] is True
     assert snapshot["features"]["gpt_55"]["available"] is True
     assert snapshot["features"]["foundry_tracing"]["available"] is True
+    assert snapshot["features"]["evaluation_logging"]["available"] is True
     assert snapshot["features"]["continuous_monitoring"]["available"] is True
     assert snapshot["features"]["voice_live"]["available"] is True
     assert snapshot["features"]["voice_talk_to_start"]["available"] is True
     assert snapshot["features"]["mai_transcribe_1"]["available"] is True
     assert snapshot["features"]["mcp_registry"]["available"] is True
     assert snapshot["features"]["source_ingestion"]["available"] is True
+
+
+def test_mai_transcribe_requires_feature_endpoint_deployment_and_api_path(monkeypatch):
+    """MAI Transcribe は flag / endpoint / deployment / API path が揃うまで available にしない。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.setenv("ENABLE_MAI_TRANSCRIBE_1", "true")
+    monkeypatch.setenv("MAI_TRANSCRIBE_1_DEPLOYMENT_NAME", "mai-transcribe-1")
+
+    snapshot = build_capability_snapshot()
+
+    assert snapshot["features"]["mai_transcribe_1"] == {"available": False, "configured": True}
+
+
+def test_continuous_monitoring_requires_evaluation_logging_opt_in(monkeypatch):
+    """継続監視は評価ログ opt-in がない限り available にしない。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+    monkeypatch.setenv("ENABLE_CONTINUOUS_MONITORING", "true")
+    monkeypatch.delenv("ENABLE_EVALUATION_LOGGING", raising=False)
+
+    snapshot = build_capability_snapshot()
+
+    assert snapshot["features"]["continuous_monitoring"] == {"available": False, "configured": True}
+    assert snapshot["features"]["evaluation_logging"] == {"available": False, "configured": False}
+
+
+def test_continuous_monitoring_sample_rate_zero_is_unavailable(monkeypatch):
+    """sampling off の場合は configured でも available にはしない。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+    monkeypatch.setenv("ENABLE_EVALUATION_LOGGING", "true")
+    monkeypatch.setenv("ENABLE_CONTINUOUS_MONITORING", "true")
+    monkeypatch.setenv("CONTINUOUS_MONITORING_SAMPLE_RATE", "0")
+
+    snapshot = build_capability_snapshot()
+
+    assert snapshot["features"]["continuous_monitoring"] == {"available": False, "configured": True}
 
 
 def test_capabilities_keep_optional_models_unavailable_without_project_endpoint(monkeypatch):

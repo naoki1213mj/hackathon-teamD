@@ -44,6 +44,7 @@ export interface RefineContext {
 export interface ChatRequestOptions {
   refineContext?: RefineContext
   authInteractionMode?: 'default' | 'silent'
+  conversationIsNew?: boolean
 }
 
 export type ConnectSSEStartResult = 'started' | 'redirecting' | 'blocked'
@@ -188,7 +189,8 @@ export async function connectSSE(
     }
     body.workflow_settings = workflowSettings
   }
-  if (conversationSettings && !conversationId) {
+  const hasExistingConversation = Boolean(conversationId) && options?.conversationIsNew !== true
+  if (conversationSettings && !hasExistingConversation) {
     body.conversation_settings = {
       work_iq_enabled: conversationSettings.workIqEnabled,
       source_scope: conversationSettings.workIqSourceScope,

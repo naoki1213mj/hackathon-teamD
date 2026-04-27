@@ -1,14 +1,18 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, ImageContent, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
+import type { ChartSpec, DebugEvent, EvidenceItem, TraceEvent } from '../lib/event-schemas'
 import { collapseToolEvents, isFoundryWorkIqToolEvent, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
+import { DebugConsole } from './DebugConsole'
+import { EvidenceChartPanel } from './EvidenceChartPanel'
 import { ErrorRetry } from './ErrorRetry'
 import { MarkdownView } from './MarkdownView'
 import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
 import { ToolEventBadges } from './ToolEventBadges'
+import { TraceViewer } from './TraceViewer'
 
 const STEP_ICONS: Record<string, React.ReactNode> = {
   'data-search-agent': <BarChart3 className="h-4 w-4" />,
@@ -85,6 +89,66 @@ function isStepToolEvent(event: ToolEvent, agentKey: string, roundNumber: number
 
 function isMcpToolEvent(event: ToolEvent): boolean {
   return resolveToolProvider(event) === 'mcp'
+}
+
+interface GroundedPayload {
+  evidence: EvidenceItem[]
+  charts: ChartSpec[]
+  traceEvents: TraceEvent[]
+  debugEvents: DebugEvent[]
+}
+
+function uniqueByKey<T>(items: T[], getKey: (item: T, index: number) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item, index) => {
+    const key = getKey(item, index)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function collectGroundedPayload(params: {
+  textContents?: TextContent[]
+  images?: ImageContent[]
+  toolEvents?: ToolEvent[]
+  metrics?: PipelineMetrics | null
+}): GroundedPayload {
+  const textContents = params.textContents ?? []
+  const images = params.images ?? []
+  const toolEvents = params.toolEvents ?? []
+  const metrics = params.metrics
+  const evidence = [
+    ...textContents.flatMap(item => item.evidence ?? []),
+    ...images.flatMap(item => item.evidence ?? []),
+    ...toolEvents.flatMap(item => item.evidence ?? []),
+    ...(metrics?.evidence ?? []),
+  ]
+  const charts = [
+    ...textContents.flatMap(item => item.charts ?? []),
+    ...images.flatMap(item => item.charts ?? []),
+    ...toolEvents.flatMap(item => item.charts ?? []),
+    ...(metrics?.charts ?? []),
+  ]
+  const traceEvents = [
+    ...textContents.flatMap(item => item.trace_events ?? []),
+    ...images.flatMap(item => item.trace_events ?? []),
+    ...toolEvents.flatMap(item => item.trace_events ?? []),
+    ...(metrics?.trace_events ?? []),
+  ]
+  const debugEvents = [
+    ...textContents.flatMap(item => item.debug_events ?? []),
+    ...images.flatMap(item => item.debug_events ?? []),
+    ...toolEvents.flatMap(item => item.debug_events ?? []),
+    ...(metrics?.debug_events ?? []),
+  ]
+
+  return {
+    evidence: uniqueByKey(evidence, (item, index) => item.id ?? `${item.source}:${item.title ?? ''}:${item.url ?? ''}:${index}`),
+    charts: uniqueByKey(charts, (item, index) => `${item.chart_type}:${item.title ?? ''}:${index}`),
+    traceEvents: uniqueByKey(traceEvents, (item, index) => item.event_id ?? `${item.name}:${item.timestamp ?? ''}:${index}`),
+    debugEvents: uniqueByKey(debugEvents, (item, index) => item.event_id ?? `${item.level}:${item.message}:${index}`),
+  }
 }
 
 interface Props {
@@ -213,6 +277,14 @@ export function WorkflowAccordion({
     event => isStepToolEvent(event, agentKey, roundNumber),
   ))
 
+  const diagnostics = useMemo(() => collectGroundedPayload({
+    textContents,
+    images,
+    toolEvents,
+    metrics,
+  }), [images, metrics, textContents, toolEvents])
+  const metricsPayload = useMemo(() => collectGroundedPayload({ metrics }), [metrics])
+
   /** 1 つのステップ（アコーディオン項目）を描画する */
   const renderStep = (
     step: { key: string; labelKey: string; step: number },
@@ -227,6 +299,12 @@ export function WorkflowAccordion({
     const sectionCollapsed = isSectionCollapsed(sectionKey, fallbackCollapsed)
     const isActive = status === 'active'
     const stepTools = getToolEvents(step.key, roundNumber)
+    const stepImages = images.filter(image => resolveToolStepKey(image.agent) === step.key)
+    const stepPayload = collectGroundedPayload({
+      textContents: roundContents.filter(item => item.agent === step.key),
+      images: stepImages,
+      toolEvents: stepTools,
+    })
     const hasFoundryWorkIqTool = stepTools.some(isFoundryWorkIqToolEvent)
     const hasMcpTool = stepTools.some(isMcpToolEvent)
     const collapsedSummary = getCollapsedSummary(step.key, content, t)
@@ -267,6 +345,16 @@ export function WorkflowAccordion({
                 {t('workflow.tool_count').replace('{n}', String(stepTools.length))}
               </span>
             )}
+            {stepPayload.evidence.length > 0 && (
+              <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                {t('trace.evidence_count').replace('{n}', String(stepPayload.evidence.length))}
+              </span>
+            )}
+            {stepPayload.charts.length > 0 && (
+              <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                {t('trace.chart_count').replace('{n}', String(stepPayload.charts.length))}
+              </span>
+            )}
             {hasFoundryWorkIqTool && (
               <span
                 data-step-source="workiq-foundry"
@@ -303,14 +391,15 @@ export function WorkflowAccordion({
         {!sectionCollapsed && (
           <div className="px-4 pb-4">
             {stepTools.length > 0 && <ToolEventBadges events={stepTools} t={t} />}
+            <EvidenceChartPanel evidence={stepPayload.evidence} charts={stepPayload.charts} t={t} />
             {stepTools.length === 0 && content && (
               <p className="py-2 text-xs text-[var(--text-muted)]">{t('workflow.tool_none')}</p>
             )}
               {content ? (
                 step.key === 'data-search-agent' ? (
-                  <AnalysisView contents={roundContents} images={images} t={t} />
+                  <AnalysisView contents={roundContents} images={images} toolEvents={stepTools} t={t} />
                 ) : step.key === 'regulation-check-agent' ? (
-                  <RegulationResults contents={roundContents} t={t} />
+                  <RegulationResults contents={roundContents} toolEvents={stepTools} t={t} />
                 ) : step.key === 'brochure-gen-agent' ? (
                 <div className="py-3 space-y-2">
                   <p className="text-sm text-[var(--text-secondary)]">{t('workflow.brochure.ready')}</p>
@@ -435,6 +524,15 @@ export function WorkflowAccordion({
 
       {/* エラー表示 */}
       {error && <ErrorRetry error={error} onRetry={onRetry} retryLabel={t('error.retry')} t={t} />}
+
+      <EvidenceChartPanel evidence={metricsPayload.evidence} charts={metricsPayload.charts} t={t} />
+
+      {(diagnostics.traceEvents.length > 0 || diagnostics.debugEvents.length > 0) && (
+        <div className="grid gap-2">
+          <TraceViewer events={diagnostics.traceEvents} t={t} />
+          <DebugConsole events={diagnostics.debugEvents} t={t} />
+        </div>
+      )}
 
       {/* メトリクス表示 */}
       {metrics && <MetricsBar metrics={metrics} t={t} locale={locale} />}

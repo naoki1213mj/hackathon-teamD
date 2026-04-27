@@ -19,9 +19,11 @@ def test_normalize_evidence_items_filters_unsafe_urls_and_metadata() -> None:
                 "title": "需要データ",
                 "source": "fabric",
                 "url": "javascript:alert(1)",
+                "quote": "Authorization: Bearer secret-token",
                 "relevance": 0.9,
-                "metadata": {"region": "okinawa", "raw": {"nested": "ignored"}},
+                "metadata": {"region": "okinawa", "token": "secret", "raw": {"nested": "ignored"}},
             },
+            {"id": "ev-2", "source": "web", "url": "https://example.com/report?sig=secret"},
             {"title": "source missing"},
         ]
     )
@@ -31,8 +33,33 @@ def test_normalize_evidence_items_filters_unsafe_urls_and_metadata() -> None:
             "id": "ev-1",
             "title": "需要データ",
             "source": "fabric",
+            "quote": "[redacted]",
             "relevance": 0.9,
             "metadata": {"region": "okinawa"},
+        },
+        {"id": "ev-2", "title": "", "source": "web"},
+    ]
+
+
+def test_normalize_evidence_items_redacts_bare_token_and_auth_metadata() -> None:
+    """EvidenceItem は裸の token 値と auth metadata key も漏らさない。"""
+    normalized = normalize_evidence_items(
+        [
+            {
+                "source": "web",
+                "quote": "source returned token=xyz and should be redacted",
+                "metadata": {"auth": "secret", "safe": "ok"},
+            }
+        ]
+    )
+
+    assert normalized == [
+        {
+            "id": "",
+            "title": "",
+            "source": "web",
+            "quote": "source returned [redacted] and should be redacted",
+            "metadata": {"safe": "ok"},
         }
     ]
 
@@ -48,6 +75,10 @@ def test_normalize_pipeline_metrics_accepts_legacy_and_extended_fields() -> None
             "completion_tokens": 32,
             "estimated_cost_usd": 0.004,
             "agent_latencies": {"data-search-agent": 0.7, "bad": -1},
+            "agent_tokens": {"data-search-agent": 42, "bad": -1},
+            "agent_prompt_tokens": {"data-search-agent": 10},
+            "agent_completion_tokens": {"data-search-agent": 32},
+            "agent_estimated_costs_usd": {"data-search-agent": 0.004},
             "evidence": [{"source": "fabric", "title": "売上履歴"}],
             "charts": [{"chart_type": "bar", "data": [{"month": "4月", "sales": 1000}]}],
             "trace_events": [{"name": "agent.run", "duration_ms": 120}],
@@ -62,6 +93,10 @@ def test_normalize_pipeline_metrics_accepts_legacy_and_extended_fields() -> None
     assert normalized["total_tokens"] == 42
     assert normalized["prompt_tokens"] == 10
     assert normalized["agent_latencies"] == {"data-search-agent": 0.7}
+    assert normalized["agent_tokens"] == {"data-search-agent": 42}
+    assert normalized["agent_prompt_tokens"] == {"data-search-agent": 10}
+    assert normalized["agent_completion_tokens"] == {"data-search-agent": 32}
+    assert normalized["agent_estimated_costs_usd"] == {"data-search-agent": 0.004}
     assert normalized["evidence"][0]["source"] == "fabric"
     assert normalized["charts"][0]["chart_type"] == "bar"
     assert normalized["trace_events"][0]["name"] == "agent.run"
@@ -96,7 +131,17 @@ def test_build_tool_event_data_normalizes_optional_schema_fields() -> None:
 def test_work_iq_source_metadata_preserves_additive_fields() -> None:
     """Work IQ metadata は既存 source/label/count に加えて additive fields を保存する。"""
     normalized = normalize_work_iq_source_metadata(
-        [{"source": "emails", "label": "メール", "count": 4, "status": "completed", "confidence": 0.75}]
+        [
+            {
+                "source": "emails",
+                "label": "メール",
+                "count": 4,
+                "status": "completed",
+                "summary": "<b>メール要約</b>",
+                "preview": "価格より体験価値を重視",
+                "confidence": 0.75,
+            }
+        ]
     )
     assert normalized == [
         {
@@ -104,6 +149,8 @@ def test_work_iq_source_metadata_preserves_additive_fields() -> None:
             "label": "メール",
             "count": 4,
             "status": "completed",
+            "summary": "メール要約",
+            "preview": "価格より体験価値を重視",
             "confidence": 0.75,
         }
     ]
@@ -114,14 +161,26 @@ def test_work_iq_source_metadata_preserves_additive_fields() -> None:
             "source_scope": ["emails"],
             "auth_mode": "delegated",
             "brief_source_metadata": [
-                {"source": "emails", "count": 4, "connector": "outlook", "evidence_ids": ["ev-1"]}
+                {
+                    "source": "emails",
+                    "count": 4,
+                    "connector": "outlook",
+                    "summary": "<script>unsafe()</script>安全な要約",
+                    "evidence_ids": ["ev-1"],
+                }
             ],
         }
     )
 
     assert session is not None
     assert session["brief_source_metadata"] == [
-        {"source": "emails", "count": 4, "connector": "outlook", "evidence_ids": ["ev-1"]}
+        {
+            "source": "emails",
+            "count": 4,
+            "connector": "outlook",
+            "summary": "安全な要約",
+            "evidence_ids": ["ev-1"],
+        }
     ]
 
 

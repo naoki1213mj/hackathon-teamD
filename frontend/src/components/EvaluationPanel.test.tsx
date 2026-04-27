@@ -53,6 +53,17 @@ const evaluationV1 = {
         accessibility_readiness: { score: 3.5, label: 'Accessibility Readiness' },
       },
     },
+    evidence_quality: {
+      overall: 3.8,
+      summary: 'Evidence summary v1',
+      focus_areas: ['Chart Support'],
+      metrics: {
+        source_coverage: { score: 4.0, label: 'Evidence Source Coverage', reason: '2 sources' },
+        chart_support: { score: 3.0, label: 'Chart Support', reason: 'chart missing data' },
+        finding_linkage: { score: 4.0, label: 'Finding-Evidence Linkage', reason: 'linked' },
+        citation_safety: { score: 5.0, label: 'Safe Evidence Rendering', reason: 'safe' },
+      },
+    },
     regression_guard: {
       summary: 'No significant regression was detected.',
       has_regressions: false,
@@ -107,6 +118,31 @@ const evaluationV2 = {
         accessibility_readiness: { score: 4.5, label: 'Accessibility Readiness' },
       },
     },
+    evidence_quality: {
+      overall: 4.7,
+      summary: 'Evidence summary v2',
+      focus_areas: [],
+      metrics: {
+        source_coverage: { score: 4.8, label: 'Evidence Source Coverage', reason: '3 sources' },
+        chart_support: { score: 4.5, label: 'Chart Support', reason: 'chart ready' },
+        finding_linkage: { score: 4.5, label: 'Finding-Evidence Linkage', reason: 'linked' },
+        citation_safety: { score: 5.0, label: 'Safe Evidence Rendering', reason: 'safe' },
+      },
+    },
+    findings: [
+      {
+        id: 'kpi-evidence',
+        title: 'KPI Evidence Readiness',
+        status: 'warn',
+        summary: 'KPI assumptions need stronger source linkage.',
+        confidence: 0.76,
+        evidence_ids: ['ev-fabric'],
+        metric_key: 'kpi_evidence_readiness',
+        area: 'plan',
+      },
+    ],
+    evidence: [{ id: 'ev-fabric', title: 'Sales Evidence', source: 'fabric', url: 'https://example.com/report', relevance: 0.9 }],
+    charts: [{ chart_type: 'bar', title: 'Sales Chart', series: ['sales'], data: [{ region: 'Okinawa', sales: 120 }] }],
     regression_guard: {
       summary: 'Improved 4 key metrics compared with the prior version.',
       has_regressions: false,
@@ -190,13 +226,14 @@ const legacyEvaluationV2 = {
   },
 }
 
-function makeSnapshot(evaluations = [evaluationV1]) {
+function makeSnapshot(evaluations = [evaluationV1], overrides = {}) {
   return {
     textContents: [],
     images: [],
     toolEvents: [],
     metrics: null,
     evaluations,
+    ...overrides,
   }
 }
 
@@ -227,12 +264,22 @@ describe('EvaluationPanel', () => {
     'eval.builtin': 'AI Quality Metrics',
     'eval.plan_quality': 'Plan Quality',
     'eval.asset_quality': 'Asset Quality',
+    'eval.evidence_quality': 'Evidence Quality',
+    'eval.evidence_quality.hint': 'Evidence and charts are shown here when available.',
     'eval.regression_guard': 'Regression Guard',
     'eval.focus_areas': 'Priority Focus Areas',
     'eval.ai_review': 'AI Review',
     'eval.marketing_review': 'Marketing Review',
     'eval.execution_readiness': 'Plan Execution Readiness',
     'eval.asset_readiness': 'Asset Delivery Readiness',
+    'eval.evidence_readiness': 'Evidence Readiness',
+    'eval.findings': 'Evaluation Findings',
+    'eval.findings.hint': 'Findings show status, confidence, and linked evidence IDs.',
+    'eval.finding.pass': 'pass',
+    'eval.finding.warn': 'warn',
+    'eval.finding.fail': 'fail',
+    'eval.finding.na': 'n/a',
+    'eval.finding.confidence': 'Confidence',
     'eval.regression.none': 'No significant regression was detected.',
     'eval.no_result': 'No evaluation results yet.',
     'eval.refine': 'Refine from results',
@@ -257,6 +304,14 @@ describe('EvaluationPanel', () => {
     'eval.trust_signal_presence': 'Trust Signal Presence',
     'eval.disclosure_completeness': 'Disclosure Completeness',
     'eval.accessibility_readiness': 'Accessibility Readiness',
+    'eval.source_coverage': 'Evidence Source Coverage',
+    'eval.chart_support': 'Chart Support',
+    'eval.finding_linkage': 'Finding-Evidence Linkage',
+    'eval.citation_safety': 'Safe Evidence Rendering',
+    'trace.evidence': 'Evidence',
+    'trace.charts': 'Charts',
+    'trace.evidence.open': 'Open evidence link',
+    'trace.chart.untitled': 'Untitled chart',
   }[key] ?? key)
 
   beforeEach(() => {
@@ -349,6 +404,27 @@ describe('EvaluationPanel', () => {
     expect(screen.getByText('Asset Quality: CTA Visibility')).toBeInTheDocument()
   })
 
+  it('renders evidence quality, findings, and sanitized evidence panels', () => {
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        artifactVersion={2}
+        evaluations={[evaluationV2]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([evaluationV2])]}
+        t={t}
+      />,
+    )
+
+    expect(screen.getAllByText('Evidence Quality').length).toBeGreaterThan(0)
+    expect(screen.getByText('Evaluation Findings')).toBeInTheDocument()
+    expect(screen.getByText('KPI assumptions need stronger source linkage.')).toBeInTheDocument()
+    expect(screen.getByText('ev-fabric')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open evidence link' })).toHaveAttribute('href', 'https://example.com/report')
+    expect(screen.getByText('Sales Chart')).toBeInTheDocument()
+  })
+
   it('saves new evaluations through the version callback', async () => {
     mockFetch.mockResolvedValueOnce(createJsonResponse({
       plan_quality: evaluationV2.result.plan_quality,
@@ -423,6 +499,52 @@ describe('EvaluationPanel', () => {
       'Content-Type': 'application/json',
       Authorization: 'Bearer delegated-token',
     })
+  })
+
+  it('sends current snapshot evidence and charts when running evaluation', async () => {
+    mockFetch.mockResolvedValueOnce(createJsonResponse({
+      plan_quality: evaluationV2.result.plan_quality,
+      asset_quality: evaluationV2.result.asset_quality,
+      evidence_quality: evaluationV2.result.evidence_quality,
+      findings: evaluationV2.result.findings,
+      evaluation_meta: { version: 2, round: 2, created_at: '2026-04-02T01:00:00+00:00' },
+    }))
+
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        conversationId="conv-1"
+        artifactVersion={2}
+        evaluations={[]}
+        versions={[
+          makeSnapshot([evaluationV1]),
+          makeSnapshot([], {
+            toolEvents: [
+              {
+                tool: 'search_sales_history',
+                status: 'completed',
+                evidence: [{ id: 'ev-fabric', title: 'Sales Evidence', source: 'fabric' }],
+                charts: [{ chart_type: 'bar', title: 'Sales Chart', data: [{ month: '4月', sales: 100 }] }],
+              },
+            ],
+          }),
+        ]}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Evaluation' }))
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled()
+    })
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.evidence).toEqual([{ id: 'ev-fabric', title: 'Sales Evidence', source: 'fabric' }])
+    expect(body.charts).toEqual([{ chart_type: 'bar', title: 'Sales Chart', data: [{ month: '4月', sales: 100 }] }])
   })
 
   it('does not run evaluation when delegated auth is unavailable', async () => {

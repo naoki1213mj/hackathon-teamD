@@ -239,6 +239,114 @@ class TestExtractResultText:
         assert chat_module._extract_result_text(result) == "市場は拡大中。"
 
 
+class TestWebSearchEvidence:
+    """Web Search citation の evidence 変換テスト"""
+
+    def test_extract_web_search_evidence_from_url_annotations(self):
+        annotation = SimpleNamespace(type="url_citation", url="https://example.com/safety", title="Safety report")
+        content = SimpleNamespace(annotations=[annotation])
+        result = SimpleNamespace(output=[SimpleNamespace(content=[content])])
+
+        evidence = chat_module._extract_web_search_evidence(result, "安全情報を確認しました。")
+
+        assert evidence == [
+            {
+                "id": "web-search-1",
+                "title": "Safety report",
+                "source": "web",
+                "url": "https://example.com/safety",
+                "relevance": 0.75,
+                "metadata": {"provider": "foundry_web_search"},
+            }
+        ]
+
+    def test_extract_web_search_evidence_falls_back_to_summary(self):
+        evidence = chat_module._extract_web_search_evidence(SimpleNamespace(output=[]), "市場トレンドを確認しました。")
+
+        assert evidence[0]["source"] == "web"
+        assert evidence[0]["quote"] == "市場トレンドを確認しました。"
+
+
+class TestTokenUsageMetrics:
+    """token usage と概算コストの抽出テスト"""
+
+    def test_extracts_responses_api_usage_aliases(self) -> None:
+        result = SimpleNamespace(usage={"input_tokens": "120", "output_tokens": 30})
+
+        usage = chat_module._extract_token_usage(result)
+
+        assert usage == {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150}
+        assert chat_module._extract_total_tokens(result) == 150
+
+    def test_extracts_nested_output_usage_without_text_content(self) -> None:
+        output = SimpleNamespace(usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+        result = SimpleNamespace(get_outputs=lambda: [[output]])
+
+        assert chat_module._extract_token_usage(result) == {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
+
+    def test_estimated_cost_requires_enable_cost_metrics(self, monkeypatch) -> None:
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+        monkeypatch.delenv("ENABLE_COST_METRICS", raising=False)
+        usage: chat_module.TokenUsage = {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}
+
+        assert chat_module._estimate_cost_usd(usage) is None
+
+        monkeypatch.setenv("ENABLE_COST_METRICS", "true")
+        assert chat_module._estimate_cost_usd(usage) == 0.00125
+
+    def test_build_done_metrics_adds_agent_metrics_additively(self, monkeypatch) -> None:
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.setenv("ENABLE_COST_METRICS", "true")
+        metrics = chat_module._build_done_metrics(
+            latency_seconds=2.5,
+            tool_calls=3,
+            total_tokens=30,
+            prompt_tokens=10,
+            completion_tokens=20,
+            agent_metrics={
+                "marketing-plan-agent": {
+                    "latency_seconds": 1.2,
+                    "total_tokens": 30,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "estimated_cost_usd": 0.002,
+                }
+            },
+        )
+
+        assert metrics["latency_seconds"] == 2.5
+        assert metrics["total_tokens"] == 30
+        assert metrics["prompt_tokens"] == 10
+        assert metrics["agent_latencies"] == {"marketing-plan-agent": 1.2}
+        assert metrics["agent_tokens"] == {"marketing-plan-agent": 30}
+        assert metrics["estimated_cost_usd"] == 0.002
+
+    def test_build_done_metrics_omits_agent_metrics_when_flag_disabled(self, monkeypatch) -> None:
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.delenv("ENABLE_COST_METRICS", raising=False)
+
+        metrics = chat_module._build_done_metrics(
+            latency_seconds=2.5,
+            tool_calls=3,
+            total_tokens=30,
+            agent_metrics={
+                "marketing-plan-agent": {
+                    "latency_seconds": 1.2,
+                    "total_tokens": 30,
+                    "estimated_cost_usd": 0.002,
+                }
+            },
+        )
+
+        assert "agent_latencies" not in metrics
+        assert "estimated_cost_usd" not in metrics
+
+
 class TestExtractLatestEvaluationResult:
     """_extract_latest_evaluation_result のテスト"""
 
@@ -3174,11 +3282,10 @@ class TestGetReferenceBrochurePath:
         assert result is None
 
     def test_with_endpoint_but_no_file(self, monkeypatch):
-        """エンドポイントありでもPDFファイルが無ければ None"""
+        """エンドポイントがあっても data/*.pdf の最新ファイルは暗黙参照しない。"""
         monkeypatch.setenv("CONTENT_UNDERSTANDING_ENDPOINT", "https://test.cognitiveservices.azure.com")
         result = chat_module._get_reference_brochure_path()
-        # sample_brochure.pdf が実在しない限り None
-        assert result is None or isinstance(result, str)
+        assert result is None
 
 
 # --- _maybe_run_quality_review テスト ---

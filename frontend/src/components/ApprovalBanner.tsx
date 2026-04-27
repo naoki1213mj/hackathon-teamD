@@ -1,5 +1,6 @@
 import { Check, MessageSquareWarning, Pencil } from 'lucide-react';
 import { useState } from 'react';
+import { ApprovalDiffView } from './ApprovalDiffView';
 
 interface ApprovalBannerProps {
   request: {
@@ -8,11 +9,12 @@ interface ApprovalBannerProps {
     conversation_id: string
     manager_comment?: string
   }
+  previousPlanMarkdown?: string
   onApprove: (response: string) => void
   t: (key: string) => string
 }
 
-export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
+export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, t }: ApprovalBannerProps) {
   const [mode, setMode] = useState<'action' | 'revise'>('action')
   const [revision, setRevision] = useState('')
   const displayPrompt = request.prompt.trim() && !/承認|修正|approve|revise/i.test(request.prompt)
@@ -34,6 +36,17 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
           <p className="font-medium">{t('approval.manager.comment')}</p>
           <p className="mt-1 whitespace-pre-wrap text-xs leading-5">{request.manager_comment}</p>
         </div>
+      )}
+
+      {request.plan_markdown && (
+        <ApprovalDiffView
+          previousText={previousPlanMarkdown}
+          currentText={request.plan_markdown}
+          previousLabel={t('approval.diff.previous')}
+          currentLabel={t('approval.diff.current')}
+          className="mb-3"
+          t={t}
+        />
       )}
 
       {mode === 'action' ? (

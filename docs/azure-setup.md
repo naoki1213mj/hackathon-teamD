@@ -36,6 +36,7 @@
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
 | Fabric | 完了 | Fabric capacity `fcdemojapaneast001` を resume し、workspace `ws-MG-pod2` に `Travel_Lakehouse` と `sales_results` / `customer_reviews` を再投入済み。`FABRIC_DATA_AGENT_URL` / `FABRIC_SQL_ENDPOINT` も Container App へ反映済み |
 | Logic Apps / Teams / SharePoint | 部分完了 | Teams connection `teams-1` は Connected。`logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live で、post-approval の Teams channel 通知は動作確認済みです。manager approval の signed trigger URL 同期も live で再確認済みで、Container App secret は現在の Logic App callback URL と一致しています。残件は SharePoint 保存経路（site permission grant または connector 再認証） |
+| Rollout gates | default-off | `/api/capabilities` は secret を含まない boolean 状態だけを返します。Source ingestion、MAI Transcribe、継続監視、cost metrics、gpt-5.5、Model Router はそれぞれ feature flag と必須 endpoint/deployment/quota が揃うまで UI で production-ready と扱いません |
 
 
 ### 4.0 Container Apps / Cosmos DB private endpoint migration note
@@ -218,6 +219,22 @@ rebuilt `workiq-dev` tenant では、次までは完了済みです。
 - [Microsoft Teams connector](https://learn.microsoft.com/en-us/connectors/teams/)
 - [SharePoint connector](https://learn.microsoft.com/en-us/connectors/sharepoint/)
 
+### 4.9 Source ingestion / MAI Transcribe / monitoring gates
+
+これらは rollout 用の default-off 機能であり、`azd up` だけでは本番有効化されません。
+
+| 機能 | 有効化条件 | 検証 |
+| --- | --- | --- |
+| Capabilities | 追加設定不要 | `curl https://<app>/api/capabilities` が endpoint / connection string を含まず `available` / `configured` だけを返す |
+| Source ingestion | `ENABLE_SOURCE_INGESTION=true` | `GET /api/sources/limits` が `enabled=true` を返し、`POST /api/sources/text` が `pending_review` source を返す。default-off では `SOURCE_INGESTION_DISABLED` |
+| PDF source | Source ingestion + 任意で `CONTENT_UNDERSTANDING_ENDPOINT` | `POST /api/sources/pdf` が PDF magic と byte 上限を検証し、解析不可でも raw text なしの draft を返す |
+| Audio source | Source ingestion + `ENABLE_MAI_TRANSCRIBE_1=true` + `MAI_TRANSCRIBE_1_ENDPOINT` + `MAI_TRANSCRIBE_1_DEPLOYMENT_NAME` + `MAI_TRANSCRIBE_1_API_PATH` | 未設定では `AUDIO_TRANSCRIBE_UNAVAILABLE`。raw audio は保存せず、短命 HTTPS `audio_url` の transcript だけを draft にする |
+| Evaluation logging | `ENABLE_EVALUATION_LOGGING=true` + project endpoint | raw prompt / Work IQ content / transcript / bearer token / brochure HTML を含まない最小 payload だけを Foundry へ送る |
+| Continuous monitoring | Evaluation logging + `ENABLE_CONTINUOUS_MONITORING=true` + sample rate > 0 | App Insights custom metrics / Foundry logging が sampled async で送られ、API 応答をブロックしない |
+| Cost metrics | `ENABLE_COST_METRICS=true` + App Insights | `done.metrics.estimated_cost_usd` は token usage からの概算。請求確定値ではない |
+
+owner-scoped API は本番相当環境で認証済み owner boundary を要求します。Bearer claims は署名検証済み upstream auth/proxy がある場合だけ `TRUST_AUTH_HEADER_CLAIMS` または trusted header で信頼してください。
+
 ## 5. 認証と権限
 
 Container App の MI に Bicep で付与されるロール:
@@ -234,6 +251,8 @@ Container App の MI に Bicep で付与されるロール:
 ```bash
 curl https://<app>/api/health    # → {"status": "ok"}
 curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
+curl https://<app>/api/capabilities
+curl https://<app>/api/sources/limits
 ```
 
 | 確認項目 | 期待動作 |
@@ -242,9 +261,12 @@ curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
 | 画像生成 | GPT Image 1.5 と MAI 経路の両方でヒーロー画像が透明 PNG でない |
 | 動画生成 | MP4 が返る (SSML ナレーション付き) |
 | Voice Live | `/api/voice-config` が MSAL 設定を返す |
+| Capabilities | `/api/capabilities` が endpoint / connection string を返さず boolean feature 状態だけを返す |
+| Source ingestion | default-off では `SOURCE_INGESTION_DISABLED`、有効化後は text/PDF/audio source がレビュー待ち draft になる |
 | Fabric | Agent1 が Fabric Data Agent または Fabric SQL endpoint を使い、CSV フォールバックにならない |
 | 承認後 Teams 通知 | `logic-wmbvhdhcsuyb2` の run history が success で、対象 Team / channel に投稿される |
 | 評価 | `/api/evaluate` が `builtin`、`plan_quality`、`asset_quality`、`regression_guard` を返す |
+| 継続監視 | 評価ログ opt-in + sample rate 条件を満たす場合だけ最小 payload が非同期送信される |
 
 ## 7. トラブルシューティング
 
@@ -259,6 +281,8 @@ curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
 | Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
 | `work_iq_runtime=foundry_tool` がエラーになる | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。`legacy` と組み合わせるのは未サポート |
 | Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
+| `/api/sources/*` が 503 | `ENABLE_SOURCE_INGESTION=true` が Container App に反映済みか確認。音声だけ失敗する場合は MAI Transcribe の endpoint / deployment / API path を確認 |
+| `/api/capabilities` で `configured=true` だが `available=false` | 必須 endpoint、App Insights、sample rate、deployment/quota、または privacy gate が不足していないか確認 |
 | 上司通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認し、Container App secret に `?api-version=...&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確かめる。`deploy.yml` の signed URL 再同期が成功しているかも確認する。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、Team / channel ID を確認 |
 | SharePoint へ保存されない | target site への permission grant（preferred）または `sharepointonline` connector の認証状態を確認 |

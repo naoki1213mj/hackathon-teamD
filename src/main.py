@@ -22,6 +22,7 @@ from src.api.chat import router as chat_router
 from src.api.conversations import router as conversations_router
 from src.api.evaluate import router as evaluate_router
 from src.api.health import router as health_router
+from src.api.sources import router as sources_router
 from src.api.voice import router as voice_router
 from src.config import get_settings
 from src.foundry_tracing import get_app_insights_association_status
@@ -171,6 +172,7 @@ app.include_router(health_router)
 app.include_router(capabilities_router)
 app.include_router(chat_router)
 app.include_router(conversations_router)
+app.include_router(sources_router)
 app.include_router(voice_router)
 app.include_router(evaluate_router)
 

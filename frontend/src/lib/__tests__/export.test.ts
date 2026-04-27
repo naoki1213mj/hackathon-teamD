@@ -78,6 +78,30 @@ describe('exportBrochureHtml', () => {
     expect(result).not.toContain('javascript:')
     expect(result).toContain('Click')
   })
+
+  it('strips unsafe href and src protocols while keeping safe data images', async () => {
+    const { exportBrochureHtml } = await import('../export')
+    const contents: TextContent[] = [
+      {
+        content: [
+          '<a href="vbscript:msgbox(1)">Bad link</a>',
+          '<img src="file:///C:/secret.png" alt="bad" />',
+          '<img src="data:image/png;base64,abc123" alt="ok" />',
+          '<img src="data:image/svg+xml,<svg onload=&quot;alert(1)&quot;></svg>" alt="bad svg" />',
+        ].join(''),
+        agent: 'brochure-gen-agent',
+        content_type: 'html',
+      },
+    ]
+
+    exportBrochureHtml(contents)
+
+    const result = await getCapturedText()
+    expect(result).not.toContain('vbscript:')
+    expect(result).not.toContain('file:///')
+    expect(result).not.toContain('data:image/svg+xml')
+    expect(result).toContain('data:image/png;base64,abc123')
+  })
 })
 
 describe('exportPlanMarkdown', () => {

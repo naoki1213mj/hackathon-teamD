@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.conversations import get_conversation, get_replay_data, list_conversations
-from src.request_identity import extract_request_identity
+from src.request_identity import RequestIdentityError, extract_request_identity
 from src.work_iq_session import (
     CONVERSATION_SETTINGS_METADATA_KEY,
     WORK_IQ_SESSION_METADATA_KEY,
@@ -79,10 +79,18 @@ def _sanitize_conversation_document(doc: dict) -> dict:
     return sanitized
 
 
+def _identity_error_response(exc: RequestIdentityError) -> JSONResponse:
+    """owner 境界の認証エラーを JSON API レスポンスへ変換する。"""
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.message, "code": exc.code})
+
+
 @router.get("/conversations")
 async def conversations_list(request: Request, limit: int = 20) -> Response:
     """会話一覧を取得する。"""
-    identity = extract_request_identity(request)
+    try:
+        identity = extract_request_identity(request, enforce_owner_boundary=True)
+    except RequestIdentityError as exc:
+        return _identity_error_response(exc)
     items = await list_conversations(owner_id=identity["user_id"], limit=limit)
     etag = _build_conversations_list_etag(items)
     cache_headers = {
@@ -101,7 +109,10 @@ async def conversations_list(request: Request, limit: int = 20) -> Response:
 @router.get("/conversations/{conversation_id}")
 async def conversation_detail(conversation_id: str, request: Request) -> Response:
     """会話詳細を取得する。"""
-    identity = extract_request_identity(request)
+    try:
+        identity = extract_request_identity(request, enforce_owner_boundary=True)
+    except RequestIdentityError as exc:
+        return _identity_error_response(exc)
     doc = await get_conversation(conversation_id, owner_id=identity["user_id"])
     if not doc:
         return JSONResponse(status_code=404, content={"error": "conversation not found"})
@@ -127,7 +138,17 @@ async def replay(request: Request, conversation_id: str, speed: float = Query(5.
         conversation_id: リプレイする会話のID
         speed: リプレイ速度の倍率（デフォルト 5倍速）
     """
-    identity = extract_request_identity(request)
+    try:
+        identity = extract_request_identity(request, enforce_owner_boundary=True)
+    except RequestIdentityError as exc:
+        error_message = exc.message
+        error_code = exc.code
+        status_code = exc.status_code
+
+        async def identity_error():
+            yield f"event: error\ndata: {json.dumps({'message': error_message, 'code': error_code}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(identity_error(), status_code=status_code, media_type="text/event-stream")
     events = await get_replay_data(conversation_id, owner_id=identity["user_id"])
 
     if not events:

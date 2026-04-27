@@ -1,3 +1,5 @@
+import type { ChartSpec, EvidenceItem } from './event-schemas'
+
 export interface EvaluationMetric {
   score: number
   reason?: string
@@ -19,6 +21,17 @@ export interface EvaluationQualityTrack {
   summary?: string
   focus_areas?: string[]
   metrics: Record<string, CustomEvaluationMetric>
+}
+
+export interface EvaluationFinding {
+  id: string
+  title: string
+  status: 'pass' | 'warn' | 'fail' | 'na'
+  summary?: string
+  confidence?: number
+  evidence_ids?: string[]
+  metric_key?: string
+  area?: 'plan' | 'asset' | 'evidence'
 }
 
 export interface RegressionMetricChange {
@@ -46,6 +59,10 @@ export interface EvaluationResult {
   marketing_quality?: Record<string, number | string>
   plan_quality?: EvaluationQualityTrack
   asset_quality?: EvaluationQualityTrack
+  evidence_quality?: EvaluationQualityTrack
+  findings?: EvaluationFinding[]
+  evidence?: EvidenceItem[]
+  charts?: ChartSpec[]
   regression_guard?: RegressionGuard
   legacy_overall?: number
   foundry_portal_url?: string
@@ -115,6 +132,10 @@ const LABELS: Record<string, string> = {
   disclosure_completeness: '表示事項の網羅性',
   accessibility_readiness: 'アクセシビリティ準備度',
   conversion_potential: 'コンバージョン期待度',
+  source_coverage: '根拠ソース網羅性',
+  chart_support: 'チャート根拠',
+  finding_linkage: '指摘と根拠の紐づき',
+  citation_safety: '安全な根拠表示',
 }
 
 function average(values: number[]): number {
@@ -280,6 +301,10 @@ export function getAssetQuality(result: EvaluationResult): EvaluationQualityTrac
     return cloneTrack(result.asset_quality)
   }
   return deriveLegacyAssetTrack(result)
+}
+
+export function getEvidenceQuality(result: EvaluationResult): EvaluationQualityTrack | null {
+  return result.evidence_quality?.metrics ? cloneTrack(result.evidence_quality) : null
 }
 
 export function getRegressionGuard(result: EvaluationResult): RegressionGuard | null {

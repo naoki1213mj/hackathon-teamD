@@ -149,6 +149,7 @@ def test_conversations_list_uses_authenticated_owner_id(monkeypatch):
         return []
 
     monkeypatch.setattr("src.api.conversations.list_conversations", fake_list_conversations)
+    monkeypatch.setenv("TRUST_AUTH_HEADER_CLAIMS", "true")
 
     token = _make_bearer_token({"oid": "oid-123", "tid": "tid-123", "preferred_username": "user@example.com"})
     response = client.get("/api/conversations", headers={"Authorization": f"Bearer {token}"})

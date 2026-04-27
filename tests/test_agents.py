@@ -14,6 +14,7 @@ from openai import APIConnectionError, RateLimitError
 from src import config as config_module
 from src.agents.data_search import search_customer_reviews, search_sales_history
 from src.agents.regulation_check import check_ng_expressions, check_travel_law_compliance, search_knowledge_base
+from src.tool_telemetry import tool_event_context
 
 
 def _disable_azd_env(monkeypatch) -> None:
@@ -38,6 +39,19 @@ class TestDataSearchTools:
         parsed = json.loads(result)
         for item in parsed:
             assert item.get("season") == "spring"
+
+    @pytest.mark.asyncio
+    async def test_search_sales_history_emits_evidence_and_chart(self):
+        """販売履歴検索は Fabric/local evidence と chart を tool_event に追加する"""
+        events = []
+
+        with tool_event_context(events.append, agent_name="data-search-agent", step=1):
+            await search_sales_history(query="沖縄", season="spring")
+
+        evidence_events = [event for event in events if event.get("tool") == "search_sales_history" and event.get("evidence")]
+        assert evidence_events
+        assert evidence_events[0]["evidence"][0]["source"] in {"fabric", "local"}
+        assert evidence_events[0]["charts"][0]["chart_type"] == "bar"
 
     @pytest.mark.asyncio
     async def test_search_customer_reviews_returns_json(self):
@@ -90,6 +104,21 @@ class TestRegulationCheckTools:
         """NG 表現がない場合は検出なしメッセージを返すこと"""
         result = await check_ng_expressions("安全な旅行プランです")
         assert "検出されませんでした" in result
+
+    @pytest.mark.asyncio
+    async def test_local_regulation_checks_emit_evidence(self):
+        """ローカル規制チェックは evidence / chart を tool_event に追加する"""
+        events = []
+
+        with tool_event_context(events.append, agent_name="regulation-check-agent", step=4):
+            await check_travel_law_compliance("書面交付義務を遵守しています。")
+
+        evidence_events = [
+            event for event in events if event.get("tool") == "check_travel_law_compliance" and event.get("evidence")
+        ]
+        assert evidence_events
+        assert evidence_events[0]["evidence"][0]["source"] == "local-check"
+        assert evidence_events[0]["charts"][0]["chart_type"] == "table"
 
     @pytest.mark.asyncio
     async def test_check_travel_law_compliance_returns_json(self):
@@ -145,6 +174,21 @@ class TestKnowledgeBaseTool:
         parsed = json.loads(result)
         assert "query" in parsed
         assert parsed["query"] == "広告規制"
+
+    @pytest.mark.asyncio
+    async def test_search_knowledge_base_emits_fallback_evidence(self, monkeypatch):
+        """Foundry IQ 未接続時も安全な fallback evidence を追加する"""
+        import src.agents.regulation_check as rc
+
+        monkeypatch.setattr(rc, "_get_search_credentials", lambda: ("", ""))
+        events = []
+
+        with tool_event_context(events.append, agent_name="regulation-check-agent", step=4):
+            await search_knowledge_base(query="旅行業法")
+
+        evidence_events = [event for event in events if event.get("tool") == "foundry_iq_search" and event.get("evidence")]
+        assert evidence_events
+        assert evidence_events[0]["evidence"][0]["source"] == "local-check"
 
     def test_default_model_name(self, monkeypatch):
         """MODEL_NAME 未設定時のデフォルト値"""

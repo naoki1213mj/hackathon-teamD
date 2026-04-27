@@ -43,6 +43,13 @@ const AGENT_STEP_KEY: Record<string, string> = {
   'video-gen-agent': 'step.video',
 }
 
+function extractPlanMarkdown(snapshot: { textContents: Array<{ agent?: string; content?: string }> } | null): string {
+  if (!snapshot) return ''
+  return snapshot.textContents.findLast(c => c.agent === 'plan-revision-agent' && c.content)?.content
+    || snapshot.textContents.findLast(c => c.agent === 'marketing-plan-agent' && c.content)?.content
+    || ''
+}
+
 function App() {
   const {
     state,
@@ -76,6 +83,7 @@ function App() {
     pendingVersion: number
     committedVersion: number | null
   } | null>(null)
+  const [draftSourceConversationId, setDraftSourceConversationId] = useState<string | null>(null)
 
   // Esc キーでリセット
   useEffect(() => {
@@ -189,6 +197,7 @@ function App() {
   const currentSnapshot = state.currentVersion > 0
     ? state.versions[state.currentVersion - 1]
     : null
+  const previousApprovalPlan = extractPlanMarkdown(currentSnapshot)
   const hasRegulationStageStarted = state.agentProgress?.agent === 'regulation-check-agent'
     || state.agentProgress?.agent === 'plan-revision-agent'
     || previewTextContents.some(c => c.agent === 'regulation-check-agent')
@@ -290,12 +299,16 @@ function App() {
   const handleSendMessage = (message: string, options?: Parameters<typeof sendMessage>[1]) => {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
-    void sendMessage(message, options)
+    void sendMessage(message, {
+      ...options,
+      conversationId: state.conversationId ?? draftSourceConversationId ?? undefined,
+    })
   }
   const handleReset = () => {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
     setSelectedPlanVersionIndexes({})
+    setDraftSourceConversationId(null)
     setVoiceDraft(prev => ({ id: prev.id + 1, text: '' }))
     reset()
   }
@@ -306,12 +319,14 @@ function App() {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
     setSelectedPlanVersionIndexes({})
+    setDraftSourceConversationId(null)
     setVoiceDraft(prev => ({ id: prev.id + 1, text: '' }))
     startNewConversation()
   }
   const handleRestoreConversation = (conversationId: string) => {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
+    setDraftSourceConversationId(null)
     void restoreConversation(conversationId)
   }
   const handleApproval = (response: string) => {
@@ -485,7 +500,14 @@ function App() {
             <div className="px-5 pb-3">
               {isManagerApproval
                 ? <ManagerApprovalStatus request={state.approvalRequest} t={t} />
-                : <ApprovalBanner request={state.approvalRequest} onApprove={handleApproval} t={t} />}
+                : (
+                    <ApprovalBanner
+                      request={state.approvalRequest}
+                      previousPlanMarkdown={previousApprovalPlan}
+                      onApprove={handleApproval}
+                      t={t}
+                    />
+                  )}
             </div>
           )}
 
@@ -500,6 +522,8 @@ function App() {
               settings={state.settings}
               conversationSettings={state.conversationSettings}
               workIqStatus={state.workIq.status}
+              workIqSourceMetadata={state.workIq.sourceMetadata}
+              workIqBriefSummary={state.workIq.briefSummary}
               modelRouterAvailable={modelRouterAvailable}
               gpt55Available={gpt55Available}
               workIqAvailable={workIqAvailable}
@@ -545,7 +569,12 @@ function App() {
                   voiceTalkToStartAvailable={voiceTalkToStartAvailable}
                   t={t}
                 />
-                <PdfUpload disabled={isRunning} t={t} />
+                <PdfUpload
+                  disabled={isRunning}
+                  conversationId={state.conversationId ?? draftSourceConversationId}
+                  onConversationId={setDraftSourceConversationId}
+                  t={t}
+                />
               </div>
             )}
           </div>

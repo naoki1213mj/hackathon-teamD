@@ -4,7 +4,10 @@ import json
 import logging
 import os
 import re
+import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -13,9 +16,17 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from src.config import get_settings
+from src.config import AppSettings, get_settings
+from src.continuous_monitoring import build_evaluation_monitoring_record, schedule_continuous_monitoring
 from src.conversations import append_conversation_events, get_conversation
-from src.request_identity import extract_request_identity
+from src.model_deployments import parse_bool_setting
+from src.pipeline_schemas import (
+    ChartSpecPayload,
+    EvidenceItemPayload,
+    normalize_chart_specs,
+    normalize_evidence_items,
+)
+from src.request_identity import RequestIdentityError, extract_request_identity
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
 logger = logging.getLogger(__name__)
@@ -42,6 +53,11 @@ _ASSET_CUSTOM_METRICS = (
 )
 _MAX_EVAL_QUERY_CHARS = 4000
 _MAX_EVAL_RESPONSE_CHARS = 12000
+_EVALUATION_LOG_SCHEMA_VERSION = "2026-04-privacy-v1"
+_DEFAULT_EVALUATION_LOG_RETENTION_DAYS = 30
+_SENSITIVE_LOG_PATTERN = re.compile(
+    r"(?i)(bearer\s+[a-z0-9._~+/=-]+|authorization\s*[:=]\s*[^,\s]+|api[_-]?key\s*[:=]\s*[^,\s]+|token\s*[:=]\s*[^,\s]+|<[^>]+>)"
+)
 _METRIC_LABELS = {
     "relevance": "依頼適合性",
     "coherence": "構成の一貫性",
@@ -61,6 +77,10 @@ _METRIC_LABELS = {
     "trust_signal_presence": "安心材料の見えやすさ",
     "disclosure_completeness": "表示事項の網羅性",
     "accessibility_readiness": "アクセシビリティ準備度",
+    "source_coverage": "根拠ソース網羅性",
+    "chart_support": "チャート根拠",
+    "finding_linkage": "指摘と根拠の紐づき",
+    "citation_safety": "安全な根拠表示",
 }
 
 
@@ -72,6 +92,8 @@ class EvaluateRequest(BaseModel):
     html: str = Field("", description="ブローシャの HTML テキスト（オプション）")
     conversation_id: str | None = Field(default=None, description="保存先の会話ID")
     artifact_version: int | None = Field(default=None, ge=1, description="評価対象の成果物バージョン")
+    evidence: list[dict[str, object]] = Field(default_factory=list, description="評価に使う根拠ソース")
+    charts: list[dict[str, object]] = Field(default_factory=list, description="評価に使うチャート仕様")
 
 
 def _truncate_for_evaluation(text: str, limit: int) -> str:
@@ -254,6 +276,287 @@ def _build_legacy_conversion_metric(asset_metrics: dict[str, dict]) -> dict:
         }
 
     return _build_check_metric(details)
+
+
+def _dedupe_evidence_items(evidence: list[EvidenceItemPayload]) -> list[EvidenceItemPayload]:
+    """根拠 item を安定した key で重複除外し、空 id を補完する。"""
+    deduped: list[EvidenceItemPayload] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in evidence:
+        key = (
+            str(item.get("id", "")),
+            str(item.get("source", "")),
+            str(item.get("title", "")),
+            str(item.get("url", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized = EvidenceItemPayload(**item)
+        if not normalized.get("id"):
+            normalized["id"] = f"eval-ev-{len(deduped) + 1}"
+        deduped.append(normalized)
+    return deduped
+
+
+def _dedupe_chart_specs(charts: list[ChartSpecPayload]) -> list[ChartSpecPayload]:
+    """chart spec を重複除外する。"""
+    deduped: list[ChartSpecPayload] = []
+    seen: set[tuple[str, str]] = set()
+    for chart in charts:
+        key = (str(chart.get("chart_type", "")), str(chart.get("title", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(chart)
+    return deduped
+
+
+def _normalize_evaluation_context(
+    evidence: object,
+    charts: object,
+) -> tuple[list[EvidenceItemPayload], list[ChartSpecPayload]]:
+    """評価 panel 用の evidence / charts を保存済み schema へ正規化する。"""
+    return _dedupe_evidence_items(normalize_evidence_items(evidence)), _dedupe_chart_specs(normalize_chart_specs(charts))
+
+
+def _append_context_from_data(
+    data: Mapping[str, object],
+    evidence: list[EvidenceItemPayload],
+    charts: list[ChartSpecPayload],
+) -> None:
+    """SSE data payload から evidence / charts を抽出する。"""
+    if "evidence" in data:
+        evidence.extend(normalize_evidence_items(data.get("evidence")))
+    if "charts" in data:
+        charts.extend(normalize_chart_specs(data.get("charts")))
+
+    metrics = data.get("metrics")
+    if isinstance(metrics, Mapping):
+        if "evidence" in metrics:
+            evidence.extend(normalize_evidence_items(metrics.get("evidence")))
+        if "charts" in metrics:
+            charts.extend(normalize_chart_specs(metrics.get("charts")))
+
+
+def _restore_evaluation_context_for_version(
+    conversation: dict | None,
+    artifact_version: int,
+) -> tuple[list[EvidenceItemPayload], list[ChartSpecPayload]]:
+    """会話履歴から指定 version の evidence / charts を復元する。"""
+    if not isinstance(conversation, dict):
+        return [], []
+
+    evidence: list[EvidenceItemPayload] = []
+    charts: list[ChartSpecPayload] = []
+    current_version = 1
+    target_version = max(1, artifact_version)
+
+    for event in conversation.get("messages", []):
+        if not isinstance(event, dict):
+            continue
+        data = event.get("data")
+        if current_version == target_version and isinstance(data, Mapping):
+            _append_context_from_data(data, evidence, charts)
+
+        if event.get("event") == "done":
+            if current_version >= target_version:
+                break
+            current_version += 1
+
+    return _dedupe_evidence_items(evidence), _dedupe_chart_specs(charts)
+
+
+def _evidence_ids_for_sources(
+    evidence: list[EvidenceItemPayload],
+    source_hints: tuple[str, ...],
+    limit: int = 4,
+) -> list[str]:
+    """source hint に一致する evidence id を返す。"""
+    matched: list[str] = []
+    normalized_hints = tuple(hint.lower() for hint in source_hints)
+    for item in evidence:
+        source = str(item.get("source", "")).lower()
+        if normalized_hints and not any(hint in source for hint in normalized_hints):
+            continue
+        evidence_id = str(item.get("id", "")).strip()
+        if evidence_id and evidence_id not in matched:
+            matched.append(evidence_id)
+        if len(matched) >= limit:
+            break
+    if matched:
+        return matched
+    return [str(item.get("id", "")).strip() for item in evidence[:limit] if str(item.get("id", "")).strip()]
+
+
+def _unit_score(metric: dict | None) -> float:
+    """0-1 または 1-5 metric を 0-1 に丸める。"""
+    if not isinstance(metric, dict) or not isinstance(metric.get("score"), (int, float)):
+        return -1.0
+    score = float(metric.get("score", -1))
+    if score < 0:
+        return -1.0
+    return min(1.0, score / 5 if score > 1 else score)
+
+
+def _finding_status(score: float) -> str:
+    """unit score を finding status へ変換する。"""
+    if score < 0:
+        return "na"
+    if score >= 0.8:
+        return "pass"
+    if score >= 0.55:
+        return "warn"
+    return "fail"
+
+
+def _finding_confidence(score: float, evidence_ids: list[str]) -> float:
+    """根拠量と metric score から confidence を決める。"""
+    if score < 0:
+        return 0.2
+    base = 0.52 + min(len(evidence_ids), 3) * 0.1
+    return round(min(0.95, base + score * 0.18), 2)
+
+
+def _build_evaluation_findings(
+    plan_metrics: dict[str, dict],
+    asset_metrics: dict[str, dict],
+    evidence: list[EvidenceItemPayload],
+    charts: list[ChartSpecPayload],
+) -> list[dict]:
+    """評価結果から UI 用 finding を構築する。"""
+    kpi_ids = _evidence_ids_for_sources(evidence, ("fabric", "web", "local"))
+    compliance_ids = _evidence_ids_for_sources(evidence, ("foundry_iq", "azure_ai_search", "local-check"))
+    asset_ids = _evidence_ids_for_sources(evidence, ("web", "local", "fabric"))
+    all_ids = [str(item.get("id", "")).strip() for item in evidence if str(item.get("id", "")).strip()]
+
+    kpi_score = _unit_score(plan_metrics.get("kpi_evidence_readiness"))
+    compliance_score = _unit_score(plan_metrics.get("travel_law_compliance"))
+    asset_score = _average([
+        _unit_score(asset_metrics.get("value_visibility")),
+        _unit_score(asset_metrics.get("trust_signal_presence")),
+        _unit_score(asset_metrics.get("disclosure_completeness")),
+    ])
+    source_score = min(1.0, (len({str(item.get("source", "")) for item in evidence if item.get("source")}) / 3) * 0.7 + (min(len(evidence), 6) / 6) * 0.3) if evidence else -1.0
+    chart_score = _average([1.0 if chart.get("data") else 0.6 for chart in charts]) if charts else -1.0
+
+    finding_specs = [
+        (
+            "evidence-source-coverage",
+            "根拠ソースの網羅性",
+            source_score,
+            "評価に利用できる根拠ソースの件数と種類を確認しました。",
+            all_ids[:4],
+            "source_coverage",
+            "evidence",
+        ),
+        (
+            "kpi-evidence",
+            _METRIC_LABELS["kpi_evidence_readiness"],
+            kpi_score,
+            "KPI の前提・比較軸・根拠説明の明確さを確認しました。",
+            kpi_ids,
+            "kpi_evidence_readiness",
+            "plan",
+        ),
+        (
+            "compliance-evidence",
+            _METRIC_LABELS["travel_law_compliance"],
+            compliance_score,
+            "旅行業法・表示事項に関する根拠とチェック結果を確認しました。",
+            compliance_ids,
+            "travel_law_compliance",
+            "plan",
+        ),
+        (
+            "asset-support",
+            "成果物訴求の根拠",
+            asset_score,
+            "ブローシャの価値訴求・安心材料・表示事項が根拠と整合しているか確認しました。",
+            asset_ids,
+            "value_visibility",
+            "asset",
+        ),
+        (
+            "chart-support",
+            _METRIC_LABELS["chart_support"],
+            chart_score,
+            "数値や比較を補助するチャートが評価に使える状態か確認しました。",
+            all_ids[:4],
+            "chart_support",
+            "evidence",
+        ),
+    ]
+
+    return [
+        {
+            "id": finding_id,
+            "title": title,
+            "status": _finding_status(score),
+            "summary": summary,
+            "confidence": _finding_confidence(score, evidence_ids),
+            "evidence_ids": evidence_ids,
+            "metric_key": metric_key,
+            "area": area,
+        }
+        for finding_id, title, score, summary, evidence_ids, metric_key, area in finding_specs
+    ]
+
+
+def _build_evidence_quality_result(
+    evidence: list[EvidenceItemPayload],
+    charts: list[ChartSpecPayload],
+    findings: list[dict],
+) -> dict:
+    """根拠品質レーンを構築する。"""
+    source_count = len({str(item.get("source", "")) for item in evidence if item.get("source")})
+    linked_findings = sum(1 for finding in findings if finding.get("evidence_ids"))
+    actionable_findings = [finding for finding in findings if finding.get("status") != "na"]
+    metrics = {
+        "source_coverage": _clone_metric(
+            {
+                "score": min(1.0, (source_count / 3) * 0.7 + (min(len(evidence), 6) / 6) * 0.3)
+                if evidence
+                else -1.0,
+                "reason": f"{source_count} 種類 / {len(evidence)} 件の根拠を確認しました"
+                if evidence
+                else "評価に利用できる根拠がありません",
+            },
+            "source_coverage",
+        ),
+        "chart_support": _clone_metric(
+            {
+                "score": _average([1.0 if chart.get("data") else 0.6 for chart in charts]) if charts else -1.0,
+                "reason": f"{len(charts)} 件のチャートを確認しました" if charts else "チャートがありません",
+            },
+            "chart_support",
+        ),
+        "finding_linkage": _clone_metric(
+            {
+                "score": round(linked_findings / len(findings), 2) if findings else -1.0,
+                "reason": f"{len(findings)} 件中 {linked_findings} 件の指摘が根拠 ID と紐づいています"
+                if findings
+                else "指摘事項がありません",
+            },
+            "finding_linkage",
+        ),
+        "citation_safety": _clone_metric(
+            {
+                "score": 1.0 if evidence or charts else -1.0,
+                "reason": "根拠・チャートは保存前に安全な schema で正規化されています"
+                if evidence or charts
+                else "安全性を確認する根拠・チャートがありません",
+            },
+            "citation_safety",
+        ),
+    }
+    category = _build_quality_category(metrics, "根拠表示は安定しています。")
+    if actionable_findings:
+        weak_findings = [finding["title"] for finding in actionable_findings if finding.get("status") in {"warn", "fail"}]
+        if weak_findings:
+            category["focus_areas"] = weak_findings[:3]
+            category["summary"] = f"根拠の優先確認ポイント: {'、'.join(weak_findings[:3])}"
+    return category
 
 
 def _extract_latest_evaluation_result_for_version(conversation: dict | None, artifact_version: int) -> dict | None:
@@ -877,53 +1180,204 @@ def _build_asset_quality_result(asset_custom_metrics: dict[str, dict]) -> dict:
 # --- Foundry ポータル連携（クラウド評価） ---
 
 
-async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None:
-    """評価結果を Foundry ポータルに記録し、ダッシュボード URL を返す。"""
+def _evaluation_log_retention_days(value: str | None) -> int:
+    """評価ログの保持日数設定を安全な整数に丸める。"""
+    try:
+        days = int((value or "").strip())
+    except ValueError:
+        return _DEFAULT_EVALUATION_LOG_RETENTION_DAYS
+    if days < 1:
+        return _DEFAULT_EVALUATION_LOG_RETENTION_DAYS
+    return min(days, 365)
+
+
+def is_evaluation_logging_enabled(settings: AppSettings | None = None) -> bool:
+    """Foundry 評価ログ送信が明示 opt-in かつ送信先設定済みかを返す。"""
+    resolved = settings or get_settings()
+    return parse_bool_setting(resolved["enable_evaluation_logging"]) and bool(resolved["project_endpoint"].strip())
+
+
+def _safe_log_text(value: object, limit: int = 80) -> str:
+    """ログ用の短い識別子を redaction-aware に正規化する。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if _SENSITIVE_LOG_PATTERN.search(text):
+        return "[redacted]"
+    normalized = re.sub(r"[\r\n\t]+", " ", text)
+    return normalized[:limit]
+
+
+def _numeric_score(value: object) -> float | None:
+    """スコアとして送信してよい数値だけを返す。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(float(value), 4)
+
+
+def _category_metric_scores(category: object) -> dict[str, float]:
+    """評価カテゴリから metric 名と数値スコアだけを抽出する。"""
+    if not isinstance(category, Mapping):
+        return {}
+    metrics = category.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return {}
+
+    sanitized: dict[str, float] = {}
+    for key, metric in metrics.items():
+        if not isinstance(metric, Mapping):
+            continue
+        score = _numeric_score(metric.get("score"))
+        if score is not None:
+            sanitized[_safe_log_text(key, limit=48)] = score
+    return sanitized
+
+
+def _summarize_findings(findings: object) -> list[dict[str, object]]:
+    """finding から本文を含まない状態・根拠 ID だけを抽出する。"""
+    if not isinstance(findings, list):
+        return []
+
+    summarized: list[dict[str, object]] = []
+    for finding in findings[:10]:
+        if not isinstance(finding, Mapping):
+            continue
+        evidence_ids = finding.get("evidence_ids")
+        summarized.append(
+            {
+                "id": _safe_log_text(finding.get("id"), limit=64),
+                "status": _safe_log_text(finding.get("status"), limit=16),
+                "metric_key": _safe_log_text(finding.get("metric_key"), limit=48),
+                "area": _safe_log_text(finding.get("area"), limit=24),
+                "confidence": _numeric_score(finding.get("confidence")),
+                "evidence_ids": [
+                    _safe_log_text(evidence_id, limit=64)
+                    for evidence_id in evidence_ids[:6]
+                    if _safe_log_text(evidence_id, limit=64)
+                ]
+                if isinstance(evidence_ids, list)
+                else [],
+            }
+        )
+    return summarized
+
+
+def _build_foundry_log_record(
+    query: str,
+    response: str,
+    scores: dict,
+    settings: AppSettings | None = None,
+) -> dict[str, object]:
+    """Foundry へ送る評価ログを raw content なしの最小 payload に変換する。"""
+    resolved = settings or get_settings()
+    findings = _summarize_findings(scores.get("findings"))
+    evidence = scores.get("evidence")
+    charts = scores.get("charts")
+    regression_guard = scores.get("regression_guard")
+    plan_quality = scores.get("plan_quality") if isinstance(scores.get("plan_quality"), Mapping) else {}
+    asset_quality = scores.get("asset_quality") if isinstance(scores.get("asset_quality"), Mapping) else {}
+    evidence_quality = scores.get("evidence_quality") if isinstance(scores.get("evidence_quality"), Mapping) else {}
+
+    finding_status_counts = {
+        status: sum(1 for finding in findings if finding.get("status") == status)
+        for status in ("pass", "warn", "fail", "na")
+    }
+    plan_overall = _numeric_score(plan_quality.get("overall") if isinstance(plan_quality, Mapping) else None)
+    asset_overall = _numeric_score(asset_quality.get("overall") if isinstance(asset_quality, Mapping) else None)
+    evidence_overall = _numeric_score(evidence_quality.get("overall") if isinstance(evidence_quality, Mapping) else None)
+    legacy_overall = _numeric_score(scores.get("legacy_overall"))
+
+    record: dict[str, object] = {
+        "schema_version": _EVALUATION_LOG_SCHEMA_VERSION,
+        "logged_at": datetime.now(timezone.utc).isoformat(),
+        "retention_days": _evaluation_log_retention_days(resolved["evaluation_log_retention_days"]),
+        "redaction": {
+            "raw_prompt_logged": False,
+            "raw_response_logged": False,
+            "raw_work_iq_logged": False,
+            "transcripts_logged": False,
+            "bearer_tokens_logged": False,
+            "brochure_html_logged": False,
+        },
+        "content_shape": {
+            "query_chars": len(query),
+            "response_chars": len(response),
+        },
+        "plan_overall": plan_overall if plan_overall is not None else -1.0,
+        "asset_overall": asset_overall if asset_overall is not None else -1.0,
+        "evidence_overall": evidence_overall if evidence_overall is not None else -1.0,
+        "legacy_overall": legacy_overall if legacy_overall is not None else -1.0,
+        "metrics": {
+            "plan_quality": _category_metric_scores(plan_quality),
+            "asset_quality": _category_metric_scores(asset_quality),
+            "evidence_quality": _category_metric_scores(evidence_quality),
+        },
+        "finding_status_counts": finding_status_counts,
+        "findings": findings,
+        "evidence_count": len(evidence) if isinstance(evidence, list) else 0,
+        "chart_count": len(charts) if isinstance(charts, list) else 0,
+    }
+
+    if isinstance(regression_guard, Mapping):
+        record["regression_guard"] = {
+            "has_regressions": bool(regression_guard.get("has_regressions")),
+            "degraded_count": len(regression_guard.get("degraded_metrics", []))
+            if isinstance(regression_guard.get("degraded_metrics"), list)
+            else 0,
+            "improved_count": len(regression_guard.get("improved_metrics", []))
+            if isinstance(regression_guard.get("improved_metrics"), list)
+            else 0,
+            "plan_overall_delta": _numeric_score(regression_guard.get("plan_overall_delta")) or 0.0,
+            "asset_overall_delta": _numeric_score(regression_guard.get("asset_overall_delta")) or 0.0,
+        }
+
+    return record
+
+
+def _privacy_summary_evaluator(
+    plan_overall: float = -1.0,
+    asset_overall: float = -1.0,
+    evidence_overall: float = -1.0,
+    legacy_overall: float = -1.0,
+    **_: object,
+) -> dict[str, object]:
+    """Foundry logging 用のローカル評価器。raw content は受け取らない。"""
+    valid_scores = [score for score in (plan_overall, asset_overall, evidence_overall, legacy_overall) if score >= 0]
+    if not valid_scores:
+        return {"score": -1.0, "reason": "redacted summary only; no aggregate score"}
+    return {
+        "score": round(sum(valid_scores) / len(valid_scores), 4),
+        "reason": "redacted/minimized evaluation summary",
+    }
+
+
+async def _log_to_foundry(record: dict[str, object]) -> str | None:
+    """最小化済み評価ログを Foundry ポータルに記録し、ダッシュボード URL を返す。"""
     settings = get_settings()
     endpoint = settings["project_endpoint"]
-    if not endpoint:
+    if not is_evaluation_logging_enabled(settings):
         return None
 
-    trimmed_query = _truncate_for_evaluation(query, _MAX_EVAL_QUERY_CHARS)
-    trimmed_response = _truncate_for_evaluation(response, _MAX_EVAL_RESPONSE_CHARS)
     temp_path: str | None = None
+    log_dir: Path | None = None
     try:
         from azure.ai.evaluation import evaluate
-        from azure.identity import DefaultAzureCredential
 
         # Foundry project URL を構築
         azure_ai_project = endpoint
 
-        # 一時データファイルを作成
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
-            json.dump({"query": trimmed_query, "response": trimmed_response}, f, ensure_ascii=False)
+        # SDK が file path を要求するため、プロジェクト配下に短命 JSONL を作る。
+        log_dir = Path.cwd() / ".evaluation-logs"
+        log_dir.mkdir(exist_ok=True)
+        temp_file = log_dir / f"evaluation-log-{uuid.uuid4().hex}.jsonl"
+        with temp_file.open(mode="w", encoding="utf-8") as f:
+            json.dump(record, f, ensure_ascii=False)
             f.write("\n")
-            temp_path = f.name
-
-        from azure.ai.evaluation import CoherenceEvaluator, RelevanceEvaluator
-
-        parsed = urlparse(endpoint)
-        azure_endpoint = f"{parsed.scheme}://{parsed.netloc}"
-        eval_model = os.environ.get("EVAL_MODEL_DEPLOYMENT", settings["model_name"])
-
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-
-        model_config = {
-            "azure_endpoint": azure_endpoint,
-            "azure_deployment": eval_model,
-            "api_version": "2024-10-21",
-            "api_key": token.token,
-        }
+        temp_path = str(temp_file)
 
         result = evaluate(
             data=temp_path,
-            evaluators={
-                "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
-                "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
-            },
+            evaluators={"privacy_summary": _privacy_summary_evaluator},
             azure_ai_project=azure_ai_project,
         )
 
@@ -937,12 +1391,20 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
     except (ImportError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Foundry ポータル連携に失敗: %s", exc)
         return None
+    except Exception as exc:
+        logger.exception("Foundry ポータル連携で予期しないエラー: %s", exc)
+        return None
     finally:
         if temp_path:
             try:
                 os.unlink(temp_path)
             except OSError as exc:
                 logger.warning("評価ログ用の一時ファイル削除に失敗: %s", exc)
+        if log_dir:
+            try:
+                log_dir.rmdir()
+            except OSError:
+                pass
 
 
 # --- エンドポイント ---
@@ -959,8 +1421,28 @@ async def evaluate_artifacts(
     カスタム評価器（旅行業法準拠 / 企画書構成 / ブローシャアクセシビリティ / 企画書品質）
     でスコアリングし、結果を返す。
     """
-    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
+    try:
+        caller_identity = extract_request_identity(
+            request,
+            expected_tenant_id=get_settings()["entra_tenant_id"],
+            enforce_owner_boundary=bool(body.conversation_id and body.artifact_version),
+        )
+    except RequestIdentityError as exc:
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.message, "code": exc.code})
     results: dict = {}
+    conversation: dict | None = None
+    evidence, charts = _normalize_evaluation_context(body.evidence, body.charts)
+
+    if body.conversation_id and body.artifact_version:
+        try:
+            conversation = await get_conversation(body.conversation_id, owner_id=caller_identity["user_id"])
+        except (ValueError, OSError) as exc:
+            logger.warning("評価用会話履歴の取得に失敗: %s", exc)
+        except Exception as exc:
+            logger.exception("評価用会話履歴の取得で予期しないエラー: %s", exc)
+
+    if not evidence and not charts and conversation and body.artifact_version:
+        evidence, charts = _restore_evaluation_context_for_version(conversation, body.artifact_version)
 
     # Code-based カスタム評価器（即座に実行）
     plan_custom_metrics = {
@@ -1010,13 +1492,18 @@ async def evaluate_artifacts(
         plan_custom_metrics=plan_custom_metrics,
     )
     results["asset_quality"] = _build_asset_quality_result(asset_custom_metrics)
+    results["findings"] = _build_evaluation_findings(plan_custom_metrics, asset_custom_metrics, evidence, charts)
+    results["evidence_quality"] = _build_evidence_quality_result(evidence, charts, results["findings"])
+    if evidence:
+        results["evidence"] = evidence
+    if charts:
+        results["charts"] = charts
 
     previous_result = None
     if body.conversation_id and body.artifact_version and body.artifact_version > 1:
         try:
-            previous_conversation = await get_conversation(body.conversation_id, owner_id=caller_identity["user_id"])
             previous_result = _extract_latest_evaluation_result_for_version(
-                previous_conversation, body.artifact_version - 1
+                conversation, body.artifact_version - 1
             )
         except (ValueError, OSError) as exc:
             logger.warning("前 version の評価結果取得に失敗: %s", exc)
@@ -1031,8 +1518,26 @@ async def evaluate_artifacts(
         ]
     )
 
-    # Foundry ポータル連携はレスポンスを待たずに非同期実行する
-    background_tasks.add_task(_log_to_foundry, body.query, body.response, results.copy())
+    # Foundry ポータル連携は明示 opt-in 時だけ、最小化済み payload で非同期実行する
+    if is_evaluation_logging_enabled():
+        background_tasks.add_task(_log_to_foundry, _build_foundry_log_record(body.query, body.response, results.copy()))
+
+    monitoring_record = build_evaluation_monitoring_record(
+        conversation_id=body.conversation_id,
+        artifact_version=body.artifact_version,
+        query=body.query,
+        response=body.response,
+        html=body.html,
+        results=results.copy(),
+    )
+    schedule_continuous_monitoring(
+        background_tasks,
+        record=monitoring_record,
+        sample_key=(
+            f"evaluation:{body.conversation_id or 'adhoc'}:"
+            f"{body.artifact_version or 0}:{len(body.query)}:{len(body.response)}:{len(body.html)}"
+        ),
+    )
 
     evaluation_meta = None
     if body.conversation_id and body.artifact_version:

@@ -5,6 +5,7 @@ import hmac
 import inspect
 import json
 import logging
+import math
 import random
 import re
 import secrets
@@ -16,7 +17,6 @@ from collections.abc import Callable, Mapping
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
-from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
 from fastapi import APIRouter, BackgroundTasks, Request, UploadFile
@@ -25,7 +25,9 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from src.api.sources import create_pdf_source_from_upload
 from src.config import get_settings
+from src.continuous_monitoring import build_pipeline_monitoring_record, schedule_pipeline_evaluation_monitoring
 from src.conversations import (
     append_conversation_events,
     get_conversation,
@@ -42,8 +44,9 @@ from src.foundry_tracing import (
 )
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
-from src.model_deployments import ModelDeploymentUnavailableError, resolve_model_deployment
-from src.request_identity import extract_request_identity, request_has_bearer_token
+from src.model_deployments import ModelDeploymentUnavailableError, parse_bool_setting, resolve_model_deployment
+from src.request_identity import RequestIdentityError, extract_request_identity, request_has_bearer_token
+from src.source_ingestion import build_contextual_chat_input
 from src.tool_telemetry import (
     ToolEventPayload,
     build_tool_event_data,
@@ -206,6 +209,8 @@ class PendingApprovalContext(TypedDict):
     conversation_settings: NotRequired[ConversationSettings]
     work_iq_session: NotRequired[WorkIQSessionMetadata | None]
     previous_versions: NotRequired[list[dict[str, object]]]
+    agent_metrics: NotRequired[dict[str, AgentMetricSnapshot]]
+    initial_tool_calls: NotRequired[int]
 
 
 class AgentExecutionOutcome(TypedDict):
@@ -217,6 +222,27 @@ class AgentExecutionOutcome(TypedDict):
     latency_seconds: float
     tool_calls: int
     total_tokens: int
+    prompt_tokens: NotRequired[int]
+    completion_tokens: NotRequired[int]
+    estimated_cost_usd: NotRequired[float]
+
+
+class TokenUsage(TypedDict, total=False):
+    """モデル応答から抽出した token usage。"""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class AgentMetricSnapshot(TypedDict, total=False):
+    """done.metrics 用の agent 別メトリクス。"""
+
+    latency_seconds: float
+    total_tokens: int
+    prompt_tokens: int
+    completion_tokens: int
+    estimated_cost_usd: float
 
 
 class RefineContext(BaseModel):
@@ -292,6 +318,8 @@ def _build_agent_tool_event(
     error_code: str | None = None,
     error_message: str | None = None,
     source_scope: list[str] | None = None,
+    evidence: list[Mapping[str, object]] | None = None,
+    charts: list[Mapping[str, object]] | None = None,
 ) -> ToolEventPayload:
     """agent 実行由来の canonical tool_event payload を構築する。"""
     return build_tool_event_data(
@@ -314,6 +342,8 @@ def _build_agent_tool_event(
         error_code=error_code,
         error_message=error_message,
         source_scope=source_scope,
+        evidence=evidence,
+        charts=charts,
     )
 
 
@@ -1279,6 +1309,47 @@ def _record_sse_event(collected_events: list[dict], event: str, start: float) ->
         logger.warning("SSE イベント収集のパースに失敗: %s", exc)
 
 
+def _schedule_pipeline_monitoring(
+    background_tasks: BackgroundTasks | None,
+    *,
+    conversation_id: str,
+    collected_events: list[dict],
+    conversation_status: str,
+) -> None:
+    """完了済み pipeline を privacy-safe な継続監視へ非同期登録する。"""
+    if conversation_status != "completed":
+        return
+    plan_markdown = ""
+    brochure_html = ""
+    for event in collected_events:
+        if event.get("event") != SSEEventType.TEXT.value:
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        content = _sanitize_optional_text(data.get("content"))
+        if not content:
+            continue
+        agent = _sanitize_optional_text(data.get("agent"))
+        content_type = _sanitize_optional_text(data.get("content_type")).lower()
+        if content_type == "html" or agent == "brochure-gen-agent":
+            brochure_html = content
+        elif agent in {"plan-revision-agent", "marketing-plan-agent"}:
+            plan_markdown = content
+    monitoring_record = build_pipeline_monitoring_record(
+        conversation_id=conversation_id,
+        events=collected_events,
+        status=conversation_status,
+    )
+    schedule_pipeline_evaluation_monitoring(
+        background_tasks,
+        record=monitoring_record,
+        sample_key=f"pipeline:{conversation_id}:{len(collected_events)}",
+        plan_markdown=plan_markdown,
+        brochure_html=brochure_html,
+    )
+
+
 def _sse_to_event_dict(event: str, *, background_update: bool = False) -> dict | None:
     """SSE 文字列を会話保存用イベント dict に変換する。"""
     try:
@@ -1385,23 +1456,302 @@ def _extract_result_text(result: object) -> str:
     return _strip_response_citation_markers(str(result))
 
 
+_TOKEN_USAGE_PROMPT_KEYS = ("prompt_tokens", "input_tokens", "total_input_tokens", "input_token_count")
+_TOKEN_USAGE_COMPLETION_KEYS = (
+    "completion_tokens",
+    "output_tokens",
+    "total_output_tokens",
+    "output_token_count",
+)
+_TOKEN_USAGE_TOTAL_KEYS = ("total_tokens", "tokens_total", "total_token_count")
+_COST_ESTIMATE_RATES_USD_PER_1M: dict[str, tuple[float, float]] = {
+    "gpt-5-4-mini": (0.25, 2.00),
+    "gpt-5.4-mini": (0.25, 2.00),
+    "gpt-5.4": (1.25, 10.00),
+    "gpt-5-5": (1.25, 10.00),
+    "gpt-5.5": (1.25, 10.00),
+    "gpt-4-1-mini": (0.40, 1.60),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1": (2.00, 8.00),
+}
+
+
+def _coerce_non_negative_int(value: object) -> int | None:
+    """usage metadata の数値を非負整数へ安全に変換する。"""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value >= 0 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def _safe_getattr(value: object, attr_name: str) -> object | None:
+    """任意オブジェクトから副作用を抑えて属性を取得する。"""
+    try:
+        resolved = getattr(value, attr_name)
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return None
+    if callable(resolved):
+        return None
+    return resolved
+
+
+def _usage_to_mapping(usage: object) -> Mapping[str, object] | None:
+    """usage オブジェクトを既知フィールドだけ読むための mapping に変換する。"""
+    if isinstance(usage, Mapping):
+        return usage
+    for method_name in ("model_dump", "as_dict"):
+        method = getattr(usage, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            payload = method()
+        except (TypeError, ValueError, RuntimeError, OSError):
+            continue
+        if isinstance(payload, Mapping):
+            return payload
+
+    extracted: dict[str, object] = {}
+    for key in (*_TOKEN_USAGE_PROMPT_KEYS, *_TOKEN_USAGE_COMPLETION_KEYS, *_TOKEN_USAGE_TOTAL_KEYS):
+        value = _safe_getattr(usage, key)
+        if value is not None:
+            extracted[key] = value
+    return extracted or None
+
+
+def _read_token_count(mapping: Mapping[str, object], keys: tuple[str, ...]) -> int | None:
+    """usage mapping から最初に見つかった token count を返す。"""
+    for key in keys:
+        parsed = _coerce_non_negative_int(mapping.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_usage_from_candidate(candidate: object) -> TokenUsage | None:
+    """usage 候補から token usage を抽出する。"""
+    usage_mapping = _usage_to_mapping(candidate)
+    if usage_mapping is None:
+        return None
+
+    prompt_tokens = _read_token_count(usage_mapping, _TOKEN_USAGE_PROMPT_KEYS)
+    completion_tokens = _read_token_count(usage_mapping, _TOKEN_USAGE_COMPLETION_KEYS)
+    total_tokens = _read_token_count(usage_mapping, _TOKEN_USAGE_TOTAL_KEYS)
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    usage: TokenUsage = {}
+    if prompt_tokens is not None:
+        usage["prompt_tokens"] = prompt_tokens
+    if completion_tokens is not None:
+        usage["completion_tokens"] = completion_tokens
+    if total_tokens is not None:
+        usage["total_tokens"] = total_tokens
+    return usage or None
+
+
+def _merge_token_usage(usages: list[TokenUsage]) -> TokenUsage:
+    """複数 output の usage を合算する。"""
+    merged: TokenUsage = {}
+    for field_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        values = [usage[field_name] for usage in usages if field_name in usage]
+        if values:
+            merged[field_name] = sum(values)
+    if "total_tokens" not in merged and "prompt_tokens" in merged and "completion_tokens" in merged:
+        merged["total_tokens"] = merged["prompt_tokens"] + merged["completion_tokens"]
+    return merged
+
+
+def _flatten_output_items(value: object, *, max_items: int = 100) -> list[object]:
+    """get_outputs() などのネストを浅く展開する。"""
+    flattened: list[object] = []
+    pending: list[object] = [value]
+    while pending and len(flattened) < max_items:
+        current = pending.pop(0)
+        if isinstance(current, list | tuple):
+            pending[0:0] = list(current)
+            continue
+        flattened.append(current)
+    return flattened
+
+
+def _extract_token_usage(result: object) -> TokenUsage:
+    """agent.run() の返り値から prompt/completion/total token を安全に抽出する。"""
+    if result is None:
+        return {}
+
+    direct_candidates = [
+        _safe_getattr(result, "usage"),
+        _safe_getattr(_safe_getattr(result, "response"), "usage"),
+        _safe_getattr(_safe_getattr(result, "raw_response"), "usage"),
+    ]
+    for candidate in direct_candidates:
+        usage = _extract_usage_from_candidate(candidate)
+        if usage:
+            return usage
+
+    output_usages: list[TokenUsage] = []
+    output_roots: list[object] = []
+    try:
+        if hasattr(result, "get_outputs"):
+            output_roots.append(result.get_outputs())
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        pass
+    for attr_name in ("outputs", "output"):
+        attr_value = _safe_getattr(result, attr_name)
+        if attr_value is not None:
+            output_roots.append(attr_value)
+
+    seen_usage_ids: set[int] = set()
+    for output_root in output_roots:
+        for output in _flatten_output_items(output_root):
+            usage_candidate = output.get("usage") if isinstance(output, Mapping) else _safe_getattr(output, "usage")
+            if usage_candidate is None or id(usage_candidate) in seen_usage_ids:
+                continue
+            seen_usage_ids.add(id(usage_candidate))
+            usage = _extract_usage_from_candidate(usage_candidate)
+            if usage:
+                output_usages.append(usage)
+    return _merge_token_usage(output_usages)
+
+
 def _extract_total_tokens(result: object) -> int:
     """agent.run() の返り値からトークン使用量を取り出す。"""
-    if result is None:
-        return 0
-    # Responses API は usage 属性を返す
-    usage = getattr(result, "usage", None)
-    if usage is not None:
-        return getattr(usage, "total_tokens", 0) or 0
-    # get_outputs() 経由で最後の output の usage を探す
-    try:
-        for output in result.get_outputs() if hasattr(result, "get_outputs") else []:
-            out_usage = getattr(output, "usage", None)
-            if out_usage:
-                return getattr(out_usage, "total_tokens", 0) or 0
-    except AttributeError, TypeError, RuntimeError:
-        pass
-    return 0
+    return _extract_token_usage(result).get("total_tokens", 0)
+
+
+def _resolve_cost_model_name(model_settings: dict | None = None) -> str:
+    """見積り用のモデル名を設定から解決する。"""
+    selected_model = _sanitize_optional_text(str((model_settings or {}).get("model", "")))
+    if selected_model:
+        return selected_model
+    return _sanitize_optional_text(get_settings().get("model_name"))
+
+
+def _estimate_cost_usd(token_usage: TokenUsage, model_settings: dict | None = None) -> float | None:
+    """ENABLE_COST_METRICS 有効時だけ token usage から概算コストを算出する。"""
+    settings = get_settings()
+    if not parse_bool_setting(settings.get("enable_cost_metrics")):
+        return None
+    prompt_tokens = token_usage.get("prompt_tokens", 0)
+    completion_tokens = token_usage.get("completion_tokens", 0)
+    if prompt_tokens <= 0 and completion_tokens <= 0:
+        return None
+
+    model_key = _resolve_cost_model_name(model_settings).lower().replace("_", "-")
+    rates = _COST_ESTIMATE_RATES_USD_PER_1M.get(model_key)
+    if rates is None:
+        return None
+    input_rate, output_rate = rates
+    estimated = (prompt_tokens / 1_000_000) * input_rate + (completion_tokens / 1_000_000) * output_rate
+    return round(estimated, 6)
+
+
+def _build_agent_metric_snapshot(outcome: AgentExecutionOutcome) -> AgentMetricSnapshot:
+    """AgentExecutionOutcome から保存・SSE 用メトリクスを抽出する。"""
+    metric: AgentMetricSnapshot = {
+        "latency_seconds": outcome.get("latency_seconds", 0),
+        "total_tokens": outcome.get("total_tokens", 0),
+    }
+    if outcome.get("prompt_tokens", 0) > 0:
+        metric["prompt_tokens"] = outcome["prompt_tokens"]
+    if outcome.get("completion_tokens", 0) > 0:
+        metric["completion_tokens"] = outcome["completion_tokens"]
+    if outcome.get("estimated_cost_usd") is not None:
+        metric["estimated_cost_usd"] = outcome["estimated_cost_usd"]
+    return metric
+
+
+def _merge_agent_metric_snapshots(
+    *metric_maps: Mapping[str, AgentMetricSnapshot] | None,
+) -> dict[str, AgentMetricSnapshot]:
+    """複数フェーズの agent metrics を agent 名ごとに合算する。"""
+    merged: dict[str, AgentMetricSnapshot] = {}
+    for metric_map in metric_maps:
+        if not metric_map:
+            continue
+        for agent_name, metric in metric_map.items():
+            if not agent_name:
+                continue
+            current = merged.setdefault(agent_name, {})
+            current["latency_seconds"] = round(
+                float(current.get("latency_seconds", 0)) + float(metric.get("latency_seconds", 0)),
+                1,
+            )
+            for key in ("total_tokens", "prompt_tokens", "completion_tokens"):
+                value = metric.get(key)
+                if isinstance(value, int) and value > 0:
+                    current[key] = int(current.get(key, 0)) + value
+            cost = metric.get("estimated_cost_usd")
+            if isinstance(cost, int | float) and cost >= 0:
+                current["estimated_cost_usd"] = round(float(current.get("estimated_cost_usd", 0)) + float(cost), 6)
+    return merged
+
+
+def _build_done_metrics(
+    *,
+    latency_seconds: float,
+    tool_calls: int,
+    total_tokens: int,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    agent_metrics: Mapping[str, AgentMetricSnapshot] | None = None,
+) -> dict[str, object]:
+    """done.metrics payload を後方互換のまま拡張する。"""
+    metrics: dict[str, object] = {
+        "latency_seconds": latency_seconds,
+        "tool_calls": tool_calls,
+        "total_tokens": total_tokens,
+    }
+    if prompt_tokens > 0:
+        metrics["prompt_tokens"] = prompt_tokens
+    if completion_tokens > 0:
+        metrics["completion_tokens"] = completion_tokens
+
+    if agent_metrics and parse_bool_setting(get_settings().get("enable_cost_metrics")):
+        agent_latencies = {
+            agent_name: metric.get("latency_seconds", 0)
+            for agent_name, metric in agent_metrics.items()
+            if "latency_seconds" in metric and metric.get("latency_seconds", 0) >= 0
+        }
+        agent_tokens = {
+            agent_name: metric["total_tokens"]
+            for agent_name, metric in agent_metrics.items()
+            if metric.get("total_tokens", 0) > 0
+        }
+        agent_prompt_tokens = {
+            agent_name: metric["prompt_tokens"]
+            for agent_name, metric in agent_metrics.items()
+            if metric.get("prompt_tokens", 0) > 0
+        }
+        agent_completion_tokens = {
+            agent_name: metric["completion_tokens"]
+            for agent_name, metric in agent_metrics.items()
+            if metric.get("completion_tokens", 0) > 0
+        }
+        agent_costs = {
+            agent_name: metric["estimated_cost_usd"]
+            for agent_name, metric in agent_metrics.items()
+            if metric.get("estimated_cost_usd") is not None
+        }
+        if agent_latencies:
+            metrics["agent_latencies"] = agent_latencies
+        if agent_tokens:
+            metrics["agent_tokens"] = agent_tokens
+        if agent_prompt_tokens:
+            metrics["agent_prompt_tokens"] = agent_prompt_tokens
+        if agent_completion_tokens:
+            metrics["agent_completion_tokens"] = agent_completion_tokens
+        if agent_costs:
+            metrics["agent_estimated_costs_usd"] = agent_costs
+            metrics["estimated_cost_usd"] = round(sum(agent_costs.values()), 6)
+    return metrics
 
 
 def _extract_brochure_html(result_text: str) -> str | None:
@@ -1852,6 +2202,7 @@ async def _build_brochure_fallback_outcome(
         "success": True,
         "latency_seconds": elapsed,
         "tool_calls": 3,
+        "total_tokens": 0,
     }
 
 
@@ -1928,7 +2279,7 @@ def _collect_result_outputs(result: object) -> list[object]:
 
     try:
         outputs = result.get_outputs() if hasattr(result, "get_outputs") else []
-    except AttributeError, TypeError, RuntimeError, OSError:
+    except (AttributeError, TypeError, RuntimeError, OSError):
         outputs = []
 
     if isinstance(outputs, list):
@@ -1998,6 +2349,70 @@ def _extract_mcp_calls(result: object, *, server_label: str | None = None) -> li
             continue
         calls.append(output)
     return calls
+
+
+def _read_mapping_or_attr(value: object, key: str) -> object | None:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return _safe_getattr(value, key)
+
+
+def _iter_content_items(value: object) -> list[object]:
+    items: list[object] = []
+    content = _read_mapping_or_attr(value, "content")
+    if isinstance(content, list):
+        items.extend(content)
+    elif content is not None:
+        items.append(content)
+    return items
+
+
+def _iter_annotations(value: object) -> list[object]:
+    annotations = _read_mapping_or_attr(value, "annotations")
+    return list(annotations) if isinstance(annotations, list | tuple) else []
+
+
+def _extract_web_search_evidence(result: object, result_text: str) -> list[Mapping[str, object]]:
+    """Foundry Web Search の URL citation を安全な evidence schema へ変換する。"""
+    evidence: list[Mapping[str, object]] = []
+    seen_urls: set[str] = set()
+    for output in _collect_result_outputs(result):
+        candidates = [output, *_iter_content_items(output)]
+        for candidate in candidates:
+            for annotation in _iter_annotations(candidate):
+                annotation_type = str(_read_mapping_or_attr(annotation, "type") or "")
+                raw_url = str(_read_mapping_or_attr(annotation, "url") or "")
+                if annotation_type and annotation_type != "url_citation":
+                    continue
+                if not raw_url or raw_url in seen_urls:
+                    continue
+                seen_urls.add(raw_url)
+                title = _sanitize_optional_text(str(_read_mapping_or_attr(annotation, "title") or "Web Search reference"))
+                evidence.append(
+                    {
+                        "id": f"web-search-{len(evidence) + 1}",
+                        "title": title or "Web Search reference",
+                        "source": "web",
+                        "url": raw_url,
+                        "relevance": 0.75,
+                        "metadata": {"provider": "foundry_web_search"},
+                    }
+                )
+                if len(evidence) >= 5:
+                    return evidence
+
+    if not evidence and result_text.strip():
+        evidence.append(
+            {
+                "id": "web-search-summary",
+                "title": "Web Search summary",
+                "source": "web",
+                "quote": result_text[:240],
+                "relevance": 0.6,
+                "metadata": {"provider": "foundry_web_search", "citation_urls": 0},
+            }
+        )
+    return evidence
 
 
 async def _load_pending_approval_context(
@@ -2497,7 +2912,11 @@ async def _execute_agent(
             delay_seconds = delay_seconds * 2 + random.uniform(0, delay_seconds * 0.3)
 
     result_text = _extract_result_text(result)
-    total_tokens = _extract_total_tokens(result)
+    token_usage = _extract_token_usage(result)
+    total_tokens = token_usage.get("total_tokens", 0)
+    prompt_tokens = token_usage.get("prompt_tokens", 0)
+    completion_tokens = token_usage.get("completion_tokens", 0)
+    estimated_cost_usd = _estimate_cost_usd(token_usage, model_settings)
     tool_names = _extract_tool_names(result, agent_name, result_text)
     if agent_name == "marketing-plan-agent" and used_foundry_prompt_agent:
         work_iq_enabled_for_prompt = bool(
@@ -2738,6 +3157,7 @@ async def _execute_agent(
             )
 
     inferred_tool_events: list[ToolEventPayload] = []
+    web_search_evidence = _extract_web_search_evidence(result, result_text) if "web_search" in tool_names else []
     for tool_name in tool_names:
         if tool_name in explicit_completed_tools:
             continue
@@ -2750,6 +3170,7 @@ async def _execute_agent(
                 source="foundry",
                 provider="foundry",
                 inferred=True,
+                evidence=web_search_evidence if tool_name == "web_search" else None,
             )
         )
 
@@ -2775,22 +3196,7 @@ async def _execute_agent(
         tool_events=all_tool_events,
     )
 
-    if include_done:
-        events.append(
-            format_sse(
-                SSEEventType.DONE,
-                {
-                    "conversation_id": conversation_id,
-                    "metrics": {
-                        "latency_seconds": elapsed,
-                        "tool_calls": tool_calls,
-                        "total_tokens": total_tokens,
-                    },
-                },
-            )
-        )
-
-    return {
+    outcome: AgentExecutionOutcome = {
         "events": events,
         "text": result_text,
         "success": True,
@@ -2798,6 +3204,32 @@ async def _execute_agent(
         "tool_calls": tool_calls,
         "total_tokens": total_tokens,
     }
+    if prompt_tokens > 0:
+        outcome["prompt_tokens"] = prompt_tokens
+    if completion_tokens > 0:
+        outcome["completion_tokens"] = completion_tokens
+    if estimated_cost_usd is not None:
+        outcome["estimated_cost_usd"] = estimated_cost_usd
+
+    if include_done:
+        events.append(
+            format_sse(
+                SSEEventType.DONE,
+                {
+                    "conversation_id": conversation_id,
+                    "metrics": _build_done_metrics(
+                        latency_seconds=elapsed,
+                        tool_calls=tool_calls,
+                        total_tokens=total_tokens,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        agent_metrics={agent_name: _build_agent_metric_snapshot(outcome)},
+                    ),
+                },
+            )
+        )
+
+    return outcome
 
 
 async def _execute_agent_with_runtime(
@@ -2950,6 +3382,23 @@ async def mock_event_generator(user_input: str, conversation_id: str):
             "tool": "search_sales_history",
             "status": "completed",
             "agent": "data-search-agent",
+            "evidence": [
+                {
+                    "id": "mock-fabric-sales",
+                    "title": "販売履歴サマリ",
+                    "source": "fabric",
+                    "quote": "沖縄エリアの春季売上は前年比 +12% で推移。",
+                    "relevance": 0.9,
+                }
+            ],
+            "charts": [
+                {
+                    "chart_type": "bar",
+                    "title": "春季売上",
+                    "series": ["revenue"],
+                    "data": [{"plan": "沖縄ファミリー", "revenue": 358400}],
+                }
+            ],
         },
     )
     await asyncio.sleep(0.3)
@@ -2992,6 +3441,15 @@ async def mock_event_generator(user_input: str, conversation_id: str):
             "tool": "web_search",
             "status": "completed",
             "agent": "marketing-plan-agent",
+            "evidence": [
+                {
+                    "id": "mock-web-trend",
+                    "title": "旅行市場トレンド",
+                    "source": "web",
+                    "quote": "春休みのファミリー旅行需要が堅調に推移。",
+                    "relevance": 0.7,
+                }
+            ],
         },
     )
     await asyncio.sleep(0.3)
@@ -3058,6 +3516,14 @@ async def _mock_post_approval_events(conversation_id: str):
             "tool": "check_ng_expressions",
             "status": "completed",
             "agent": "regulation-check-agent",
+            "evidence": [
+                {
+                    "id": "mock-local-ng",
+                    "title": "NG 表現辞書",
+                    "source": "local-check",
+                    "quote": "禁止表現リストを照合し、該当表現は検出されませんでした。",
+                }
+            ],
         },
     )
     await asyncio.sleep(0.2)
@@ -3068,6 +3534,21 @@ async def _mock_post_approval_events(conversation_id: str):
             "tool": "check_travel_law_compliance",
             "status": "completed",
             "agent": "regulation-check-agent",
+            "evidence": [
+                {
+                    "id": "mock-travel-law",
+                    "title": "旅行業法チェックリスト",
+                    "source": "local-check",
+                    "quote": "広告表示規制と登録番号表示を確認しました。",
+                }
+            ],
+            "charts": [
+                {
+                    "chart_type": "table",
+                    "title": "旅行業法チェック結果",
+                    "data": [{"check_item": "広告表示規制", "status": "✅ 適合"}],
+                }
+            ],
         },
     )
     await asyncio.sleep(0.3)
@@ -3615,15 +4096,7 @@ async def _refine_events(
 
 
 def _get_reference_brochure_path() -> str | None:
-    """既存パンフレットPDFのパスを取得する。"""
-    settings = get_settings()
-    if not settings.get("content_understanding_endpoint"):
-        return None
-    # data/ ディレクトリ内の PDF ファイルを検索（最新アップロード優先）
-    data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-    pdf_files = sorted(data_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if pdf_files:
-        return str(pdf_files[0])
+    """最新 data/*.pdf の暗黙参照は使わず、source ingestion のレビュー済み要約を使う。"""
     return None
 
 
@@ -3684,8 +4157,6 @@ async def _post_approval_events(
         )
         return
 
-    total_tool_calls = 0
-    total_tokens_sum = 0
     approval_start = time.monotonic()
     workflow_settings = context.get("workflow_settings")
     approval_scope = context.get("approval_scope", "user")
@@ -3696,6 +4167,12 @@ async def _post_approval_events(
     hero_image_task = None
     destination_text = None
     video_outcome_task = None
+    initial_agent_metrics = context.get("agent_metrics") if isinstance(context.get("agent_metrics"), dict) else {}
+    total_agent_metrics = _merge_agent_metric_snapshots(initial_agent_metrics)
+    total_tool_calls = int(context.get("initial_tool_calls", 0) or 0)
+    total_tokens_sum = sum(metric.get("total_tokens", 0) for metric in total_agent_metrics.values())
+    total_prompt_tokens = sum(metric.get("prompt_tokens", 0) for metric in total_agent_metrics.values())
+    total_completion_tokens = sum(metric.get("completion_tokens", 0) for metric in total_agent_metrics.values())
 
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
@@ -3755,6 +4232,12 @@ async def _post_approval_events(
             return
         total_tool_calls += regulation_outcome["tool_calls"]
         total_tokens_sum += regulation_outcome.get("total_tokens", 0)
+        total_prompt_tokens += regulation_outcome.get("prompt_tokens", 0)
+        total_completion_tokens += regulation_outcome.get("completion_tokens", 0)
+        total_agent_metrics = _merge_agent_metric_snapshots(
+            total_agent_metrics,
+            {"regulation-check-agent": _build_agent_metric_snapshot(regulation_outcome)},
+        )
         regulation_text = regulation_outcome["text"]
 
         revision_input = f"## 元の企画書\n\n{context['plan_markdown']}\n\n## 規制チェック結果\n\n{regulation_text}"
@@ -3772,6 +4255,12 @@ async def _post_approval_events(
             return
         total_tool_calls += revision_outcome["tool_calls"]
         total_tokens_sum += revision_outcome.get("total_tokens", 0)
+        total_prompt_tokens += revision_outcome.get("prompt_tokens", 0)
+        total_completion_tokens += revision_outcome.get("completion_tokens", 0)
+        total_agent_metrics = _merge_agent_metric_snapshots(
+            total_agent_metrics,
+            {"plan-revision-agent": _build_agent_metric_snapshot(revision_outcome)},
+        )
         revised_plan_markdown = revision_outcome["text"] or context["plan_markdown"]
 
         if workflow_settings and workflow_settings.get("manager_approval_enabled"):
@@ -3826,6 +4315,8 @@ async def _post_approval_events(
                     "manager_callback_token": manager_callback_token,
                     "previous_versions": previous_versions,
                     "owner_id": context_owner_id,
+                    "agent_metrics": total_agent_metrics,
+                    "initial_tool_calls": total_tool_calls,
                 },
             )
             yield format_sse(
@@ -3904,6 +4395,12 @@ async def _post_approval_events(
         return
     total_tool_calls += brochure_outcome["tool_calls"]
     total_tokens_sum += brochure_outcome.get("total_tokens", 0)
+    total_prompt_tokens += brochure_outcome.get("prompt_tokens", 0)
+    total_completion_tokens += brochure_outcome.get("completion_tokens", 0)
+    total_agent_metrics = _merge_agent_metric_snapshots(
+        total_agent_metrics,
+        {"brochure-gen-agent": _build_agent_metric_snapshot(brochure_outcome)},
+    )
 
     if video_outcome_task is not None:
         video_outcome = await video_outcome_task
@@ -3911,6 +4408,12 @@ async def _post_approval_events(
             yield event
         total_tool_calls += video_outcome["tool_calls"]
         total_tokens_sum += video_outcome.get("total_tokens", 0)
+        total_prompt_tokens += video_outcome.get("prompt_tokens", 0)
+        total_completion_tokens += video_outcome.get("completion_tokens", 0)
+        total_agent_metrics = _merge_agent_metric_snapshots(
+            total_agent_metrics,
+            {"video-gen-agent": _build_agent_metric_snapshot(video_outcome)},
+        )
 
     from src.agents.video_gen import pop_pending_video_job
 
@@ -3978,11 +4481,14 @@ async def _post_approval_events(
         {
             "conversation_id": conversation_id,
             "background_updates_pending": background_updates_pending,
-            "metrics": {
-                "latency_seconds": round(time.monotonic() - approval_start, 1),
-                "tool_calls": total_tool_calls,
-                "total_tokens": total_tokens_sum,
-            },
+            "metrics": _build_done_metrics(
+                latency_seconds=round(time.monotonic() - approval_start, 1),
+                tool_calls=total_tool_calls,
+                total_tokens=total_tokens_sum,
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=total_completion_tokens,
+                agent_metrics=total_agent_metrics,
+            ),
         },
     )
 
@@ -4294,6 +4800,15 @@ async def _run_manager_approval_continuation(
             status=conversation_status,
             owner_id=resolved_owner_id,
         )
+    else:
+        _schedule_pipeline_monitoring(
+            None,
+            conversation_id=conversation_id,
+            collected_events=collected_events,
+            conversation_status=_conversation_status_from_events(
+                [*existing_conversation.get("messages", []), *collected_events]
+            ),
+        )
 
     for update_job in background_update_jobs:
         asyncio.create_task(_append_post_completion_updates_safe(conversation_id, update_job))
@@ -4477,6 +4992,10 @@ async def workflow_event_generator(
             ),
         )
 
+    initial_agent_metrics = _merge_agent_metric_snapshots(
+        {"data-search-agent": _build_agent_metric_snapshot(analysis_outcome)},
+        {"marketing-plan-agent": _build_agent_metric_snapshot(plan_outcome)},
+    )
     _store_pending_approval_context(
         conversation_id,
         {
@@ -4490,6 +5009,8 @@ async def workflow_event_generator(
             "owner_id": _sanitize_optional_text(owner_id),
             "conversation_settings": conversation_settings or {"work_iq_enabled": False, "source_scope": []},
             "work_iq_session": work_iq_session,
+            "agent_metrics": initial_agent_metrics,
+            "initial_tool_calls": analysis_outcome["tool_calls"] + plan_outcome["tool_calls"],
         },
     )
 
@@ -4512,12 +5033,19 @@ async def workflow_event_generator(
 
 @router.post("/chat")
 @limiter.limit("10/minute")
-async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
+async def chat(request: Request, body: ChatRequest, background_tasks: BackgroundTasks) -> StreamingResponse:
     """チャットメッセージを受け取り、SSE ストリームでパイプライン結果を返す"""
     conversation_id = body.conversation_id or str(uuid.uuid4())
     settings = get_settings()
     project_endpoint_available = bool(settings["project_endpoint"])
-    caller_identity = extract_request_identity(request, expected_tenant_id=settings["entra_tenant_id"])
+    try:
+        caller_identity = extract_request_identity(
+            request,
+            expected_tenant_id=settings["entra_tenant_id"],
+            enforce_owner_boundary=True,
+        )
+    except RequestIdentityError as exc:
+        return _error_stream(exc.message, exc.code, status_code=exc.status_code)
     work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
     work_iq_graph_access_token = _extract_bearer_token(
         _sanitize_optional_text(request.headers.get("x-work-iq-graph-authorization"))
@@ -4591,11 +5119,17 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 _record_sse_event(collected_events, event, start)
                 yield event
 
-        # conversation_id が既存 = マルチターン修正
-        if body.conversation_id:
+        contextual_message = await build_contextual_chat_input(
+            owner_id=caller_identity["user_id"],
+            conversation_id=conversation_id,
+            user_input=body.message,
+        )
+
+        # conversation_id が保存済み会話の場合のみマルチターン修正。未保存 ID は source draft と同じ ID で初回実行する。
+        if body.conversation_id and existing_conversation is not None:
             async for event in _collect_and_yield(
                 _refine_events(
-                    body.message,
+                    contextual_message,
                     conversation_id,
                     body.refine_context,
                     owner_id=caller_identity["user_id"],
@@ -4610,7 +5144,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             if project_endpoint_available:
                 async for event in _collect_and_yield(
                     workflow_event_generator(
-                        body.message,
+                        contextual_message,
                         conversation_id,
                         normalized_model_settings,
                         normalized_workflow_settings,
@@ -4624,7 +5158,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 ):
                     yield event
             else:
-                async for event in _collect_and_yield(mock_event_generator(body.message, conversation_id)):
+                async for event in _collect_and_yield(mock_event_generator(contextual_message, conversation_id)):
                     yield event
 
         # 会話を非同期で保存（レスポンスには影響しない）
@@ -4653,6 +5187,12 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                 ),
                 status=conversation_status,
                 owner_id=caller_identity["user_id"],
+            )
+            _schedule_pipeline_monitoring(
+                background_tasks,
+                conversation_id=conversation_id,
+                collected_events=collected_events,
+                conversation_status=conversation_status,
             )
         except (ValueError, OSError) as exc:
             logger.debug("会話保存に失敗（非致命的）: %s", exc)
@@ -4701,7 +5241,14 @@ async def approve(
     thread_id: str, request: Request, body: ApproveRequest, background_tasks: BackgroundTasks
 ) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
-    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
+    try:
+        caller_identity = extract_request_identity(
+            request,
+            expected_tenant_id=get_settings()["entra_tenant_id"],
+            enforce_owner_boundary=True,
+        )
+    except RequestIdentityError as exc:
+        return _error_stream(exc.message, exc.code, status_code=exc.status_code)
     # 入力ガード（承認レスポンスにも適用）
     shield_result = await check_prompt_shield(body.response)
     is_approved = _is_approval_response(body.response)
@@ -4741,9 +5288,14 @@ async def approve(
                 yield event
         else:
             work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
+            contextual_response = await build_contextual_chat_input(
+                owner_id=caller_identity["user_id"],
+                conversation_id=thread_id,
+                user_input=body.response,
+            )
             async for event in _collect_and_yield(
                 _refine_events(
-                    body.response,
+                    contextual_response,
                     thread_id,
                     owner_id=caller_identity["user_id"],
                     work_iq_access_token=work_iq_access_token,
@@ -4777,6 +5329,12 @@ async def approve(
                 ),
                 status=conversation_status,
                 owner_id=caller_identity["user_id"],
+            )
+            _schedule_pipeline_monitoring(
+                background_tasks,
+                conversation_id=thread_id,
+                collected_events=collected_events,
+                conversation_status=conversation_status,
             )
         except (ValueError, OSError) as exc:
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
@@ -4952,35 +5510,8 @@ async def manager_approval_callback(
     return JSONResponse(content={"status": "reopened", "conversation_id": thread_id})
 
 
-_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-
-
 @router.post("/upload-pdf")
 @limiter.limit("5/minute")
 async def upload_pdf(request: Request, file: UploadFile) -> JSONResponse:
-    """既存パンフレット PDF をアップロードし、data/ に保存する。
-
-    Content Understanding (Agent4) が参照するための前処理。
-    """
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        return JSONResponse({"error": "PDF ファイルのみアップロード可能です"}, status_code=400)
-
-    # ファイル名のサニタイズ（ディレクトリトラバーサル防止）
-    safe_name = Path(file.filename).name
-    if not safe_name or safe_name.startswith("."):
-        return JSONResponse({"error": "無効なファイル名です"}, status_code=400)
-
-    content = await file.read()
-    if len(content) > _UPLOAD_MAX_BYTES:
-        return JSONResponse({"error": "ファイルサイズが上限（10MB）を超えています"}, status_code=413)
-
-    # PDF 先頭バイト検証
-    if not content[:5].startswith(b"%PDF-"):
-        return JSONResponse({"error": "有効な PDF ファイルではありません"}, status_code=400)
-
-    dest = _ALLOWED_DIR / safe_name
-    dest.write_bytes(content)
-    logger.info("PDF アップロード完了: %s (%d bytes)", safe_name, len(content))
-
-    return JSONResponse({"filename": safe_name, "size": len(content)})
+    """後方互換ルート。PDF は data/ へ保存せず、source review flow に登録する。"""
+    return await create_pdf_source_from_upload(request, file)

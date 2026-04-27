@@ -50,11 +50,28 @@ class AppSettings(TypedDict):
     gpt_55_deployment_name: str
     enable_foundry_tracing: str
     enable_continuous_monitoring: str
+    continuous_monitoring_sample_rate: str
+    enable_evaluation_logging: str
+    evaluation_log_retention_days: str
     enable_cost_metrics: str
     mcp_registry_endpoint: str
+    enable_source_ingestion: str
     source_ingestion_endpoint: str
+    source_max_items_per_owner: str
+    source_ttl_seconds: str
+    source_max_text_chars: str
+    source_max_pdf_bytes: str
+    source_max_audio_seconds: str
+    source_max_audio_bytes: str
     enable_voice_talk_to_start: str
+    enable_mai_transcribe_1: str
+    mai_transcribe_1_endpoint: str
     mai_transcribe_1_deployment_name: str
+    mai_transcribe_1_api_path: str
+    trust_auth_header_claims: str
+    trusted_auth_header_name: str
+    trusted_auth_header_value: str
+    require_authenticated_owner: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -98,11 +115,28 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
         "CONTINUOUS_MONITORING_ENABLED",
         "ENABLE_CONTINUOUS_EVALUATIONS",
     ),
+    "continuous_monitoring_sample_rate": ("CONTINUOUS_MONITORING_SAMPLE_RATE",),
+    "enable_evaluation_logging": ("ENABLE_EVALUATION_LOGGING", "EVALUATION_LOGGING_ENABLED"),
+    "evaluation_log_retention_days": ("EVALUATION_LOG_RETENTION_DAYS",),
     "enable_cost_metrics": ("ENABLE_COST_METRICS", "COST_METRICS_ENABLED"),
     "mcp_registry_endpoint": ("MCP_REGISTRY_ENDPOINT", "MCP_REGISTRY_URL"),
+    "enable_source_ingestion": ("ENABLE_SOURCE_INGESTION", "SOURCE_INGESTION_ENABLED"),
     "source_ingestion_endpoint": ("SOURCE_INGESTION_ENDPOINT", "SOURCE_INGESTION_URL"),
+    "source_max_items_per_owner": ("SOURCE_MAX_ITEMS_PER_OWNER",),
+    "source_ttl_seconds": ("SOURCE_TTL_SECONDS",),
+    "source_max_text_chars": ("SOURCE_MAX_TEXT_CHARS",),
+    "source_max_pdf_bytes": ("SOURCE_MAX_PDF_BYTES",),
+    "source_max_audio_seconds": ("SOURCE_MAX_AUDIO_SECONDS",),
+    "source_max_audio_bytes": ("SOURCE_MAX_AUDIO_BYTES",),
     "enable_voice_talk_to_start": ("ENABLE_VOICE_TALK_TO_START", "VOICE_TALK_TO_START_ENABLED"),
+    "enable_mai_transcribe_1": ("ENABLE_MAI_TRANSCRIBE_1", "MAI_TRANSCRIBE_1_ENABLED"),
+    "mai_transcribe_1_endpoint": ("MAI_TRANSCRIBE_1_ENDPOINT",),
     "mai_transcribe_1_deployment_name": ("MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",),
+    "mai_transcribe_1_api_path": ("MAI_TRANSCRIBE_1_API_PATH",),
+    "trust_auth_header_claims": ("TRUST_AUTH_HEADER_CLAIMS",),
+    "trusted_auth_header_name": ("TRUSTED_AUTH_HEADER_NAME",),
+    "trusted_auth_header_value": ("TRUSTED_AUTH_HEADER_VALUE",),
+    "require_authenticated_owner": ("REQUIRE_AUTHENTICATED_OWNER",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -122,8 +156,21 @@ _DEFAULTS: dict[str, str] = {
     "enable_gpt_55": "false",
     "enable_foundry_tracing": "false",
     "enable_continuous_monitoring": "false",
+    "continuous_monitoring_sample_rate": "0.1",
+    "enable_evaluation_logging": "false",
+    "evaluation_log_retention_days": "30",
     "enable_cost_metrics": "false",
+    "enable_source_ingestion": "false",
+    "source_max_items_per_owner": "20",
+    "source_ttl_seconds": "604800",
+    "source_max_text_chars": "20000",
+    "source_max_pdf_bytes": "10485760",
+    "source_max_audio_seconds": "1800",
+    "source_max_audio_bytes": "26214400",
     "enable_voice_talk_to_start": "false",
+    "enable_mai_transcribe_1": "false",
+    "trust_auth_header_claims": "false",
+    "require_authenticated_owner": "false",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

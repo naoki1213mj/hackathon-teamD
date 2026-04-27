@@ -50,6 +50,22 @@ def test_chat_blocks_obvious_prompt_injection():
     assert "INPUT_GUARD_BLOCKED" in response.text
 
 
+def test_chat_production_rejects_untrusted_bearer_claims(monkeypatch):
+    """本番 chat owner 境界では未検証 bearer claims を拒否する。"""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
+    monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
+
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer untrusted.token.value"},
+        json={"message": "テスト入力"},
+    )
+
+    assert response.status_code == 401
+    assert "AUTH_HEADER_UNTRUSTED" in response.text
+
+
 def test_chat_sse_events_contain_expected_types():
     """SSE ストリームに期待するイベント種別が含まれる（承認要求で一旦停止する）"""
     response = client.post(
@@ -432,7 +448,7 @@ def test_chat_refine_forwards_work_iq_session_and_token(monkeypatch):
     monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
     monkeypatch.setattr(
         "src.api.chat.extract_request_identity",
-        lambda _request, expected_tenant_id="": {
+        lambda _request, expected_tenant_id="", enforce_owner_boundary=False: {
             "user_id": "user-test",
             "auth_mode": "delegated",
             "oid": "oid-1",
@@ -652,7 +668,7 @@ def test_approve_revision_forwards_work_iq_bearer_token(monkeypatch):
     monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
     monkeypatch.setattr(
         "src.api.chat.extract_request_identity",
-        lambda _request, expected_tenant_id="": {
+        lambda _request, expected_tenant_id="", enforce_owner_boundary=False: {
             "user_id": "user-test",
             "auth_mode": "delegated",
             "oid": "oid-1",

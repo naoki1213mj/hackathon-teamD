@@ -1,11 +1,13 @@
-import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, ShieldCheck, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import { getDelegatedApiAuth } from '../lib/api-auth'
+import type { ChartSpec, EvidenceItem } from '../lib/event-schemas'
 import {
     buildEvaluationFeedback,
     calculateEvaluationOverall,
     getAssetQuality,
+    getEvidenceQuality,
     getEvaluationDeltaItems,
     getEvaluationDetailChanges,
     getLatestEvaluation,
@@ -14,12 +16,14 @@ import {
     hasBuiltinMetrics,
     shouldDisplayBuiltinMetric,
     type EvaluationDeltaItem,
+    type EvaluationFinding,
     type EvaluationQualityTrack,
     type EvaluationRecord,
     type EvaluationResult,
     type RegressionGuard,
     type RegressionMetricChange,
 } from '../lib/evaluation'
+import { EvidenceChartPanel } from './EvidenceChartPanel'
 
 interface EvaluationPanelProps {
   query: string
@@ -58,6 +62,13 @@ const ASSET_GROUPS = [
   {
     titleKey: 'eval.asset_readiness',
     keys: ['cta_visibility', 'value_visibility', 'trust_signal_presence', 'disclosure_completeness', 'accessibility_readiness'],
+  },
+]
+
+const EVIDENCE_GROUPS = [
+  {
+    titleKey: 'eval.evidence_readiness',
+    keys: ['source_coverage', 'chart_support', 'finding_linkage', 'citation_safety'],
   },
 ]
 
@@ -237,6 +248,90 @@ function MetricCard({
   )
 }
 
+function uniqueByKey<T>(items: T[], keyFn: (item: T, index: number) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item, index) => {
+    const key = keyFn(item, index)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function collectEvaluationEvidenceContext(snapshot: ArtifactSnapshot | null): { evidence: EvidenceItem[]; charts: ChartSpec[] } {
+  if (!snapshot) return { evidence: [], charts: [] }
+  const evidence = [
+    ...snapshot.textContents.flatMap(item => item.evidence ?? []),
+    ...snapshot.images.flatMap(item => item.evidence ?? []),
+    ...snapshot.toolEvents.flatMap(item => item.evidence ?? []),
+    ...(snapshot.metrics?.evidence ?? []),
+  ]
+  const charts = [
+    ...snapshot.textContents.flatMap(item => item.charts ?? []),
+    ...snapshot.images.flatMap(item => item.charts ?? []),
+    ...snapshot.toolEvents.flatMap(item => item.charts ?? []),
+    ...(snapshot.metrics?.charts ?? []),
+  ]
+  return {
+    evidence: uniqueByKey(evidence, (item, index) => item.id ?? `${item.source}:${item.title ?? ''}:${item.url ?? ''}:${index}`),
+    charts: uniqueByKey(charts, (chart, index) => `${chart.chart_type}:${chart.title ?? ''}:${index}`),
+  }
+}
+
+function FindingStatusBadge({ status, t }: { status: EvaluationFinding['status']; t: (key: string) => string }) {
+  const styles = {
+    pass: 'bg-green-500/10 text-green-600',
+    warn: 'bg-amber-500/10 text-amber-600',
+    fail: 'bg-red-500/10 text-red-500',
+    na: 'bg-[var(--panel-border)] text-[var(--text-muted)]',
+  }[status]
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${styles}`}>
+      {t(`eval.finding.${status}`)}
+    </span>
+  )
+}
+
+function FindingsPanel({ findings, t }: { findings: EvaluationFinding[]; t: (key: string) => string }) {
+  if (findings.length === 0) return null
+  return (
+    <section className="space-y-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-[var(--accent-strong)]" />
+        <div>
+          <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.findings')}</p>
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">{t('eval.findings.hint')}</p>
+        </div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {findings.map(finding => (
+          <article key={finding.id} className="rounded-2xl bg-[var(--panel-strong)] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">{finding.title}</p>
+                {finding.summary && <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{finding.summary}</p>}
+              </div>
+              <FindingStatusBadge status={finding.status} t={t} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+              {typeof finding.confidence === 'number' && (
+                <span className="rounded-full border border-[var(--panel-border)] px-2.5 py-1">
+                  {t('eval.finding.confidence')}: {Math.round(finding.confidence * 100)}%
+                </span>
+              )}
+              {(finding.evidence_ids ?? []).slice(0, 4).map(id => (
+                <span key={`${finding.id}-${id}`} className="rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[var(--accent-strong)]">
+                  {id}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function DeltaBadge({ item }: { item: RegressionMetricChange }) {
   const isUp = item.delta > 0
   return (
@@ -356,6 +451,15 @@ export function EvaluationPanel({
   const previousPlanTrack = previousResult ? getPlanQuality(previousResult) : null
   const assetTrack = result ? getAssetQuality(result) : null
   const previousAssetTrack = previousResult ? getAssetQuality(previousResult) : null
+  const evidenceTrack = result ? getEvidenceQuality(result) : null
+  const previousEvidenceTrack = previousResult ? getEvidenceQuality(previousResult) : null
+  const currentSnapshot = artifactVersion && artifactVersion > 0 ? versions[artifactVersion - 1] ?? null : null
+  const evidenceContext = useMemo(
+    () => collectEvaluationEvidenceContext(currentSnapshot),
+    [currentSnapshot],
+  )
+  const resultEvidence = result?.evidence ?? evidenceContext.evidence
+  const resultCharts = result?.charts ?? evidenceContext.charts
   const regressionGuard = result ? getRegressionGuard(result) : null
   const builtinMetrics = result && hasBuiltinMetrics(result.builtin)
     ? Object.entries(result.builtin)
@@ -422,6 +526,8 @@ export function EvaluationPanel({
           html,
           conversation_id: conversationId,
           artifact_version: artifactVersion,
+          ...(evidenceContext.evidence.length > 0 ? { evidence: evidenceContext.evidence } : {}),
+          ...(evidenceContext.charts.length > 0 ? { charts: evidenceContext.charts } : {}),
         }),
       })
       if (!res.ok) {
@@ -484,7 +590,7 @@ export function EvaluationPanel({
 
       {result && (
         <div className="space-y-4 rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
-          <div className="grid gap-3 xl:grid-cols-3">
+          <div className="grid gap-3 xl:grid-cols-4">
             <SummaryCard
               eyebrow={t('eval.plan_quality')}
               title={t('eval.plan_quality')}
@@ -500,6 +606,15 @@ export function EvaluationPanel({
               previous={previousAssetTrack?.overall}
               summary={assetTrack?.summary}
             />
+            {evidenceTrack && (
+              <SummaryCard
+                eyebrow={t('eval.evidence_quality')}
+                title={t('eval.evidence_quality')}
+                score={evidenceTrack.overall}
+                previous={previousEvidenceTrack?.overall}
+                summary={evidenceTrack.summary}
+              />
+            )}
             <RegressionCard guard={regressionGuard} t={t} />
           </div>
 
@@ -520,6 +635,25 @@ export function EvaluationPanel({
               </div>
             </div>
           ) : null}
+
+          {(evidenceTrack || resultEvidence.length > 0 || resultCharts.length > 0 || (result.findings?.length ?? 0) > 0) && (
+            <div className="space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.evidence_quality')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    {evidenceTrack?.summary ?? t('eval.evidence_quality.hint')}
+                  </p>
+                </div>
+                {evidenceTrack && <ScoreBadge score={evidenceTrack.overall} />}
+              </div>
+              {resultEvidence.length > 0 || resultCharts.length > 0 ? (
+                <EvidenceChartPanel evidence={resultEvidence} charts={resultCharts} t={t} />
+              ) : null}
+              <FindingsPanel findings={result.findings ?? []} t={t} />
+              {evidenceTrack && renderTrackGroups(evidenceTrack, previousEvidenceTrack, EVIDENCE_GROUPS, t)}
+            </div>
+          )}
 
           {builtinMetrics.length > 0 && (
             <div className="space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">

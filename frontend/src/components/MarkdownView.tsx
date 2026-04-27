@@ -4,14 +4,43 @@
 
 import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { sanitizeImageUrl, sanitizeLinkUrl, stripResponseCitationMarkers } from '../lib/safe-url'
 
 interface MarkdownViewProps {
   content: string
   className?: string
 }
 
+const markdownComponents: Components = {
+  a({ href, title, children }) {
+    const safeHref = sanitizeLinkUrl(href)
+    if (!safeHref) return <span>{children}</span>
+
+    return (
+      <a href={safeHref} title={title} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    )
+  },
+  img({ src, alt, title }) {
+    const safeSrc = sanitizeImageUrl(src)
+    if (!safeSrc) return null
+
+    return <img src={safeSrc} alt={alt ?? ''} title={title} loading="lazy" />
+  },
+}
+
+function markdownUrlTransform(url: string, key: string): string {
+  if (key === 'href') return sanitizeLinkUrl(url) ?? ''
+  if (key === 'src') return sanitizeImageUrl(url) ?? ''
+  return ''
+}
+
 export const MarkdownView = memo(function MarkdownView({ content, className = '' }: MarkdownViewProps) {
+  const sanitizedContent = stripResponseCitationMarkers(content)
+
   return (
     <div
       className={[
@@ -34,7 +63,13 @@ export const MarkdownView = memo(function MarkdownView({ content, className = ''
         className,
       ].join(' ')}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+        urlTransform={markdownUrlTransform}
+      >
+        {sanitizedContent}
+      </ReactMarkdown>
     </div>
   )
 })

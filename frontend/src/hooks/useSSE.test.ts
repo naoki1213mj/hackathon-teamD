@@ -77,6 +77,42 @@ describe('buildRestoredPipelineState', () => {
     expect(state.textContents).toHaveLength(2)
   })
 
+  it('restores optional evidence, chart, trace, and debug data from image events', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          {
+            event: 'image',
+            data: {
+              url: 'data:image/png;base64,abc123',
+              alt: 'hero image',
+              agent: 'brochure-gen-agent',
+              evidence: [{ source: 'image-model', title: 'Prompt policy' }],
+              charts: [{ chart_type: 'kpi', title: 'Image latency', data: [{ label: 'ms', value: 120 }] }],
+              trace_events: [{ name: 'image.generate', status: 'completed', duration_ms: 120 }],
+              debug_events: [{ level: 'info', message: 'placeholder not used' }],
+            },
+          },
+          { event: 'done', data: { conversation_id: 'conv-images', metrics: { latency_seconds: 1, tool_calls: 1, total_tokens: 0 } } },
+        ],
+      },
+      'conv-images',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.images[0]).toMatchObject({
+      alt: 'hero image',
+      agent: 'brochure-gen-agent',
+      evidence: [{ source: 'image-model', title: 'Prompt policy' }],
+      charts: [{ chart_type: 'kpi', title: 'Image latency', data: [{ label: 'ms', value: 120 }] }],
+      trace_events: [{ name: 'image.generate', status: 'completed', duration_ms: 120 }],
+      debug_events: [{ level: 'info', message: 'placeholder not used' }],
+    })
+    expect(state.versions[0].images[0].charts?.[0].title).toBe('Image latency')
+  })
+
   it('restores manager approval conversations with manager scope', () => {
     const state = buildRestoredPipelineState(
       {
@@ -229,6 +265,10 @@ describe('buildRestoredPipelineState', () => {
             enabled: true,
             status: 'consent_required',
             source_scope: ['emails', 'teams_chats'],
+            brief_summary: '<b>安全な要約</b>',
+            brief_source_metadata: [
+              { source: 'emails', count: 2, status: 'completed', summary: '<b>メール要約</b>' },
+            ],
           },
         },
         messages: [],
@@ -242,6 +282,10 @@ describe('buildRestoredPipelineState', () => {
       workIqSourceScope: ['emails', 'teams_chats'],
     })
     expect(state.workIq.status).toBe('consent_required')
+    expect(state.workIq.briefSummary).toBe('安全な要約')
+    expect(state.workIq.sourceMetadata).toEqual([
+      { source: 'emails', count: 2, status: 'completed', summary: 'メール要約' },
+    ])
   })
 
   it('restores Work IQ warning_code when status is absent', () => {

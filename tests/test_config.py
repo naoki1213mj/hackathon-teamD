@@ -44,11 +44,28 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "GPT_55_DEPLOYMENT_NAME",
         "ENABLE_FOUNDRY_TRACING",
         "ENABLE_CONTINUOUS_MONITORING",
+        "CONTINUOUS_MONITORING_SAMPLE_RATE",
+        "ENABLE_EVALUATION_LOGGING",
+        "EVALUATION_LOG_RETENTION_DAYS",
         "ENABLE_COST_METRICS",
         "MCP_REGISTRY_ENDPOINT",
+        "ENABLE_SOURCE_INGESTION",
         "SOURCE_INGESTION_ENDPOINT",
+        "SOURCE_MAX_ITEMS_PER_OWNER",
+        "SOURCE_TTL_SECONDS",
+        "SOURCE_MAX_TEXT_CHARS",
+        "SOURCE_MAX_PDF_BYTES",
+        "SOURCE_MAX_AUDIO_SECONDS",
+        "SOURCE_MAX_AUDIO_BYTES",
         "ENABLE_VOICE_TALK_TO_START",
+        "ENABLE_MAI_TRANSCRIBE_1",
+        "MAI_TRANSCRIBE_1_ENDPOINT",
         "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
+        "MAI_TRANSCRIBE_1_API_PATH",
+        "TRUST_AUTH_HEADER_CLAIMS",
+        "TRUSTED_AUTH_HEADER_NAME",
+        "TRUSTED_AUTH_HEADER_VALUE",
+        "REQUIRE_AUTHENTICATED_OWNER",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -108,6 +125,18 @@ def test_work_iq_timeout_default(monkeypatch):
     settings = get_settings()
 
     assert settings["work_iq_timeout_seconds"] == "120"
+
+
+def test_identity_boundary_defaults_to_untrusted_header_claims(monkeypatch):
+    """未設定時は Authorization claims を信頼しない。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
+    monkeypatch.delenv("REQUIRE_AUTHENTICATED_OWNER", raising=False)
+
+    settings = get_settings()
+
+    assert settings["trust_auth_header_claims"] == "false"
+    assert settings["require_authenticated_owner"] == "false"
 
 
 def test_image_deployment_name_defaults(monkeypatch):
@@ -191,15 +220,26 @@ def test_roadmap_capability_defaults(monkeypatch):
         "ENABLE_GPT_55",
         "ENABLE_FOUNDRY_TRACING",
         "ENABLE_CONTINUOUS_MONITORING",
+        "CONTINUOUS_MONITORING_SAMPLE_RATE",
         "ENABLE_COST_METRICS",
+        "ENABLE_SOURCE_INGESTION",
         "ENABLE_VOICE_TALK_TO_START",
+        "ENABLE_MAI_TRANSCRIBE_1",
         "MODEL_ROUTER_ENDPOINT",
         "MODEL_ROUTER_DEPLOYMENT_NAME",
         "MODEL_DEPLOYMENT_ALLOWLIST",
         "GPT_55_DEPLOYMENT_NAME",
         "MCP_REGISTRY_ENDPOINT",
         "SOURCE_INGESTION_ENDPOINT",
+        "SOURCE_MAX_ITEMS_PER_OWNER",
+        "SOURCE_TTL_SECONDS",
+        "SOURCE_MAX_TEXT_CHARS",
+        "SOURCE_MAX_PDF_BYTES",
+        "SOURCE_MAX_AUDIO_SECONDS",
+        "SOURCE_MAX_AUDIO_BYTES",
+        "MAI_TRANSCRIBE_1_ENDPOINT",
         "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
+        "MAI_TRANSCRIBE_1_API_PATH",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -209,15 +249,28 @@ def test_roadmap_capability_defaults(monkeypatch):
     assert settings["enable_gpt_55"] == "false"
     assert settings["enable_foundry_tracing"] == "false"
     assert settings["enable_continuous_monitoring"] == "false"
+    assert settings["continuous_monitoring_sample_rate"] == "0.1"
+    assert settings["enable_evaluation_logging"] == "false"
+    assert settings["evaluation_log_retention_days"] == "30"
     assert settings["enable_cost_metrics"] == "false"
+    assert settings["enable_source_ingestion"] == "false"
     assert settings["enable_voice_talk_to_start"] == "false"
+    assert settings["enable_mai_transcribe_1"] == "false"
     assert settings["model_router_endpoint"] == ""
     assert settings["model_router_deployment_name"] == ""
     assert settings["model_deployment_allowlist"] == ""
     assert settings["gpt_55_deployment_name"] == ""
     assert settings["mcp_registry_endpoint"] == ""
     assert settings["source_ingestion_endpoint"] == ""
+    assert settings["source_max_items_per_owner"] == "20"
+    assert settings["source_ttl_seconds"] == "604800"
+    assert settings["source_max_text_chars"] == "20000"
+    assert settings["source_max_pdf_bytes"] == "10485760"
+    assert settings["source_max_audio_seconds"] == "1800"
+    assert settings["source_max_audio_bytes"] == "26214400"
+    assert settings["mai_transcribe_1_endpoint"] == ""
     assert settings["mai_transcribe_1_deployment_name"] == ""
+    assert settings["mai_transcribe_1_api_path"] == ""
 
 
 def test_roadmap_capability_env_aliases(monkeypatch):

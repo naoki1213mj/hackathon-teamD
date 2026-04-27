@@ -5,14 +5,118 @@ import json
 import logging
 import os
 import urllib.request
+from datetime import datetime, timezone
+from typing import Any
 
 from agent_framework import tool
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
-from src.tool_telemetry import trace_tool_invocation
+from src.tool_telemetry import build_tool_event_data, emit_tool_event, redact_sensitive_text, trace_tool_invocation
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_evidence_quote(value: object, *, max_length: int = 220) -> str:
+    normalized = redact_sensitive_text(str(value or "").replace("\n", " ").strip())
+    return f"{normalized[: max_length - 1]}…" if len(normalized) > max_length else normalized
+
+
+def _emit_regulation_evidence_event(
+    tool_name: str,
+    *,
+    source: str,
+    provider: str,
+    evidence: list[dict[str, object]],
+    charts: list[dict[str, object]] | None = None,
+) -> None:
+    """規制チェックで利用した根拠を追加の tool_event として送る。"""
+    emit_tool_event(
+        build_tool_event_data(
+            tool_name,
+            "completed",
+            agent_name="regulation-check-agent",
+            source=source,
+            provider=provider,
+            evidence=evidence,
+            charts=charts,
+        )
+    )
+
+
+def _fallback_regulation_evidence(query: str) -> list[dict[str, object]]:
+    return [
+        {
+            "id": "local-regulation-rules",
+            "title": "ローカル規制チェックリスト",
+            "source": "local-check",
+            "quote": _safe_evidence_quote(
+                f"Foundry IQ 未接続時のフォールバックとして、NG 表現 {len(NG_EXPRESSIONS)} 件と旅行業法チェック {len(TRAVEL_LAW_CHECKLIST)} 件を参照。"
+            ),
+            "retrieved_at": _utc_now_iso(),
+            "metadata": {
+                "query_length": len(query),
+                "ng_expression_count": len(NG_EXPRESSIONS),
+                "travel_law_check_count": len(TRAVEL_LAW_CHECKLIST),
+            },
+        }
+    ]
+
+
+def _reference_evidence(references: list[dict[str, Any]], *, source: str) -> list[dict[str, object]]:
+    evidence: list[dict[str, object]] = []
+    for index, ref in enumerate(references[:_iq_top_k]):
+        title = str(ref.get("title", "") or "規制ナレッジ").strip()
+        score = float(ref.get("score") or ref.get("rerankerScore") or 0)
+        if score < _iq_score_threshold:
+            continue
+        item: dict[str, object] = {
+            "id": f"{source}-reference-{index + 1}",
+            "title": title[:100],
+            "source": source,
+            "relevance": min(max(score, 0), 1),
+            "retrieved_at": _utc_now_iso(),
+            "metadata": {"knowledge_base": _KB_NAME},
+        }
+        url = str(ref.get("url", "") or ref.get("sourceUrl", "")).strip()
+        if url:
+            item["url"] = url
+        evidence.append(item)
+    return evidence
+
+
+def _result_evidence(results: list[dict[str, Any]], *, source: str, query: str) -> list[dict[str, object]]:
+    evidence: list[dict[str, object]] = []
+    for index, result in enumerate(results[:_iq_top_k]):
+        content = result.get("content") or result.get("chunk") or ""
+        title = result.get("title") or result.get("source") or "規制ナレッジ"
+        evidence.append(
+            {
+                "id": f"{source}-result-{index + 1}",
+                "title": str(title)[:100],
+                "source": source,
+                "quote": _safe_evidence_quote(content),
+                "relevance": 0.8,
+                "retrieved_at": _utc_now_iso(),
+                "metadata": {"query_length": len(query)},
+            }
+        )
+    return evidence
+
+
+def _local_check_chart(rows: list[dict[str, object]], *, title: str, source: str) -> list[dict[str, object]]:
+    return [
+        {
+            "chart_type": "table",
+            "title": title,
+            "data": rows,
+            "metadata": {"source": source},
+        }
+    ]
 
 # --- Foundry IQ Agentic Retrieval 設定 ---
 
@@ -138,6 +242,17 @@ async def search_knowledge_base(query: str) -> str:
         search_endpoint, api_key = _get_search_credentials()
         if not search_endpoint:
             logger.info("Search endpoint 未設定、フォールバック使用")
+            _emit_regulation_evidence_event(
+                "foundry_iq_search",
+                source="foundry",
+                provider="foundry",
+                evidence=_fallback_regulation_evidence(query),
+                charts=_local_check_chart(
+                    [{"category": "NG expressions", "count": len(NG_EXPRESSIONS)}, {"category": "Travel law checks", "count": len(TRAVEL_LAW_CHECKLIST)}],
+                    title="ローカル規制チェック項目",
+                    source="local-check",
+                ),
+            )
             return _get_fallback_regulations(query)
 
         try:
@@ -184,12 +299,32 @@ async def search_knowledge_base(query: str) -> str:
                 title = ref.get("title", "")
                 score = ref.get("rerankerScore", 0)
                 if title and score >= _iq_score_threshold:
-                    ref_summaries.append({"title": title, "score": score})
+                    ref_summaries.append({"title": title, "score": score, "url": ref.get("url", "") or ref.get("sourceUrl", "")})
 
             if not results:
                 logger.info("Foundry IQ KB 検索結果なし、フォールバック使用")
+                _emit_regulation_evidence_event(
+                    "foundry_iq_search",
+                    source="foundry",
+                    provider="foundry",
+                    evidence=_fallback_regulation_evidence(query),
+                )
                 return _get_fallback_regulations(query)
 
+            evidence = [*_result_evidence(results, source="foundry_iq", query=query), *_reference_evidence(ref_summaries, source="foundry_iq")]
+            _emit_regulation_evidence_event(
+                "foundry_iq_search",
+                source="foundry",
+                provider="foundry",
+                evidence=evidence,
+                charts=_local_check_chart(
+                    [{"title": item.get("title", ""), "score": item.get("score", 0)} for item in ref_summaries],
+                    title="Foundry IQ 参照スコア",
+                    source="foundry_iq",
+                )
+                if ref_summaries
+                else None,
+            )
             return json.dumps(
                 {
                     "source": "Foundry IQ Agentic Retrieval",
@@ -206,9 +341,21 @@ async def search_knowledge_base(query: str) -> str:
             # KB が未作成 (404) の場合は直接 Index 検索にフォールバック
             if e.code == 404:
                 return await _fallback_index_search(query, search_endpoint, api_key)
+            _emit_regulation_evidence_event(
+                "foundry_iq_search",
+                source="foundry",
+                provider="foundry",
+                evidence=_fallback_regulation_evidence(query),
+            )
             return _get_fallback_regulations(query)
         except Exception as e:
             logger.warning("Foundry IQ KB 検索失敗: %s", e)
+            _emit_regulation_evidence_event(
+                "foundry_iq_search",
+                source="foundry",
+                provider="foundry",
+                evidence=_fallback_regulation_evidence(query),
+            )
             return _get_fallback_regulations(query)
 
 
@@ -226,13 +373,30 @@ async def _fallback_index_search(query: str, search_endpoint: str, api_key: str)
             content = doc.get("content", doc.get("chunk", ""))
             title = doc.get("title", "")
             if content:
-                results.append({"title": title, "content": content[:500]})
+                results.append({"title": title, "content": content[:500], "url": doc.get("url", "") or doc.get("source_url", "")})
         if results:
+            _emit_regulation_evidence_event(
+                "foundry_iq_search",
+                source="foundry",
+                provider="foundry",
+                evidence=_result_evidence(results, source="azure_ai_search", query=query),
+                charts=_local_check_chart(
+                    [{"title": row.get("title", ""), "source": "Azure AI Search"} for row in results],
+                    title="Azure AI Search 直接検索結果",
+                    source="azure_ai_search",
+                ),
+            )
             return json.dumps(
                 {"source": "Azure AI Search (直接検索)", "query": query, "results": results}, ensure_ascii=False
             )
     except Exception as e:
         logger.warning("Index 直接検索もも失敗: %s", e)
+    _emit_regulation_evidence_event(
+        "foundry_iq_search",
+        source="foundry",
+        provider="foundry",
+        evidence=_fallback_regulation_evidence(query),
+    )
     return _get_fallback_regulations(query)
 
 
@@ -248,6 +412,32 @@ async def check_ng_expressions(text: str) -> str:
         for ng in NG_EXPRESSIONS:
             if ng["expression"] in text:
                 found.append(ng)
+        _emit_regulation_evidence_event(
+            "check_ng_expressions",
+            source="local",
+            provider="local",
+            evidence=[
+                {
+                    "id": "local-ng-expression-dictionary",
+                    "title": "NG 表現辞書",
+                    "source": "local-check",
+                    "quote": _safe_evidence_quote(
+                        "検出: " + "、".join(item["expression"] for item in found)
+                        if found
+                        else "禁止表現リストを照合し、該当表現は検出されませんでした。"
+                    ),
+                    "retrieved_at": _utc_now_iso(),
+                    "metadata": {"matched_count": len(found), "rule_count": len(NG_EXPRESSIONS)},
+                }
+            ],
+            charts=_local_check_chart(
+                [{"expression": item["expression"], "reason": item["reason"], "suggestion": item["suggestion"]} for item in found],
+                title="検出された NG 表現",
+                source="local-check",
+            )
+            if found
+            else None,
+        )
         return json.dumps(found, ensure_ascii=False) if found else "NG 表現は検出されませんでした。"
 
 
@@ -265,6 +455,22 @@ async def check_travel_law_compliance(document: str) -> str:
             found = keyword in document or any(w in document for w in keyword.split("・"))
             status = "✅ 適合" if found else "⚠️ 要確認"
             results.append({"check_item": item, "status": status})
+        _emit_regulation_evidence_event(
+            "check_travel_law_compliance",
+            source="local",
+            provider="local",
+            evidence=[
+                {
+                    "id": "local-travel-law-checklist",
+                    "title": "旅行業法チェックリスト",
+                    "source": "local-check",
+                    "quote": _safe_evidence_quote(f"{len(results)} 項目を確認し、{sum(1 for row in results if row['status'].startswith('✅'))} 項目が適合判定です。"),
+                    "retrieved_at": _utc_now_iso(),
+                    "metadata": {"check_count": len(results)},
+                }
+            ],
+            charts=_local_check_chart(results, title="旅行業法チェック結果", source="local-check"),
+        )
         return json.dumps(results, ensure_ascii=False)
 
 

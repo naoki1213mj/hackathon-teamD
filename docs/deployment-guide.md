@@ -141,27 +141,65 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | --- | --- | --- |
 | `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Microsoft Foundry project endpoint |
 | `MODEL_NAME` | 任意 | テキスト deployment 名 (既定: `gpt-5-4-mini`) |
+| `ENABLE_MODEL_ROUTER` | 任意 | Model Router を UI / capabilities に公開する場合だけ `true` |
+| `MODEL_ROUTER_ENDPOINT` | 任意 | Model Router endpoint。`/api/capabilities` には値を返さない |
+| `MODEL_ROUTER_DEPLOYMENT_NAME` | 任意 | Model Router deployment 名 |
+| `ENABLE_GPT_55` | 任意 | gpt-5.5 を UI / capabilities に公開する場合だけ `true`。deployment/quota 作成後に有効化 |
+| `GPT_55_DEPLOYMENT_NAME` | 任意 | gpt-5.5 deployment 名を既定から変える場合 |
 | `EVAL_MODEL_DEPLOYMENT` | 推奨 | 評価用の専用 deployment |
+| `ENABLE_COST_METRICS` | 任意 | token usage から概算コストを表示する場合だけ `true`。請求データではない |
+| `ENABLE_FOUNDRY_TRACING` | 任意 | Foundry/App Insights tracing を opt-in する場合だけ `true` |
+| `ENABLE_EVALUATION_LOGGING` | 任意 | Foundry への評価ログ送信を opt-in する場合だけ `true`。raw prompt / Work IQ content / transcript / bearer token / brochure HTML は送信しない |
+| `ENABLE_CONTINUOUS_MONITORING` | 任意 | 評価ログ opt-in 時だけ有効な継続監視。SSE/API 応答後にサンプル済みの最小 payload を非同期送信 |
+| `CONTINUOUS_MONITORING_SAMPLE_RATE` | 任意 | 継続監視の決定的サンプリング率（0.0〜1.0、既定 0.1） |
+| `EVALUATION_LOG_RETENTION_DAYS` | 任意 | Foundry 評価ログの運用保持目安（日、既定 30）。project 側の保持/削除運用と合わせて管理 |
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存 |
 | `SEARCH_ENDPOINT` | 任意 | Azure AI Search endpoint (`search_knowledge_base()` はこれを最優先で使う) |
 | `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー。live tenant では Container Apps secret で保持 |
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
+| `MCP_REGISTRY_ENDPOINT` | 任意 | MCP registry UI / capabilities 用 endpoint |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan runtime（既定: `foundry_preprovisioned`） |
 | `WORKIQ_RUNTIME` | 任意 | Work IQ runtime（既定: `foundry_tool`）。`graph_prefetch` は明示 rollback 用 |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 120） |
 | `PUBLIC_APP_BASE_URL` | 上司承認で推奨 | manager approval / callback URL に使う canonical public URL |
 | `ENABLE_GITHUB_COPILOT_REVIEW_AGENT` | 任意 | preview の `GitHubCopilotAgent` 品質レビューを opt-in するときだけ `true` |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
+| `ENABLE_SOURCE_INGESTION` | 任意 | ユーザー提供ソース取り込み API。accidental production-on 防止のため既定 `false` |
+| `SOURCE_INGESTION_ENDPOINT` | 任意 | 外部 ingestion service を使う場合の endpoint。ローカル `/api/sources/*` には不要 |
+| `SOURCE_MAX_ITEMS_PER_OWNER` | 任意 | owner ごとの保存 source 数上限（既定 20、最大 100） |
+| `SOURCE_TTL_SECONDS` | 任意 | source draft の TTL 秒数（既定 604800、最大 30 日） |
+| `SOURCE_MAX_TEXT_CHARS` | 任意 | text / transcript / PDF 抽出テキストの最大文字数（既定 20000、最大 50000） |
+| `SOURCE_MAX_PDF_BYTES` | 任意 | PDF upload の最大 byte 数（既定 10MiB、最大 25MiB） |
+| `SOURCE_MAX_AUDIO_SECONDS` | 任意 | audio_url の想定音声長上限（既定 1800 秒、最大 3600 秒） |
+| `SOURCE_MAX_AUDIO_BYTES` | 任意 | audio_url の想定音声サイズ上限（既定 25MiB、最大 100MiB） |
+| `ENABLE_MAI_TRANSCRIBE_1` | 任意 | MAI-Transcribe-1 音声 source ingestion を opt-in する場合だけ `true` |
+| `MAI_TRANSCRIBE_1_ENDPOINT` | 任意 | REST contract 確認済みの MAI Transcribe endpoint |
+| `MAI_TRANSCRIBE_1_DEPLOYMENT_NAME` | 任意 | MAI-Transcribe-1 deployment 名 |
+| `MAI_TRANSCRIBE_1_API_PATH` | 任意 | 確認済みの Transcribe API path。未設定時は呼び出さない |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
+| `ENABLE_VOICE_TALK_TO_START` | 任意 | Voice Live の talk-to-start UX を公開する場合だけ `true` |
 | `LOGIC_APP_CALLBACK_URL` | 任意 | 承認後アクション workflow。signed URL なので secret として扱う |
 | `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認通知 workflow。signed URL なので secret として扱う |
+| `TRUST_AUTH_HEADER_CLAIMS` | 任意 | 署名検証済み upstream auth がある場合だけ bearer claims を信頼する。通常は `false` |
+| `TRUSTED_AUTH_HEADER_NAME` / `TRUSTED_AUTH_HEADER_VALUE` | 任意 | upstream が検証済み request に付ける境界ヘッダー |
+| `REQUIRE_AUTHENTICATED_OWNER` | 任意 | development でも owner-scoped API に認証を強制する場合だけ `true` |
 | `SERVE_STATIC` | 任意 | コンテナ内フロントエンド配信 (`true`) |
 | `API_KEY` | 任意 | API エンドポイント保護 |
 
 全項目は [.env.example](../.env.example) を参照してください。
+
+### ロールアウト gate
+
+- `/api/capabilities` は feature flag / 接続状態を `available` / `configured` の boolean だけで返し、endpoint、connection string、tenant 固有値は返しません。UI 表示可否はこの endpoint を優先してください。
+- Source ingestion は `ENABLE_SOURCE_INGESTION=true` を明示した環境だけで有効です。raw audio は保存・返却せず、API は短命 `audio_url` を transcribe adapter に渡すだけです。text/PDF draft は owner scope の get/review/delete と TTL cleanup の対象で、公開 payload に raw text は含めません。`GET /api/sources/limits` で secret を含まない有効状態と運用上限を確認できます。
+- MAI Transcribe は `ENABLE_MAI_TRANSCRIBE_1=true` に加えて endpoint / deployment / 確認済み API path が揃うまで unavailable です。未確認の REST path を推測して呼びません。
+- 評価ログと継続監視は privacy gate です。`ENABLE_EVALUATION_LOGGING=true` なしでは Foundry へ送信せず、`ENABLE_CONTINUOUS_MONITORING=true` だけでは有効になりません。送信 payload は raw prompt / Work IQ content / transcript / bearer token / brochure HTML を含めない最小化済みデータです。
+- `ENABLE_COST_METRICS=true` で表示される cost は token usage からの推定であり、Azure Cost Management の課金確定値ではありません。
+- Work IQ の `foundry_tool` 経路は既定ですが、ユーザーの `https://ai.azure.com/user_impersonation` token と tenant consent がない場合は fail-closed です。`graph_prefetch` は明示 rollback のみです。
+- owner-scoped API（会話、source ingestion）は本番相当環境で認証済み owner boundary を要求します。Bearer claim は信頼済み upstream 境界がある場合だけ使ってください。
 
 > Logic App の signed trigger URL は `&sp=...&sv=...&sig=...` を含みます。Container App secret や `azd env` へ反映するときは **URL 全体を 1 つの値として引用**し、途中で切れないようにしてください。
 >
@@ -172,6 +210,8 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 ```bash
 curl https://<your-app>/api/health
 curl https://<your-app>/api/ready
+curl https://<your-app>/api/capabilities
+curl https://<your-app>/api/sources/limits
 ```
 
 `/api/ready` が `503` の場合、レスポンスの `missing` 配列に不足設定が表示されます。
@@ -205,6 +245,8 @@ Trivy, Gitleaks, npm audit, pip-audit, bandit
 | Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
 | `work_iq_runtime=foundry_tool` が失敗する | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` になっているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。必要なら `WORKIQ_RUNTIME=graph_prefetch` に切り替えて切り分ける |
 | Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
+| `/api/sources/*` が 503 | `ENABLE_SOURCE_INGESTION=true` が Container App に反映済みか確認。音声だけ失敗する場合は `ENABLE_MAI_TRANSCRIBE_1` と MAI Transcribe endpoint / deployment / API path を確認する |
+| `/api/capabilities` で機能が `configured=true` でも `available=false` | feature flag だけでなく必須 endpoint、App Insights、sample rate、deployment/quota が揃っているか確認。既定では未完成機能を production-ready として公開しない |
 | 上司承認通知が飛ばない | `logic-manager-approval-*` の run history と Container App secret `manager-approval-trigger-url` に `&sp=...&sv=...&sig=...` を含む full signed URL が入っているか確認。`deploy.yml` の signed URL 再同期が成功しているかも確認する。未設定でも承認ページ自体は動作 |
 | 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、対象 Team / channel を確認 |
 | SharePoint に保存されない | target site への permission grant か `sharepointonline` connector の認証状態を確認 |

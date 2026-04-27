@@ -1,11 +1,23 @@
 """品質評価 API と評価器ヘルパーのテスト"""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api import evaluate as evaluate_module
 from src.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_evaluate_rate_limiter(monkeypatch) -> None:
+    """評価 API の rate limit 状態をテスト間で分離する。"""
+    evaluate_module.limiter.reset()
+    monkeypatch.delenv("ENABLE_CONTINUOUS_MONITORING", raising=False)
+    monkeypatch.delenv("CONTINUOUS_MONITORING_SAMPLE_RATE", raising=False)
+    monkeypatch.delenv("ENABLE_EVALUATION_LOGGING", raising=False)
+    monkeypatch.delenv("EVALUATION_LOGGING_ENABLED", raising=False)
+    monkeypatch.delenv("EVALUATION_LOG_RETENTION_DAYS", raising=False)
 
 
 def test_evaluate_travel_law_compliance_scores_all_required_items():
@@ -109,8 +121,8 @@ def test_evaluate_target_fit_readiness_handles_general_audience_briefs():
     assert result["details"]["依頼ターゲットとの整合"] is True
 
 
-def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
-    calls: list[tuple[str, str, dict]] = []
+def test_evaluate_endpoint_does_not_log_to_foundry_by_default(monkeypatch):
+    calls: list[dict[str, object]] = []
 
     async def fake_builtin(_query: str, _response: str) -> dict:
         return {
@@ -130,8 +142,8 @@ def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
             "reason": "solid",
         }
 
-    async def fake_log(query: str, response: str, scores: dict) -> str | None:
-        calls.append((query, response, scores))
+    async def fake_log(record: dict[str, object]) -> str | None:
+        calls.append(record)
         return "https://example.test/foundry"
 
     monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
@@ -159,8 +171,316 @@ def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
     assert payload["legacy_overall"] > 0
     assert payload["regression_guard"]["has_regressions"] is False
     assert "foundry_portal_url" not in payload
+    assert calls == []
+
+
+def test_evaluate_production_rejects_untrusted_owner_claims(monkeypatch):
+    """会話へ保存する評価は本番で未検証 bearer claims を拒否する。"""
+    monkeypatch.setattr("src.config._get_azd_env_values", lambda: {})
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("TRUST_AUTH_HEADER_CLAIMS", raising=False)
+    monkeypatch.delenv("TRUSTED_AUTH_HEADER_NAME", raising=False)
+
+    response = client.post(
+        "/api/evaluate",
+        headers={"Authorization": "Bearer untrusted.token.value"},
+        json={
+            "query": "春の沖縄プランを作成",
+            "response": "# 春の沖縄プラン",
+            "conversation_id": "conv-eval",
+            "artifact_version": 1,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "AUTH_HEADER_UNTRUSTED"
+
+
+def test_evaluate_endpoint_logs_sanitized_foundry_payload_when_opted_in(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    async def fake_builtin(_query: str, _response: str) -> dict:
+        return {
+            "relevance": {"score": 4.0, "reason": "good"},
+            "coherence": {"score": 4.2, "reason": "solid"},
+            "fluency": {"score": 4.1, "reason": "clear"},
+        }
+
+    async def fake_marketing(_query: str, _response: str) -> dict:
+        return {
+            "overall": 4.0,
+            "appeal": 4.3,
+            "differentiation": 3.9,
+            "kpi_validity": 4.0,
+            "brand_tone": 4.1,
+            "reason": "solid",
+        }
+
+    async def fake_log(record: dict[str, object]) -> str | None:
+        calls.append(record)
+        return "https://example.test/foundry"
+
+    monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+    monkeypatch.setenv("ENABLE_EVALUATION_LOGGING", "true")
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", fake_marketing)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+
+    raw_query = "Authorization: Bearer raw-secret Work IQ meeting note: confidential"
+    raw_response = "# 春の沖縄プラン\nKPI: 予約数 200 件\ntranscript: raw customer call"
+    raw_html = "<section data-token='secret'>予約はこちら 89,000円（税込）</section>"
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": raw_query,
+            "response": raw_response,
+            "html": raw_html,
+            "evidence": [
+                {
+                    "id": "ev-token",
+                    "title": "需要データ",
+                    "source": "fabric",
+                    "quote": "Authorization: Bearer secret-token",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
     assert len(calls) == 1
-    assert calls[0][0] == "春の沖縄プランを作成"
+    record = calls[0]
+    serialized = str(record)
+    assert raw_query not in serialized
+    assert raw_response not in serialized
+    assert raw_html not in serialized
+    assert "raw-secret" not in serialized
+    assert "secret-token" not in serialized
+    assert "raw customer call" not in serialized
+    assert record["retention_days"] == 30
+    assert record["redaction"]["raw_prompt_logged"] is False
+    assert record["redaction"]["brochure_html_logged"] is False
+    assert record["content_shape"] == {
+        "query_chars": len(raw_query),
+        "response_chars": len(raw_response),
+    }
+    assert record["plan_overall"] > 0
+    assert record["evidence_count"] == 1
+
+
+def test_evaluate_endpoint_schedules_continuous_monitoring_when_opted_in(monkeypatch):
+    """継続監視は opt-in 時だけ sanitized payload で非同期登録する。"""
+    scheduled: list[dict[str, object]] = []
+
+    async def fake_builtin(_query: str, _response: str) -> dict:
+        return {
+            "relevance": {"score": 4.0, "reason": "good"},
+            "coherence": {"score": 4.0, "reason": "solid"},
+            "fluency": {"score": 4.0, "reason": "clear"},
+        }
+
+    async def fake_marketing(_query: str, _response: str) -> dict:
+        return {
+            "overall": 4.0,
+            "appeal": 4.0,
+            "differentiation": 4.0,
+            "kpi_validity": 4.0,
+            "brand_tone": 4.0,
+            "reason": "solid",
+        }
+
+    async def fake_log(record: dict[str, object]) -> str | None:
+        return str(record.get("record_type") or "evaluation")
+
+    def fake_schedule(_background_tasks, *, record: dict[str, object], sample_key: str, **_kwargs: object) -> bool:
+        scheduled.append({"record": record, "sample_key": sample_key})
+        return True
+
+    monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+    monkeypatch.setenv("ENABLE_EVALUATION_LOGGING", "true")
+    monkeypatch.setenv("ENABLE_CONTINUOUS_MONITORING", "true")
+    monkeypatch.setenv("CONTINUOUS_MONITORING_SAMPLE_RATE", "1")
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", fake_marketing)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+    monkeypatch.setattr(evaluate_module, "schedule_continuous_monitoring", fake_schedule)
+
+    raw_query = "Authorization: Bearer raw-secret Work IQ confidential note"
+    raw_response = "# 春の沖縄プラン\ntranscript: raw customer call"
+    raw_html = "<html><body data-token='secret'>予約はこちら</body></html>"
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": raw_query,
+            "response": raw_response,
+            "html": raw_html,
+            "conversation_id": "conv-monitoring",
+            "artifact_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(scheduled) == 1
+    record = scheduled[0]["record"]
+    serialized = str(record)
+    assert record["record_type"] == "evaluation_completion"
+    assert raw_query not in serialized
+    assert raw_response not in serialized
+    assert raw_html not in serialized
+    assert "raw-secret" not in serialized
+    assert "raw customer call" not in serialized
+    assert record["redaction"]["raw_work_iq_logged"] is False
+    assert record["content_shape"]["html_chars"] == len(raw_html)
+
+
+def test_evaluate_endpoint_accepts_sanitized_evidence_and_charts(monkeypatch):
+    async def fake_builtin(_query: str, _response: str) -> dict:
+        return {
+            "relevance": {"score": 4.0, "reason": "good"},
+            "coherence": {"score": 4.0, "reason": "solid"},
+            "fluency": {"score": 4.0, "reason": "clear"},
+        }
+
+    async def fake_marketing(_query: str, _response: str) -> dict:
+        return {
+            "overall": 4.0,
+            "appeal": 4.0,
+            "differentiation": 4.0,
+            "kpi_validity": 4.0,
+            "brand_tone": 4.0,
+            "reason": "solid",
+        }
+
+    async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
+        return None
+
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", fake_marketing)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": "春の沖縄プランを作成",
+            "response": "# 春の沖縄プラン\nKPI: 予約数 200 件\n根拠: 前年比とレビュー平均\nターゲット: ファミリー",
+            "html": "<html lang='ja'><body><h1>予約はこちら</h1><p>98,000円（税込） 安心サポート</p><footer>登録番号</footer></body></html>",
+            "evidence": [
+                {
+                    "id": "",
+                    "title": "需要データ",
+                    "source": "fabric",
+                    "url": "javascript:alert(1)",
+                    "quote": "Authorization: Bearer secret-token",
+                    "metadata": {"region": "okinawa", "token": "secret"},
+                },
+                {"id": "ev-web", "title": "市場トレンド", "source": "web", "url": "https://example.com/report"},
+            ],
+            "charts": [
+                {
+                    "chart_type": "bar",
+                    "title": "<p>unsafe</p>",
+                    "series": ["sales"],
+                    "data": [{"month": "4月", "sales": 100, "token": "secret"}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evidence"][0]["id"] == "eval-ev-1"
+    assert "url" not in payload["evidence"][0]
+    assert payload["evidence"][0]["quote"] == "[redacted]"
+    assert payload["evidence"][0]["metadata"] == {"region": "okinawa"}
+    assert payload["charts"][0]["title"] == "[redacted html]"
+    assert payload["charts"][0]["data"] == [{"month": "4月", "sales": 100}]
+    assert payload["evidence_quality"]["overall"] > 0
+    assert any(finding["status"] in {"pass", "warn"} for finding in payload["findings"])
+    assert any(finding["evidence_ids"] for finding in payload["findings"])
+
+
+def test_evaluate_endpoint_restores_evidence_context_from_conversation(monkeypatch):
+    async def fake_builtin(_query: str, _response: str) -> dict:
+        return {
+            "relevance": {"score": 4.0, "reason": "good"},
+            "coherence": {"score": 4.0, "reason": "solid"},
+            "fluency": {"score": 4.0, "reason": "clear"},
+        }
+
+    async def fake_marketing(_query: str, _response: str) -> dict:
+        return {
+            "overall": 4.0,
+            "appeal": 4.0,
+            "differentiation": 4.0,
+            "kpi_validity": 4.0,
+            "brand_tone": 4.0,
+            "reason": "solid",
+        }
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ) -> dict:
+        return {
+            "messages": [
+                {
+                    "event": "tool_event",
+                    "data": {
+                        "tool": "search_sales_history",
+                        "status": "completed",
+                        "evidence": [{"id": "ev-v1", "title": "v1 sales", "source": "fabric"}],
+                        "charts": [{"chart_type": "bar", "title": "v1 chart", "data": [{"sales": 100}]}],
+                    },
+                },
+                {"event": "done", "data": {"metrics": {"latency_seconds": 1, "tool_calls": 1, "total_tokens": 1}}},
+                {
+                    "event": "tool_event",
+                    "data": {
+                        "tool": "web_search",
+                        "status": "completed",
+                        "evidence": [{"id": "ev-v2", "title": "v2 trend", "source": "web"}],
+                    },
+                },
+                {"event": "done", "data": {"metrics": {"latency_seconds": 1, "tool_calls": 1, "total_tokens": 1}}},
+            ],
+            "metadata": {},
+            "status": "completed",
+            "input": "春の沖縄プランを作成",
+        }
+
+    async def fake_persist(
+        conversation_id: str,
+        artifact_version: int,
+        result: dict,
+        owner_id: str | None = None,
+    ) -> dict | None:
+        return {"version": 2, "round": 1, "created_at": "2026-04-02T01:00:00+00:00"}
+
+    async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
+        return None
+
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", fake_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", fake_marketing)
+    monkeypatch.setattr(evaluate_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(evaluate_module, "_persist_evaluation_result", fake_persist)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": "春の沖縄プランを作成",
+            "response": "# 春の沖縄プラン\nKPI: 予約数 200 件\n根拠: 前年比\nターゲット: ファミリー",
+            "html": "<html><body>予約はこちら 98,000円（税込） 安心サポート 登録番号</body></html>",
+            "conversation_id": "conv-1",
+            "artifact_version": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evidence"] == [{"id": "ev-v2", "title": "v2 trend", "source": "web"}]
+    assert payload["findings"][0]["evidence_ids"] == ["ev-v2"]
+    assert payload["evaluation_meta"]["version"] == 2
 
 
 def test_evaluate_endpoint_persists_grouped_result_for_version(monkeypatch):
@@ -286,9 +606,9 @@ def test_evaluate_endpoint_detects_regression_against_previous_version(monkeypat
         }
 
     async def fake_persist(
-        _conversation_id: str,
-        _artifact_version: int,
-        _result: dict,
+        conversation_id: str,
+        artifact_version: int,
+        result: dict,
         owner_id: str | None = None,
     ) -> dict | None:
         return None
@@ -347,12 +667,12 @@ def test_evaluate_endpoint_returns_200_when_v2_evaluators_raise(monkeypatch):
         raise Exception("marketing evaluator unavailable")
 
     async def fake_persist(
-        _conversation_id: str,
-        _artifact_version: int,
-        _result: dict,
+        conversation_id: str,
+        artifact_version: int,
+        result: dict,
         owner_id: str | None = None,
     ) -> dict | None:
-        persist_calls.append((_conversation_id, _artifact_version))
+        persist_calls.append((conversation_id, artifact_version))
         return {"version": 2, "round": 1, "created_at": "2026-04-06T00:00:00+00:00"}
 
     async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:

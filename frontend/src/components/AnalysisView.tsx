@@ -1,10 +1,12 @@
-import type { ImageContent, TextContent } from '../hooks/useSSE'
+import type { ImageContent, TextContent, ToolEvent } from '../hooks/useSSE'
+import { EvidencePanel } from './EvidencePanel'
 import { ImageGallery } from './ImageGallery'
 import { MarkdownView } from './MarkdownView'
 
 interface AnalysisViewProps {
   contents: TextContent[]
   images?: ImageContent[]
+  toolEvents?: ToolEvent[]
   t: (key: string) => string
 }
 
@@ -19,7 +21,7 @@ function stripEmbeddedImageMarkup(content: string): string {
     .trim()
 }
 
-export function AnalysisView({ contents, images = [], t }: AnalysisViewProps) {
+export function AnalysisView({ contents, images = [], toolEvents = [], t }: AnalysisViewProps) {
   const analysisContent = contents.findLast(c => c.agent === 'data-search-agent')
   if (!analysisContent) return null
 
@@ -37,6 +39,7 @@ export function AnalysisView({ contents, images = [], t }: AnalysisViewProps) {
           <ImageGallery images={analysisImages} t={t} />
         </div>
       ) : null}
+      <EvidencePanel events={toolEvents} t={t} />
     </div>
   )
 }

@@ -1,3 +1,5 @@
+import { sanitizeHttpUrl, stripResponseCitationMarkers } from './safe-url'
+
 export type JsonScalar = string | number | boolean | null
 export type JsonValue = JsonScalar | JsonObject | JsonValue[]
 
@@ -54,6 +56,8 @@ export interface WorkIqSourceMetadata {
   count?: number
   connector?: string
   status?: string
+  summary?: string
+  preview?: string
   confidence?: number
   latest_timestamp?: string
   evidence_ids?: string[]
@@ -82,6 +86,10 @@ export interface PipelineMetrics {
   cache_hits?: number
   cache_misses?: number
   agent_latencies?: Record<string, number>
+  agent_tokens?: Record<string, number>
+  agent_prompt_tokens?: Record<string, number>
+  agent_completion_tokens?: Record<string, number>
+  agent_estimated_costs_usd?: Record<string, number>
   tool_latencies?: Record<string, number>
   evidence?: EvidenceItem[]
   charts?: ChartSpec[]
@@ -107,6 +115,44 @@ function toTrimmedString(value: unknown): string | undefined {
   return normalized || undefined
 }
 
+function toSanitizedPreview(value: unknown): string | undefined {
+  const text = toTrimmedString(value)
+  if (!text) return undefined
+  const normalized = text
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return undefined
+  if (SENSITIVE_TEXT_RE.test(normalized)) return REDACTED_VALUE
+  const redacted = stripResponseCitationMarkers(normalized).replace(SECRET_VALUE_RE, (match) => (
+    match.toLowerCase().startsWith('bearer ') ? 'Bearer [redacted]' : REDACTED_VALUE
+  ))
+  return redacted.slice(0, 280)
+}
+
+const REDACTED_VALUE = '[redacted]'
+const REDACTED_HTML_VALUE = '[redacted html]'
+const MAX_DISPLAY_STRING_LENGTH = 240
+const HTML_CONTENT_RE = /<\s*(?:!doctype|html|body|script|style|iframe|article|section|div|p|h[1-6]|img)\b/i
+const SENSITIVE_TEXT_RE = /\b(?:raw\s+prompt|system\s+prompt|user\s+prompt|developer\s+prompt|transcript|work\s*iq\s+raw|workiq\s+raw|brochure\s+html)\b/i
+const SECRET_VALUE_RE = /\b(?:bearer\s+[a-z0-9._~+/=-]+|authorization\s*:\s*(?:bearer\s+)?[a-z0-9._~+/=-]+|api[_-]?key\s*[:=]\s*[^\s,;]+|access[_-]?token\s*[:=]\s*[^\s,;]+)\b/gi
+const SENSITIVE_METADATA_KEY_RE = /(?:auth(?:orization)?|bearer|token|secret|password|api[_-]?key|prompt|transcript|raw(?:[_-]?content)?|work[_-]?iq[_-]?raw|brochure[_-]?html|html(?:[_-]?content)?)/i
+
+export function sanitizeTraceDebugString(value: unknown): string | undefined {
+  const raw = toTrimmedString(value)
+  if (!raw) return undefined
+  if (HTML_CONTENT_RE.test(raw)) return REDACTED_HTML_VALUE
+  if (SENSITIVE_TEXT_RE.test(raw)) return REDACTED_VALUE
+
+  const redacted = stripResponseCitationMarkers(raw).replace(SECRET_VALUE_RE, (match) => (
+    match.toLowerCase().startsWith('bearer ') ? 'Bearer [redacted]' : REDACTED_VALUE
+  ))
+  return redacted.length > MAX_DISPLAY_STRING_LENGTH
+    ? `${redacted.slice(0, MAX_DISPLAY_STRING_LENGTH - 1)}…`
+    : redacted
+}
+
 function toNonNegativeNumber(value: unknown): number | undefined {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
@@ -118,14 +164,7 @@ function toUnitNumber(value: unknown): number | undefined {
 }
 
 function toHttpUrl(value: unknown): string | undefined {
-  const rawUrl = toTrimmedString(value)
-  if (!rawUrl) return undefined
-  try {
-    const parsed = new URL(rawUrl)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? rawUrl : undefined
-  } catch {
-    return undefined
-  }
+  return sanitizeHttpUrl(value)
 }
 
 function normalizeScalar(value: unknown): JsonScalar | undefined {
@@ -135,12 +174,25 @@ function normalizeScalar(value: unknown): JsonScalar | undefined {
   return undefined
 }
 
-function normalizeScalarRecord(value: unknown): Record<string, JsonScalar> | undefined {
+function normalizeScalarRecord(
+  value: unknown,
+  options: { sanitizeStrings?: boolean; filterSensitiveKeys?: boolean } = {},
+): Record<string, JsonScalar> | undefined {
   if (!isRecord(value)) return undefined
   const normalized: Record<string, JsonScalar> = {}
   Object.entries(value).forEach(([key, item]) => {
+    if (options.filterSensitiveKeys && SENSITIVE_METADATA_KEY_RE.test(key)) {
+      return
+    }
     const scalar = normalizeScalar(item)
     if (scalar !== undefined) {
+      if (options.sanitizeStrings && typeof scalar === 'string') {
+        const sanitized = sanitizeTraceDebugString(scalar)
+        if (sanitized !== undefined) {
+          normalized[key] = sanitized
+        }
+        return
+      }
       normalized[key] = scalar
     }
   })
@@ -183,10 +235,10 @@ export function normalizeEvidenceItems(value: unknown): EvidenceItem[] | undefin
         title: toTrimmedString(item.title),
         source,
         url: toHttpUrl(item.url),
-        quote: toTrimmedString(item.quote),
+        quote: sanitizeTraceDebugString(item.quote),
         relevance: toUnitNumber(item.relevance),
         retrieved_at: toTrimmedString(item.retrieved_at),
-        metadata: normalizeScalarRecord(item.metadata),
+        metadata: normalizeScalarRecord(item.metadata, { sanitizeStrings: true, filterSensitiveKeys: true }),
       })
     })
     .filter((item): item is EvidenceItem => item !== null)
@@ -213,7 +265,7 @@ function normalizeChartType(value: unknown): ChartSpec['chart_type'] {
 export function normalizeChartSpecs(value: unknown): ChartSpec[] | undefined {
   const normalized = asRecords(value).map((item): ChartSpec => {
     const data = asRecords(item.data)
-      .map(normalizeScalarRecord)
+      .map(row => normalizeScalarRecord(row, { sanitizeStrings: true, filterSensitiveKeys: true }))
       .filter((row): row is Record<string, JsonScalar> => row !== undefined)
     return compactRecord({
       chart_type: normalizeChartType(item.chart_type ?? item.type),
@@ -231,18 +283,18 @@ export function normalizeChartSpecs(value: unknown): ChartSpec[] | undefined {
 export function normalizeTraceEvents(value: unknown): TraceEvent[] | undefined {
   const normalized = asRecords(value)
     .map((item): TraceEvent | null => {
-      const name = toTrimmedString(item.name)
+      const name = sanitizeTraceDebugString(item.name)
       if (!name) return null
       return compactRecord({
-        event_id: toTrimmedString(item.event_id),
+        event_id: sanitizeTraceDebugString(item.event_id),
         name,
-        phase: toTrimmedString(item.phase),
-        status: toTrimmedString(item.status),
-        timestamp: toTrimmedString(item.timestamp),
-        agent: toTrimmedString(item.agent),
-        tool: toTrimmedString(item.tool),
+        phase: sanitizeTraceDebugString(item.phase),
+        status: sanitizeTraceDebugString(item.status),
+        timestamp: sanitizeTraceDebugString(item.timestamp),
+        agent: sanitizeTraceDebugString(item.agent),
+        tool: sanitizeTraceDebugString(item.tool),
         duration_ms: toNonNegativeNumber(item.duration_ms),
-        metadata: normalizeScalarRecord(item.metadata),
+        metadata: normalizeScalarRecord(item.metadata, { sanitizeStrings: true, filterSensitiveKeys: true }),
       })
     })
     .filter((item): item is TraceEvent => item !== null)
@@ -264,16 +316,16 @@ function normalizeDebugLevel(value: unknown): DebugEvent['level'] {
 export function normalizeDebugEvents(value: unknown): DebugEvent[] | undefined {
   const normalized = asRecords(value)
     .map((item): DebugEvent | null => {
-      const message = toTrimmedString(item.message)
+      const message = sanitizeTraceDebugString(item.message)
       if (!message) return null
       return compactRecord({
-        event_id: toTrimmedString(item.event_id),
+        event_id: sanitizeTraceDebugString(item.event_id),
         level: normalizeDebugLevel(item.level),
         message,
-        code: toTrimmedString(item.code),
-        timestamp: toTrimmedString(item.timestamp),
-        agent: toTrimmedString(item.agent),
-        metadata: normalizeScalarRecord(item.metadata),
+        code: sanitizeTraceDebugString(item.code),
+        timestamp: sanitizeTraceDebugString(item.timestamp),
+        agent: sanitizeTraceDebugString(item.agent),
+        metadata: normalizeScalarRecord(item.metadata, { sanitizeStrings: true, filterSensitiveKeys: true }),
       })
     })
     .filter((item): item is DebugEvent => item !== null)
@@ -291,6 +343,8 @@ export function normalizeWorkIqSourceMetadata(value: unknown): WorkIqSourceMetad
         count: toNonNegativeNumber(item.count),
         connector: toTrimmedString(item.connector),
         status: toTrimmedString(item.status),
+        summary: toSanitizedPreview(item.summary ?? item.sanitized_summary),
+        preview: toSanitizedPreview(item.preview ?? item.sanitized_preview),
         confidence: toUnitNumber(item.confidence),
         latest_timestamp: toTrimmedString(item.latest_timestamp),
         evidence_ids: normalizeStringArray(item.evidence_ids),
@@ -349,6 +403,10 @@ export function normalizePipelineMetrics(value: unknown): PipelineMetrics | null
     cache_hits: toNonNegativeNumber(value.cache_hits),
     cache_misses: toNonNegativeNumber(value.cache_misses),
     agent_latencies: normalizeNumberRecord(value.agent_latencies ?? value.latency_by_agent_seconds),
+    agent_tokens: normalizeNumberRecord(value.agent_tokens),
+    agent_prompt_tokens: normalizeNumberRecord(value.agent_prompt_tokens),
+    agent_completion_tokens: normalizeNumberRecord(value.agent_completion_tokens),
+    agent_estimated_costs_usd: normalizeNumberRecord(value.agent_estimated_costs_usd),
     tool_latencies: normalizeNumberRecord(value.tool_latencies),
     evidence: normalizeEvidenceItems(value.evidence),
     charts: normalizeChartSpecs(value.charts),

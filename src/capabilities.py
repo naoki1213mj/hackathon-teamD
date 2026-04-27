@@ -3,7 +3,9 @@
 from typing import TypedDict
 
 from src.config import AppSettings, get_settings
+from src.continuous_monitoring import parse_sample_rate
 from src.foundry_tracing import is_foundry_tracing_enabled
+from src.mai_transcribe import get_mai_transcribe_availability
 from src.model_deployments import gpt_55_availability, model_router_availability, parse_bool_setting
 
 
@@ -39,6 +41,8 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
 
     gpt_55 = gpt_55_availability(resolved)
     model_router = model_router_availability(resolved)
+    mai_transcribe = get_mai_transcribe_availability(resolved)
+    evaluation_logging_enabled = parse_bool_setting(resolved["enable_evaluation_logging"])
     voice_live_configured = has_project_endpoint and has_entra_client
     work_iq_configured = (
         has_entra_client
@@ -57,8 +61,15 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
             parse_bool_setting(resolved["enable_foundry_tracing"]),
         ),
         "continuous_monitoring": _feature(
-            parse_bool_setting(resolved["enable_continuous_monitoring"]) and has_project_endpoint,
+            parse_bool_setting(resolved["enable_continuous_monitoring"])
+            and evaluation_logging_enabled
+            and has_project_endpoint
+            and parse_sample_rate(resolved["continuous_monitoring_sample_rate"]) > 0,
             parse_bool_setting(resolved["enable_continuous_monitoring"]),
+        ),
+        "evaluation_logging": _feature(
+            evaluation_logging_enabled and has_project_endpoint,
+            evaluation_logging_enabled,
         ),
         "cost_metrics": _feature(
             parse_bool_setting(resolved["enable_cost_metrics"])
@@ -70,8 +81,8 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
             _has_value(resolved["mcp_registry_endpoint"]) or _has_value(resolved["improvement_mcp_endpoint"]),
         ),
         "source_ingestion": _feature(
-            _has_value(resolved["source_ingestion_endpoint"]),
-            _has_value(resolved["source_ingestion_endpoint"]),
+            parse_bool_setting(resolved["enable_source_ingestion"]),
+            parse_bool_setting(resolved["enable_source_ingestion"]) or _has_value(resolved["source_ingestion_endpoint"]),
         ),
         "voice_live": _feature(voice_live_configured, voice_live_configured),
         "voice_talk_to_start": _feature(
@@ -79,8 +90,8 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
             parse_bool_setting(resolved["enable_voice_talk_to_start"]),
         ),
         "mai_transcribe_1": _feature(
-            _has_value(resolved["mai_transcribe_1_deployment_name"]),
-            _has_value(resolved["mai_transcribe_1_deployment_name"]),
+            mai_transcribe["available"],
+            mai_transcribe["configured"],
         ),
         "work_iq": _feature(work_iq_configured, work_iq_configured),
     }

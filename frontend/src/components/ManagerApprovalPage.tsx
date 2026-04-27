@@ -1,6 +1,6 @@
 import { Check, LoaderCircle, RefreshCcw, ShieldAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { MarkdownView } from './MarkdownView'
+import { ApprovalDiffView } from './ApprovalDiffView'
 
 interface ManagerApprovalPageProps {
   conversationId: string
@@ -187,44 +187,26 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
             ))}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-[20px] border border-[var(--accent)]/25 bg-[var(--panel-bg)] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--accent-strong)]">
-                    {t('approval.manager.portal.current_version')}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                    v{payload.current_version} · {payload.plan_title}
-                  </p>
-                </div>
-              </div>
-              <MarkdownView content={payload.plan_markdown} />
-            </div>
-
-            <div className="rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                    {t('approval.manager.portal.previous_version')}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                    {comparisonTarget ? `v${comparisonTarget.version} · ${comparisonTarget.plan_title}` : t('approval.manager.portal.previous_version.empty')}
-                  </p>
-                </div>
-              </div>
-              {comparisonTarget
-                ? <MarkdownView content={comparisonTarget.plan_markdown} />
-                : <p className="text-sm text-[var(--text-secondary)]">{t('approval.manager.portal.previous_version.empty')}</p>}
-            </div>
-          </div>
+          <ApprovalDiffView
+            previousText={comparisonTarget?.plan_markdown ?? ''}
+            currentText={payload.plan_markdown}
+            previousLabel={comparisonTarget
+              ? `${t('approval.manager.portal.previous_version')}: v${comparisonTarget.version} · ${comparisonTarget.plan_title}`
+              : t('approval.manager.portal.previous_version.empty')}
+            currentLabel={`${t('approval.manager.portal.current_version')}: v${payload.current_version} · ${payload.plan_title}`}
+            t={t}
+          />
         </div>
       )}
 
       {previousVersions.length === 0 && (
-        <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
-          <MarkdownView content={payload.plan_markdown} />
-        </div>
+        <ApprovalDiffView
+          previousText=""
+          currentText={payload.plan_markdown}
+          previousLabel={t('approval.manager.portal.previous_version.empty')}
+          currentLabel={`${t('approval.manager.portal.current_version')}: v${payload.current_version} · ${payload.plan_title}`}
+          t={t}
+        />
       )}
 
       <div className="space-y-2">
