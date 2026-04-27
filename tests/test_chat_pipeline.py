@@ -323,20 +323,23 @@ class TestMarketingPlanRuntimeSettings:
 
 
 @pytest.mark.asyncio
-async def test_execute_agent_uses_foundry_prompt_agent_when_work_iq_is_off(monkeypatch) -> None:
-    """Work IQ OFF でも foundry_preprovisioned は Prompt Agent 経路を使う。"""
+async def test_execute_agent_uses_legacy_marketing_agent_when_work_iq_is_off(monkeypatch) -> None:
+    """Work IQ OFF では Work IQ 付き Prompt Agent を避けて legacy 経路を使う。"""
 
     captured: dict[str, object] = {}
 
-    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
-        del model_settings
-        raise AssertionError("Legacy marketing agent should not run while Foundry prompt agent is configured")
+    class _FakeLegacyAgent:
+        async def run(self, user_input: str):
+            captured["legacy_user_input"] = user_input
+            return SimpleNamespace(output_text="legacy output")
 
-    def fake_run_marketing_plan_prompt_agent(user_input: str, model_settings: dict | None = None, **kwargs):
-        captured["user_input"] = user_input
-        captured["model_settings"] = model_settings
-        captured["kwargs"] = kwargs
-        return SimpleNamespace(output_text="foundry output")
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        captured["legacy_model_settings"] = model_settings
+        return _FakeLegacyAgent()
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("Foundry prompt agent should not run when Work IQ is off")
 
     monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
     monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
@@ -352,20 +355,21 @@ async def test_execute_agent_uses_foundry_prompt_agent_when_work_iq_is_off(monke
     )
 
     assert outcome["success"] is True
-    assert outcome["text"] == "foundry output"
+    assert outcome["text"] == "legacy output"
     assert captured == {
-        "user_input": "沖縄プラン",
-        "model_settings": {"model": "gpt-5-4-mini"},
-        "kwargs": {
-            "work_iq": {"enabled": False, "source_scope": []},
-            "work_iq_access_token": "",
-        },
+        "legacy_user_input": "沖縄プラン",
+        "legacy_model_settings": {"model": "gpt-5-4-mini"},
     }
     parsed = [_parse_sse(event) for event in outcome["events"]]
     assert any(
-        event_name == chat_module.SSEEventType.TOOL_EVENT
-        and payload.get("tool") == "foundry_prompt_agent"
+        event_name == chat_module.SSEEventType.AGENT_PROGRESS
+        and payload.get("agent") == "marketing-plan-agent"
         and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+    assert not any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") in {"foundry_prompt_agent", "workiq_foundry_tool"}
         for event_name, payload in parsed
     )
 
@@ -531,6 +535,7 @@ async def test_execute_agent_falls_back_to_legacy_when_foundry_prompt_agent_is_u
         conversation_id="conv-foundry-fallback",
         model_settings={"model": "gpt-5-4-mini"},
         workflow_settings={"marketing_plan_runtime": "foundry_preprovisioned"},
+        work_iq_session={"enabled": True, "source_scope": ["emails"]},
         work_iq_access_token="delegated-token",
     )
 

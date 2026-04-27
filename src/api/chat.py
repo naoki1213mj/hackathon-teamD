@@ -2178,6 +2178,12 @@ async def _execute_agent(
     max_attempts = 5
     used_foundry_prompt_agent = False
     marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings) if agent_name == "marketing-plan-agent" else "legacy"
+    if (
+        agent_name == "marketing-plan-agent"
+        and marketing_plan_runtime == "foundry_preprovisioned"
+        and not (isinstance(work_iq_session, dict) and work_iq_session.get("enabled"))
+    ):
+        marketing_plan_runtime = "legacy"
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
