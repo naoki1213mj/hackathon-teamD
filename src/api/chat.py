@@ -1806,6 +1806,25 @@ def _conversation_status_from_events(events: list[dict]) -> str:
     return "completed"
 
 
+def _manager_continuation_status_from_events(events: list[dict]) -> str:
+    """上司承認後のバックグラウンド継続中ステータスを推定する。"""
+    status = _conversation_status_from_events(events)
+    if not events:
+        return status
+    last_event = events[-1].get("event")
+    terminal_events = {
+        SSEEventType.DONE,
+        SSEEventType.DONE.value,
+        SSEEventType.ERROR,
+        SSEEventType.ERROR.value,
+        SSEEventType.APPROVAL_REQUEST,
+        SSEEventType.APPROVAL_REQUEST.value,
+    }
+    if last_event not in terminal_events:
+        return "running"
+    return status
+
+
 _TOOL_CALL_TYPE_MAP = {
     "code_interpreter_call": "code_interpreter",
     "web_search_call": "web_search",
@@ -3909,6 +3928,7 @@ async def _run_manager_approval_continuation(
     collected_events: list[dict] = []
     start = time.monotonic()
     background_update_jobs: list[PostCompletionUpdateContext] = []
+    resolved_owner_id = owner_id or _get_conversation_owner_id(existing_conversation)
 
     def _register_background_job(update_context: PostCompletionUpdateContext) -> None:
         background_update_jobs.append(update_context)
@@ -3917,30 +3937,52 @@ async def _run_manager_approval_continuation(
         "承認",
         conversation_id,
         approval_context=approval_context,
-        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
+        owner_id=resolved_owner_id,
         register_background_job=_register_background_job,
     ):
         _record_sse_event(collected_events, event, start)
+        latest_event = collected_events[-1:] if collected_events else []
+        if not latest_event:
+            continue
+        conversation_status = _manager_continuation_status_from_events(
+            [*existing_conversation.get("messages", []), *collected_events]
+        )
+        background_updates_pending = bool(background_update_jobs) if conversation_status != "running" else None
+        await append_conversation_events(
+            conversation_id=conversation_id,
+            user_input=existing_conversation.get("input", ""),
+            new_events=latest_event,
+            metrics=replace_conversation_metadata(
+                _build_conversation_metadata_for_save(
+                    conversation_id,
+                    existing_conversation,
+                    conversation_status,
+                    background_updates_pending=background_updates_pending,
+                    owner_id=resolved_owner_id,
+                )
+            ),
+            status=conversation_status,
+            owner_id=resolved_owner_id,
+        )
 
-    conversation_status = _conversation_status_from_events(
-        [*existing_conversation.get("messages", []), *collected_events]
-    )
-    await append_conversation_events(
-        conversation_id=conversation_id,
-        user_input=existing_conversation.get("input", ""),
-        new_events=collected_events,
-        metrics=replace_conversation_metadata(
-            _build_conversation_metadata_for_save(
-                conversation_id,
-                existing_conversation,
-                conversation_status,
-                background_updates_pending=bool(background_update_jobs),
-                owner_id=owner_id,
-            )
-        ),
-        status=conversation_status,
-        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
-    )
+    if not collected_events:
+        conversation_status = _conversation_status_from_events(existing_conversation.get("messages", []))
+        await append_conversation_events(
+            conversation_id=conversation_id,
+            user_input=existing_conversation.get("input", ""),
+            new_events=[],
+            metrics=replace_conversation_metadata(
+                _build_conversation_metadata_for_save(
+                    conversation_id,
+                    existing_conversation,
+                    conversation_status,
+                    background_updates_pending=False,
+                    owner_id=resolved_owner_id,
+                )
+            ),
+            status=conversation_status,
+            owner_id=resolved_owner_id,
+        )
 
     for update_job in background_update_jobs:
         asyncio.create_task(_append_post_completion_updates_safe(conversation_id, update_job))

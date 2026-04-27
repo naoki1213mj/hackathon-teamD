@@ -175,7 +175,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: {
         minReplicas: 1
-        maxReplicas: 3
+        // Cosmos DB が private endpoint 前提で到達できるまで、会話状態の replica 分断を避ける。
+        maxReplicas: 1
         rules: [
           {
             name: 'http-rule'

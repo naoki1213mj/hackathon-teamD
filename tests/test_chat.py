@@ -687,6 +687,54 @@ def test_manager_approval_callback_approved_marks_running_and_starts_background_
     assert lookup["allow_cross_owner"] is False
 
 
+async def test_manager_approval_continuation_persists_progress_incrementally(monkeypatch):
+    """上司承認後のバックグラウンド継続は完了待ちせず進捗を保存する"""
+    from src.api import chat as chat_module
+
+    append_calls: list[dict[str, object]] = []
+    existing_conversation = {
+        "input": "沖縄プラン",
+        "messages": [{"event": "approval_request", "data": {"approval_scope": "manager"}}],
+        "metadata": {},
+        "user_id": "user-123",
+    }
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        del owner_id, allow_cross_owner
+        return existing_conversation
+
+    async def fake_post_approval_events(*_args, **_kwargs):
+        yield chat_module.format_sse(
+            chat_module.SSEEventType.AGENT_PROGRESS,
+            {"agent": "brochure-gen-agent", "status": "running"},
+        )
+        yield chat_module.format_sse(chat_module.SSEEventType.DONE, {"message": "完了"})
+
+    async def fake_append_conversation_events(**kwargs):
+        append_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "_post_approval_events", fake_post_approval_events)
+    monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+
+    await chat_module._run_manager_approval_continuation(
+        "conv-manager",
+        {"owner_id": "user-123", "approval_scope": "manager"},
+    )
+
+    assert [call["status"] for call in append_calls] == ["running", "completed"]
+    first_saved_event = append_calls[0]["new_events"][0]
+    assert first_saved_event["event"] == "agent_progress"
+    assert first_saved_event["data"] == {"agent": "brochure-gen-agent", "status": "running"}
+    assert append_calls[1]["new_events"][0]["event"] == "done"
+    assert append_calls[0]["owner_id"] == "user-123"
+
+
 def test_manager_approval_callback_rejects_invalid_token(monkeypatch):
     """callback token が一致しない場合は拒否する"""
 

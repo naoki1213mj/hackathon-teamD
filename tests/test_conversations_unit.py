@@ -30,11 +30,13 @@ def _clear_memory_store(monkeypatch):
     # シングルトンをリセットして各テストが独立して初期化できるようにする
     _conv_mod._cosmos_client = None
     _conv_mod._cosmos_initialized = False
+    _conv_mod._cosmos_retry_after_monotonic = 0.0
     yield
     _memory_store.clear()
     _conv_mod._conversation_locks.clear()
     _conv_mod._cosmos_client = None
     _conv_mod._cosmos_initialized = False
+    _conv_mod._cosmos_retry_after_monotonic = 0.0
 
 
 # --- 既存テスト ---
@@ -544,6 +546,29 @@ class TestCosmosClientCreation:
         with patch.dict(sys.modules, {"azure.cosmos": mock_cosmos_module}):
             result = _get_cosmos_client()
             assert result is None
+            assert _conv_mod._cosmos_initialized is False
+            assert _conv_mod._cosmos_retry_after_monotonic > 0.0
+
+    def test_cosmos_client_retries_after_transient_failure(self, monkeypatch):
+        """一時的な Cosmos 接続失敗後もクールダウン後に再試行できる"""
+        monkeypatch.setenv("COSMOS_DB_ENDPOINT", "https://test.documents.azure.com:443/")
+
+        import sys
+        import types
+
+        mock_client = MagicMock(name="cosmos-client")
+        mock_cosmos_module = types.ModuleType("azure.cosmos")
+        mock_cosmos_module.CosmosClient = MagicMock(side_effect=[RuntimeError("firewall"), mock_client])
+        mock_identity_module = types.ModuleType("azure.identity")
+        mock_identity_module.DefaultAzureCredential = MagicMock(return_value=MagicMock(name="credential"))
+
+        with patch.dict(sys.modules, {"azure.cosmos": mock_cosmos_module, "azure.identity": mock_identity_module}):
+            assert _get_cosmos_client() is None
+            assert _conv_mod._cosmos_initialized is False
+
+            _conv_mod._cosmos_retry_after_monotonic = 0.0
+            assert _get_cosmos_client() is mock_client
+            assert _conv_mod._cosmos_initialized is True
 
     def test_get_container_success(self, monkeypatch):
         """コンテナ正常取得"""

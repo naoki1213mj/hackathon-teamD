@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ _REPLACE_METADATA_FLAG = "__replace_metadata__"
 # Cosmos DB クライアントのシングルトン（接続プーリングを再利用するため）
 _cosmos_client = None
 _cosmos_initialized = False
+_cosmos_retry_after_monotonic = 0.0
+_COSMOS_CLIENT_RETRY_SECONDS = 60.0
 
 
 def _normalize_owner_id(owner_id: str | None) -> str:
@@ -64,28 +67,40 @@ def _get_cosmos_client():
     CosmosClient は接続プーリングを内蔵しているため、モジュールレベルで
     シングルトンとして保持し、呼び出しごとの再生成を避ける。
     """
-    global _cosmos_client, _cosmos_initialized
+    global _cosmos_client, _cosmos_initialized, _cosmos_retry_after_monotonic
     if _cosmos_initialized:
         return _cosmos_client
-    _cosmos_initialized = True
 
     endpoint = os.environ.get("COSMOS_DB_ENDPOINT", "")
     if not endpoint:
+        _cosmos_initialized = True
+        return None
+    now = time.monotonic()
+    if _cosmos_retry_after_monotonic > now:
         return None
     try:
         from azure.cosmos import CosmosClient
         from azure.identity import DefaultAzureCredential
 
         _cosmos_client = CosmosClient(url=endpoint, credential=DefaultAzureCredential())
+        _cosmos_initialized = True
+        _cosmos_retry_after_monotonic = 0.0
         return _cosmos_client
     except ImportError:
+        _cosmos_initialized = True
         logger.warning("azure-cosmos がインストールされていません")
         return None
     except (ValueError, OSError) as exc:
         logger.warning("Cosmos DB クライアントの作成に失敗: %s", exc)
+        _cosmos_client = None
+        _cosmos_initialized = False
+        _cosmos_retry_after_monotonic = time.monotonic() + _COSMOS_CLIENT_RETRY_SECONDS
         return None
     except Exception as exc:
         logger.exception("Cosmos DB クライアントの作成で予期しないエラー: %s", exc)
+        _cosmos_client = None
+        _cosmos_initialized = False
+        _cosmos_retry_after_monotonic = time.monotonic() + _COSMOS_CLIENT_RETRY_SECONDS
         return None
 
 
