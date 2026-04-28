@@ -237,7 +237,7 @@ jobs:
           exit 1
 
       - name: Rollback on failure
-        if: failure()
+        if: failure() && steps.prev-revision.outputs.image != ''
         run: |
           wait_for_containerapp_provisioning() {
             for i in $(seq 1 30); do
