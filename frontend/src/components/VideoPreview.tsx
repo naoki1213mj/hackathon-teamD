@@ -1,4 +1,5 @@
 import { Download } from 'lucide-react'
+import { sanitizeHttpMediaUrl } from '../lib/safe-url'
 
 interface VideoPreviewProps {
   videoUrl?: string
@@ -8,7 +9,9 @@ interface VideoPreviewProps {
 }
 
 export function VideoPreview({ videoUrl, statusMessage, backgroundPending = false, t }: VideoPreviewProps) {
-  if (!videoUrl) {
+  const safeVideoUrl = sanitizeHttpMediaUrl(videoUrl)
+
+  if (!safeVideoUrl) {
     const message = statusMessage || (backgroundPending ? t('video.pending.description') : t('tab.video.description'))
     const isIssueMessage = message.startsWith('⚠️') || message.startsWith('❌')
 
@@ -26,7 +29,7 @@ export function VideoPreview({ videoUrl, statusMessage, backgroundPending = fals
   return (
     <div className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)]">
       <video
-        src={videoUrl}
+        src={safeVideoUrl}
         controls
         className="w-full"
         preload="metadata"
@@ -36,7 +39,7 @@ export function VideoPreview({ videoUrl, statusMessage, backgroundPending = fals
       </video>
       <div className="p-3">
         <a
-          href={videoUrl}
+          href={safeVideoUrl}
           download="avatar-video.mp4"
           target="_blank"
           rel="noopener noreferrer"

@@ -19,7 +19,7 @@ def _get_foundry_voice_target() -> tuple[str, str, str]:
     try:
         resource_name = project_endpoint.split("//", 1)[1].split(".", 1)[0]
         project_name = project_endpoint.rstrip("/").rsplit("/", 1)[1]
-    except IndexError, AttributeError:
+    except (IndexError, AttributeError):
         return "", "", ""
 
     endpoint = f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime"

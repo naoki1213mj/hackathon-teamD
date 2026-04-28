@@ -1,5 +1,6 @@
 """チャット逐次オーケストレーションのテスト"""
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -3056,6 +3057,100 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
             "content_type": "text",
         },
     ) in parsed_events
+
+
+@pytest.mark.asyncio
+async def test_post_approval_does_not_block_done_when_video_agent_submission_hangs(monkeypatch) -> None:
+    """video agent のジョブ送信が戻らない場合でも SSE は done まで進む。"""
+
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test/project",
+            "content_understanding_endpoint": "",
+            "logic_app_callback_url": "",
+        },
+    )
+    monkeypatch.setattr(chat_module, "_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS", 0.01)
+
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
+        return {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "旧企画書",
+            "model_settings": {"temperature": 0.3},
+        }
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session
+        del work_iq_access_token, total_steps, include_done
+        if agent_name == "video-gen-agent":
+            await asyncio.sleep(1)
+
+        payload_by_agent = {
+            "regulation-check-agent": "規制チェック結果",
+            "plan-revision-agent": "修正版企画書",
+            "brochure-gen-agent": "```html\n<html><body>brochure</body></html>\n```",
+            "video-gen-agent": '{"status": "submitted"}',
+        }
+        text = payload_by_agent[agent_name]
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": text, "agent": agent_name},
+                )
+            ],
+            "text": text,
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 10,
+        }
+
+    async def fake_quality_review(review_input: str):
+        assert "修正版企画書" in review_input
+        return []
+
+    async def fake_trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_html: str):
+        assert conversation_id == "conv-video-submission-timeout"
+        assert plan_markdown == "修正版企画書"
+        assert brochure_html == "<html><body>brochure</body></html>"
+
+    monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "_maybe_run_quality_review", fake_quality_review)
+    monkeypatch.setattr(chat_module, "_trigger_logic_app", fake_trigger_logic_app)
+    monkeypatch.setattr("src.agents.video_gen.pop_pending_video_job", lambda _conversation_id: None)
+
+    parsed_events = [
+        _parse_sse(event)
+        for event in [
+            event async for event in chat_module._post_approval_events("承認", "conv-video-submission-timeout")
+        ]
+    ]
+
+    assert (
+        "text",
+        {
+            "content": chat_module._VIDEO_SUBMISSION_TIMEOUT_MESSAGE,
+            "agent": "video-gen-agent",
+            "content_type": "text",
+        },
+    ) in parsed_events
+    assert any(event_name == chat_module.SSEEventType.DONE for event_name, _ in parsed_events)
 
 
 @pytest.mark.asyncio

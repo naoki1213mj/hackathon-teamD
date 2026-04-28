@@ -579,6 +579,32 @@ describe('connectSSE', () => {
     )
   })
 
+  it('reports network failures without throwing or leaving the flow running', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const errorHandler = vi.fn()
+
+    await expect(connectSSE('test', { error: errorHandler })).resolves.toBe('blocked')
+
+    expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'NETWORK_ERROR',
+      message: expect.stringContaining('ネットワークエラー'),
+    }))
+  })
+
+  it('reports approval network failures without throwing', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const errorHandler = vi.fn()
+
+    await expect(sendApproval('conv-1', '承認', { error: errorHandler })).resolves.toBeUndefined()
+
+    expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'NETWORK_ERROR',
+      message: expect.stringContaining('ネットワークエラー'),
+    }))
+  })
+
   it('dispatches multiple event types to their respective handlers', async () => {
     const sseBody =
       'event: tool_event\ndata: {"tool":"web_search","status":"completed","agent":"a1"}\n\n' +

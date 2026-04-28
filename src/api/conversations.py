@@ -79,6 +79,16 @@ def _sanitize_conversation_document(doc: dict) -> dict:
     return sanitized
 
 
+def _sanitize_conversation_list_item(doc: dict) -> dict[str, str]:
+    """会話一覧用に詳細 metadata / messages を含まない要約だけを返す。"""
+    return {
+        "id": str(doc.get("id", "")),
+        "input": str(doc.get("input", "")),
+        "status": str(doc.get("status", "")),
+        "created_at": str(doc.get("created_at", "")),
+    }
+
+
 def _identity_error_response(exc: RequestIdentityError) -> JSONResponse:
     """owner 境界の認証エラーを JSON API レスポンスへ変換する。"""
     return JSONResponse(status_code=exc.status_code, content={"error": exc.message, "code": exc.code})
@@ -92,7 +102,8 @@ async def conversations_list(request: Request, limit: int = 20) -> Response:
     except RequestIdentityError as exc:
         return _identity_error_response(exc)
     items = await list_conversations(owner_id=identity["user_id"], limit=limit)
-    etag = _build_conversations_list_etag(items)
+    safe_items = [_sanitize_conversation_list_item(item) for item in items if isinstance(item, dict)]
+    etag = _build_conversations_list_etag(safe_items)
     cache_headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate",
         "Pragma": "no-cache",
@@ -101,7 +112,7 @@ async def conversations_list(request: Request, limit: int = 20) -> Response:
     if _if_none_match_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=cache_headers)
     return JSONResponse(
-        content={"conversations": items},
+        content={"conversations": safe_items},
         headers=cache_headers,
     )
 

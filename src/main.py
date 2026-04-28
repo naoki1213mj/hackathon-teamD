@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         from src.http_client import close_http_client
 
         await close_http_client()
-    except ImportError, RuntimeError:
+    except (ImportError, RuntimeError):
         pass
 
 

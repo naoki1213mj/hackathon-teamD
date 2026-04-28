@@ -31,6 +31,21 @@ _HARD_MAX_PDF_BYTES = 25 * 1024 * 1024
 _HARD_MAX_AUDIO_SECONDS = 60 * 60
 _HARD_MAX_AUDIO_BYTES = 100 * 1024 * 1024
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_SENSITIVE_METADATA_KEY_RE = re.compile(
+    r"(\bauth\b|authorization|bearer|token|secret|password|api[_-]?key|x[_-]?functions[_-]?key|subscription[_-]?key|sig)",
+    re.IGNORECASE,
+)
+_SECRET_VALUE_RE = re.compile(
+    r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]+|"
+    r"\bauthorization\s*[:=]\s*(?:bearer\s+)?[^\s,;]+|"
+    r"\bapi[_-]?key\s*[:=]\s*[^\s,;]+|"
+    r"\b(?:access[_-]?)?token\s*[:=]\s*[^\s,;]+|"
+    r"\bsecret\s*[:=]\s*[^\s,;]+|"
+    r"\bpassword\s*[:=]\s*[^\s,;]+|"
+    r"\bsig\s*[:=]\s*[^\s,;]+|"
+    r"\bx-functions-key\s*[:=]\s*[^\s,;]+|"
+    r"\bsubscription-key\s*[:=]\s*[^\s,;]+)"
+)
 _memory_sources: dict[str, "SourceRecord"] = {}
 _store_lock = asyncio.Lock()
 
@@ -141,6 +156,14 @@ def sanitize_source_text(value: object, *, max_length: int) -> str:
     return normalized[:max_length]
 
 
+def redact_sensitive_source_text(value: object, *, max_length: int) -> str:
+    """公開・LLM 注入用テキストから token / secret 値を除去する。"""
+    sanitized = sanitize_source_text(value, max_length=max_length)
+    if not sanitized:
+        return ""
+    return _SECRET_VALUE_RE.sub("[redacted]", sanitized)
+
+
 def normalize_source_metadata(value: object) -> dict[str, str | int | float | bool | None] | None:
     """保存してよい scalar metadata のみに絞る。"""
     if not isinstance(value, dict):
@@ -150,8 +173,12 @@ def normalize_source_metadata(value: object) -> dict[str, str | int | float | bo
         clean_key = sanitize_source_text(key, max_length=64)
         if not clean_key:
             continue
+        if _SENSITIVE_METADATA_KEY_RE.search(clean_key):
+            continue
         if isinstance(item, str):
-            normalized[clean_key] = sanitize_source_text(item, max_length=300)
+            redacted_item = redact_sensitive_source_text(item, max_length=300)
+            if redacted_item:
+                normalized[clean_key] = redacted_item
         elif isinstance(item, int | float | bool) or item is None:
             normalized[clean_key] = item
     return normalized or None
@@ -159,8 +186,9 @@ def normalize_source_metadata(value: object) -> dict[str, str | int | float | bo
 
 def summarize_text_source(text: str) -> str:
     """レビュー用に本文から短い要約候補を作る。"""
-    normalized_lines = [line.strip() for line in text.splitlines() if line.strip()]
-    basis = " ".join(normalized_lines) if normalized_lines else text.strip()
+    safe_text = redact_sensitive_source_text(text, max_length=len(text))
+    normalized_lines = [line.strip() for line in safe_text.splitlines() if line.strip()]
+    basis = " ".join(normalized_lines) if normalized_lines else safe_text.strip()
     if len(basis) <= _MAX_SUMMARY_LENGTH:
         return basis
     return f"{basis[: _MAX_SUMMARY_LENGTH - 1].rstrip()}…"
@@ -234,6 +262,7 @@ async def create_text_source(
     limits = get_source_ingestion_limits()
     sanitized_text = sanitize_source_text(text, max_length=limits["max_text_chars"] + 1)
     _validate_text_length(sanitized_text, limits)
+    redacted_text = redact_sensitive_source_text(sanitized_text, max_length=limits["max_text_chars"])
     now = _utc_now()
     source_id = str(uuid.uuid4())
     record = SourceRecord(
@@ -241,14 +270,14 @@ async def create_text_source(
         owner_id=owner_id,
         conversation_id=conversation_id,
         kind=kind,
-        title=sanitize_source_text(title, max_length=_MAX_TITLE_LENGTH) or "Untitled source",
-        summary=summarize_text_source(sanitized_text),
+        title=redact_sensitive_source_text(title, max_length=_MAX_TITLE_LENGTH) or "Untitled source",
+        summary=summarize_text_source(redacted_text),
         status="pending_review",
         created_at=now,
         updated_at=now,
         expires_at=_expires_at(now, limits["ttl_seconds"]),
-        raw_text=sanitized_text,
-        metadata=metadata,
+        raw_text=redacted_text,
+        metadata=normalize_source_metadata(metadata),
     )
     async with _store_lock:
         _purge_expired_locked()
@@ -277,14 +306,14 @@ async def create_audio_source(
         owner_id=owner_id,
         conversation_id=conversation_id,
         kind="audio",
-        title=sanitize_source_text(title, max_length=_MAX_TITLE_LENGTH) or "Audio source",
+        title=redact_sensitive_source_text(title, max_length=_MAX_TITLE_LENGTH) or "Audio source",
         summary=summarize_text_source(sanitized_transcript),
         status="pending_review",
         created_at=now,
         updated_at=now,
         expires_at=_expires_at(now, limits["ttl_seconds"]),
         raw_text="",
-        metadata=metadata,
+        metadata=normalize_source_metadata(metadata),
     )
     async with _store_lock:
         _purge_expired_locked()
@@ -325,7 +354,7 @@ async def review_source(
         if record is None:
             return None
         if summary is not None:
-            record.summary = sanitize_source_text(summary, max_length=_MAX_SUMMARY_LENGTH)
+            record.summary = redact_sensitive_source_text(summary, max_length=_MAX_SUMMARY_LENGTH)
         record.status = "reviewed" if approved else "rejected"
         record.raw_text = ""
         record.updated_at = _utc_now()

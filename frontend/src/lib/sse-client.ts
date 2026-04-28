@@ -14,6 +14,15 @@ import { getDelegatedApiAuth } from './api-auth'
 const SSE_TIMEOUT_MS = 900_000
 const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+function buildNetworkError(err: unknown): { message: string; code: string } {
+  const detail = err instanceof Error && err.message ? `: ${err.message}` : ''
+  return { message: `ネットワークエラーが発生しました${detail}`, code: 'NETWORK_ERROR' }
+}
+
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || (err instanceof DOMException && err.name === 'AbortError')
+}
+
 function buildWorkIqAuthError(status: string): { message: string; code: string } {
   switch (status) {
     case 'auth_required':
@@ -234,11 +243,12 @@ export async function connectSSE(
       signal: combinedSignal,
     })
   } catch (err: unknown) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (isAbortError(err, combinedSignal)) {
       handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
       return 'blocked'
     }
-    throw err
+    handlers.error?.(buildNetworkError(err))
+    return 'blocked'
   }
 
   if (!response.ok) {
@@ -246,7 +256,16 @@ export async function connectSSE(
     return 'blocked'
   }
 
-  await readSSEStream(response, handlers, combinedSignal)
+  try {
+    await readSSEStream(response, handlers, combinedSignal)
+  } catch (err: unknown) {
+    if (isAbortError(err, combinedSignal)) {
+      handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
+      return 'blocked'
+    }
+    handlers.error?.(buildNetworkError(err))
+    return 'blocked'
+  }
   return 'started'
 }
 
@@ -280,11 +299,12 @@ export async function sendApproval(
       signal: combinedSignal,
     })
   } catch (err: unknown) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (isAbortError(err, combinedSignal)) {
       handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
       return
     }
-    throw err
+    handlers.error?.(buildNetworkError(err))
+    return
   }
 
   if (!res.ok) {
@@ -292,5 +312,13 @@ export async function sendApproval(
     return
   }
 
-  await readSSEStream(res, handlers, combinedSignal)
+  try {
+    await readSSEStream(res, handlers, combinedSignal)
+  } catch (err: unknown) {
+    if (isAbortError(err, combinedSignal)) {
+      handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
+      return
+    }
+    handlers.error?.(buildNetworkError(err))
+  }
 }

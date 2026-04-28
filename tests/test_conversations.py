@@ -55,6 +55,45 @@ def test_conversations_list_returns_304_when_etag_matches(monkeypatch):
     assert conditional_response.content == b""
 
 
+def test_conversations_list_hides_sensitive_metadata(monkeypatch):
+    """会話一覧はメモリ fallback の完全 doc からも機密フィールドを返さない"""
+
+    async def fake_list_conversations(owner_id: str | None = None, limit: int = 20):
+        return [
+            {
+                "id": "conv-sensitive",
+                "user_id": "user-123",
+                "input": "沖縄プラン",
+                "status": "awaiting_manager_approval",
+                "created_at": "2026-04-05T00:00:00+00:00",
+                "messages": [{"event": "approval_request", "data": {"plan_markdown": "# secret"}}],
+                "metadata": {
+                    "manager_approval_callback_token": "secret-token",
+                    "work_iq_session": {
+                        "owner_oid": "oid-123",
+                        "owner_tid": "tid-123",
+                        "owner_upn": "user@example.com",
+                    },
+                },
+            }
+        ]
+
+    monkeypatch.setattr("src.api.conversations.list_conversations", fake_list_conversations)
+
+    response = client.get("/api/conversations")
+
+    assert response.status_code == 200
+    item = response.json()["conversations"][0]
+    assert item == {
+        "id": "conv-sensitive",
+        "input": "沖縄プラン",
+        "status": "awaiting_manager_approval",
+        "created_at": "2026-04-05T00:00:00+00:00",
+    }
+    assert "secret-token" not in response.text
+    assert "owner_oid" not in response.text
+
+
 def test_conversation_detail_returns_404_for_unknown():
     """存在しない conversation_id は 404"""
     response = client.get("/api/conversations/nonexistent-id")

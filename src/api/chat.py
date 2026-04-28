@@ -134,8 +134,13 @@ _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
 _BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
 _USER_MESSAGES_METADATA_KEY = "user_messages"
 _PIPELINE_TOTAL_STEPS = 5
+_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS = 75
 _VIDEO_POLL_MAX_WAIT_SECONDS = 420
 _VIDEO_BACKGROUND_PENDING_MESSAGE = "販促動画をバックグラウンドで生成しています。動画タブは完了後に自動更新されます。"
+_VIDEO_SUBMISSION_TIMEOUT_MESSAGE = (
+    "⚠️ 動画生成ジョブの送信がタイムアウトしました。企画書とブローシャは完了しています。"
+    "時間をおいて再実行してください。"
+)
 _VIDEO_POLL_TIMEOUT_MESSAGE = (
     "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"
 )
@@ -225,6 +230,69 @@ class AgentExecutionOutcome(TypedDict):
     prompt_tokens: NotRequired[int]
     completion_tokens: NotRequired[int]
     estimated_cost_usd: NotRequired[float]
+
+
+def _build_video_submission_timeout_outcome() -> AgentExecutionOutcome:
+    """video agent のジョブ送信が長時間戻らない場合に、UI を完了/注意状態へ進める。"""
+    return {
+        "events": [
+            format_sse(
+                SSEEventType.AGENT_PROGRESS,
+                {
+                    "agent": "video-gen-agent",
+                    "status": "running",
+                    "step": _PIPELINE_TOTAL_STEPS,
+                    "total_steps": _PIPELINE_TOTAL_STEPS,
+                },
+            ),
+            format_sse(
+                SSEEventType.TEXT,
+                {
+                    "content": _VIDEO_SUBMISSION_TIMEOUT_MESSAGE,
+                    "agent": "video-gen-agent",
+                    "content_type": "text",
+                },
+            ),
+            _format_tool_event_sse(
+                _build_agent_tool_event(
+                    "generate_promo_video",
+                    "failed",
+                    agent_name="video-gen-agent",
+                    step=_PIPELINE_TOTAL_STEPS,
+                    source="foundry",
+                    provider="foundry",
+                    error_code="VIDEO_SUBMISSION_TIMEOUT",
+                    error_message="Video generation agent did not submit the Photo Avatar job before the timeout.",
+                )
+            ),
+            format_sse(
+                SSEEventType.AGENT_PROGRESS,
+                {
+                    "agent": "video-gen-agent",
+                    "status": "completed",
+                    "step": _PIPELINE_TOTAL_STEPS,
+                    "total_steps": _PIPELINE_TOTAL_STEPS,
+                },
+            ),
+        ],
+        "text": _VIDEO_SUBMISSION_TIMEOUT_MESSAGE,
+        "success": False,
+        "latency_seconds": float(_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS),
+        "tool_calls": 0,
+        "total_tokens": 0,
+    }
+
+
+async def _await_video_submission_outcome(video_outcome_task: asyncio.Task[AgentExecutionOutcome]) -> AgentExecutionOutcome:
+    """video agent のジョブ送信待ちを bounded にし、SSE の完了をブロックしない。"""
+    try:
+        return await asyncio.wait_for(video_outcome_task, timeout=_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS)
+    except TimeoutError:
+        logger.warning(
+            "video-gen-agent のジョブ送信が %.0f 秒以内に完了しませんでした",
+            _VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS,
+        )
+        return _build_video_submission_timeout_outcome()
 
 
 class TokenUsage(TypedDict, total=False):
@@ -3127,7 +3195,7 @@ async def _execute_agent(
                             events[i] = (
                                 f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
                             )
-                    except json.JSONDecodeError, AttributeError:
+                    except (json.JSONDecodeError, AttributeError):
                         pass
                 break
 
@@ -3288,7 +3356,7 @@ async def _maybe_run_quality_review(review_input: str) -> list[str]:
     except (ImportError, ValueError, OSError) as exc:
         logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
         return []
-    except RuntimeError, TypeError:
+    except (RuntimeError, TypeError):
         logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
         return []
 
@@ -4403,7 +4471,7 @@ async def _post_approval_events(
     )
 
     if video_outcome_task is not None:
-        video_outcome = await video_outcome_task
+        video_outcome = await _await_video_submission_outcome(video_outcome_task)
         for event in video_outcome["events"]:
             yield event
         total_tool_calls += video_outcome["tool_calls"]
@@ -4441,7 +4509,7 @@ async def _post_approval_events(
         if part
     )
     brochure_html = _extract_brochure_html(brochure_outcome["text"]) or ""
-    background_updates_pending = bool(video_job_id or review_input.strip() or settings["logic_app_callback_url"])
+    background_updates_pending = bool(video_job_id or review_input.strip() or settings.get("logic_app_callback_url", ""))
 
     if background_updates_pending and register_background_job is None:
         if video_job_id:
@@ -4624,7 +4692,7 @@ async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_
         logger.info("Logic Apps コールバック送信完了: conversation_id=%s", conversation_id)
     except (ValueError, OSError) as exc:
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）: %s", exc)
-    except RuntimeError, urllib.error.URLError:
+    except (RuntimeError, urllib.error.URLError):
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）", exc_info=True)
 
 

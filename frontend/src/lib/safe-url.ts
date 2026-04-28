@@ -81,6 +81,21 @@ export function sanitizeHttpUrl(value: unknown): string | undefined {
   return sanitizeAbsoluteUrl(value, HTTP_PROTOCOLS)
 }
 
+export function sanitizeHttpMediaUrl(value: unknown): string | undefined {
+  const rawUrl = toTrimmedString(value)
+  if (!rawUrl) return undefined
+
+  const compactProtocol = extractCompactProtocol(rawUrl)
+  if (!compactProtocol || !HTTP_PROTOCOLS.has(compactProtocol)) return undefined
+
+  try {
+    const parsed = new URL(rawUrl)
+    return HTTP_PROTOCOLS.has(parsed.protocol.toLowerCase()) ? rawUrl : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function sanitizeLinkUrl(value: unknown): string | undefined {
   return sanitizeAbsoluteUrl(value, LINK_PROTOCOLS)
 }

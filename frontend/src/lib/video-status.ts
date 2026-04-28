@@ -1,4 +1,5 @@
 import type { TextContent } from '../hooks/useSSE'
+import { sanitizeHttpMediaUrl } from './safe-url'
 
 export type VideoWorkflowStatus = 'idle' | 'pending' | 'completed' | 'issue'
 
@@ -24,7 +25,7 @@ function normalizeVideoStatusMessage(rawContent: string): string | undefined {
 export function extractVideoUrl(textContents: TextContent[]): string | undefined {
   const videoEntry = textContents.findLast(content => content.agent === 'video-gen-agent' && content.content_type === 'video')
   const url = videoEntry?.content.trim()
-  return url || undefined
+  return sanitizeHttpMediaUrl(url)
 }
 
 export function extractVideoStatusMessage(textContents: TextContent[]): string | undefined {
@@ -42,6 +43,9 @@ export function classifyVideoWorkflowStatus(
   }
 
   const statusMessage = extractVideoStatusMessage(textContents)
+  if (statusMessage?.startsWith('⚠️') || statusMessage?.startsWith('❌')) {
+    return 'issue'
+  }
   if (backgroundUpdatesPending) {
     return statusMessage ? 'pending' : 'idle'
   }

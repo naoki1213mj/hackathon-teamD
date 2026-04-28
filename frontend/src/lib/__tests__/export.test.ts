@@ -180,4 +180,22 @@ describe('exportAllAsJson', () => {
     expect(parsed.brochure_html).toBe('<h1>brochure v2</h1>')
     expect(parsed.analysis).toBe('analysis v2')
   })
+
+  it('redacts unsafe and tokenized image URLs from JSON bundle', async () => {
+    const { exportAllAsJson } = await import('../export')
+    const images: ImageContent[] = [
+      { url: 'https://example.com/hero.png?sig=secret', alt: 'tokenized', agent: 'brochure-gen-agent' },
+      { url: 'javascript:alert(1)', alt: 'unsafe', agent: 'brochure-gen-agent' },
+      { url: 'https://example.com/safe.png', alt: 'safe', agent: 'brochure-gen-agent' },
+    ]
+
+    exportAllAsJson([], images, 'conv-images')
+
+    const parsed = JSON.parse(await getCapturedText())
+    expect(parsed.images).toEqual([
+      { url: null, alt: 'tokenized' },
+      { url: null, alt: 'unsafe' },
+      { url: 'https://example.com/safe.png', alt: 'safe' },
+    ])
+  })
 })

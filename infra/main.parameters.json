@@ -34,6 +34,12 @@
     },
     "postApprovalSharePointSiteId": {
       "value": "${POST_APPROVAL_SHAREPOINT_SITE_ID=}"
+    },
+    "imageProjectEndpointMai": {
+      "value": "${IMAGE_PROJECT_ENDPOINT_MAI=}"
+    },
+    "maiResourceName": {
+      "value": "${MAI_RESOURCE_NAME=}"
     }
   }
 }

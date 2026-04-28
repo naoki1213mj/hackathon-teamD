@@ -103,7 +103,7 @@ export function exportAllAsJson(
     regulation_check: findLastContent(contents, c => c.agent === 'regulation-check-agent')?.content || null,
     brochure_html: findLastContent(contents, c => c.agent === 'brochure-gen-agent' && c.content_type === 'html')?.content || null,
     analysis: findLastContent(contents, c => c.agent === 'data-search-agent')?.content || null,
-    images: images.map(img => ({ url: img.url, alt: img.alt })),
+    images: images.map(img => ({ url: sanitizeImageUrl(img.url) ?? null, alt: img.alt })),
   }
   downloadBlob(JSON.stringify(data, null, 2), 'artifacts.json', 'application/json;charset=utf-8')
 }

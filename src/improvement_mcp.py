@@ -316,7 +316,7 @@ def _parse_content_payload(content: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         try:
             parsed = ast.literal_eval(content)
-        except SyntaxError, ValueError:
+        except (SyntaxError, ValueError):
             return None
     return parsed if isinstance(parsed, dict) else None
 

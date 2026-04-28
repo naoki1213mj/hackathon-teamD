@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "7703486287818194448"
+      "templateHash": "6212427492005194362"
     }
   },
   "parameters": {
@@ -30,6 +30,29 @@
       "defaultValue": "",
       "metadata": {
         "description": "コンテナイメージ名（azd が自動設定する）"
+      }
+    },
+    "enableContainerAppsVnetIntegration": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Container Apps Environment を VNet 統合で作成する。既存の非 VNet 統合 CAE では replacement / blue-green 移行の承認後に true にする。"
+      }
+    },
+    "containerAppsVnetIntegrationMigrationApproval": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "既存 CAE の VNet 統合移行を明示承認する確認文字列。既存環境では ENABLE_CONTAINER_APPS_VNET_INTEGRATION=true と併せて CONFIRM_CAE_VNET_MIGRATION を設定する。"
+      }
+    },
+    "containerAppMaxReplicas": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 10,
+      "metadata": {
+        "description": "Container App の最大 replica 数。Cosmos DB private endpoint 経路の疎通確認後に 2 以上へ引き上げる。"
       }
     },
     "voiceSpaClientId": {
@@ -113,9 +136,10 @@
     },
     "apimName": "[format('{0}{1}', variables('abbrs').apim, variables('resourceToken'))]",
     "defaultModelDeploymentName": "gpt-5-4-mini",
-    "defaultImageModelDeploymentName": "gpt-image-1.5",
+    "defaultImageModelDeploymentName": "gpt-image-2",
     "aiServicesApiBase": "[format('https://{0}{1}.services.ai.azure.com', variables('abbrs').aiFoundry, variables('resourceToken'))]",
-    "improvementMcpEndpoint": "[format('https://{0}.azure-api.net/improvement-mcp/runtime/webhooks/mcp', variables('apimName'))]"
+    "improvementMcpEndpoint": "[format('https://{0}.azure-api.net/improvement-mcp/runtime/webhooks/mcp', variables('apimName'))]",
+    "containerAppsVnetIntegrationApproved": "[and(parameters('enableContainerAppsVnetIntegration'), equals(parameters('containerAppsVnetIntegrationMigrationApproval'), 'CONFIRM_CAE_VNET_MIGRATION'))]"
   },
   "resources": {
     "rg": {
@@ -565,7 +589,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "7244403325358407731"
+              "templateHash": "2803039925515362981"
             }
           },
           "parameters": {
@@ -585,7 +609,7 @@
             },
             "imageModelDeploymentName": {
               "type": "string",
-              "defaultValue": "gpt-image-1.5"
+              "defaultValue": "gpt-image-2"
             }
           },
           "resources": [
@@ -638,9 +662,9 @@
               },
               "properties": {
                 "model": {
-                  "name": "gpt-image-1.5",
+                  "name": "gpt-image-2",
                   "format": "OpenAI",
-                  "version": "2025-12-16"
+                  "version": "2026-04-21"
                 }
               },
               "dependsOn": [
@@ -784,7 +808,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "9633735603092962136"
+              "templateHash": "15726064715718823348"
             }
           },
           "parameters": {
@@ -830,7 +854,8 @@
                   {
                     "name": "snet-private-endpoints",
                     "properties": {
-                      "addressPrefix": "10.0.2.0/24"
+                      "addressPrefix": "10.0.2.0/24",
+                      "privateEndpointNetworkPolicies": "Disabled"
                     }
                   }
                 ]
@@ -883,7 +908,8 @@
           },
           "logAnalyticsWorkspaceId": {
             "value": "[reference('logAnalytics').outputs.id.value]"
-          }
+          },
+          "subnetId": "[if(variables('containerAppsVnetIntegrationApproved'), createObject('value', reference('vnet').outputs.containerAppsSubnetId.value), createObject('value', ''))]"
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -947,7 +973,8 @@
       },
       "dependsOn": [
         "logAnalytics",
-        "rg"
+        "rg",
+        "vnet"
       ]
     },
     "containerApp": {
@@ -1018,6 +1045,9 @@
           },
           "improvementMcpEndpoint": {
             "value": "[variables('improvementMcpEndpoint')]"
+          },
+          "maxReplicas": {
+            "value": "[parameters('containerAppMaxReplicas')]"
           }
         },
         "template": {
@@ -1027,7 +1057,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "1863573869286756417"
+              "templateHash": "6630475830254986169"
             }
           },
           "parameters": {
@@ -1071,6 +1101,12 @@
             "cosmosDbEndpoint": {
               "type": "string",
               "defaultValue": ""
+            },
+            "maxReplicas": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1,
+              "maxValue": 10
             },
             "contentUnderstandingEndpoint": {
               "type": "string",
@@ -1169,7 +1205,7 @@
                   ],
                   "scale": {
                     "minReplicas": 1,
-                    "maxReplicas": 3,
+                    "maxReplicas": "[parameters('maxReplicas')]",
                     "rules": [
                       {
                         "name": "http-rule",
@@ -2297,9 +2333,7 @@
           "tags": {
             "value": "[variables('tags')]"
           },
-          "privateEndpointsSubnetId": {
-            "value": "[reference('vnet').outputs.privateEndpointsSubnetId.value]"
-          },
+          "privateEndpointsSubnetId": "[if(variables('containerAppsVnetIntegrationApproved'), createObject('value', reference('vnet').outputs.privateEndpointsSubnetId.value), createObject('value', ''))]",
           "vnetId": {
             "value": "[reference('vnet').outputs.id.value]"
           }
@@ -2311,7 +2345,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "14003567375872034540"
+              "templateHash": "2271317370773385801"
             }
           },
           "parameters": {
@@ -2359,6 +2393,7 @@
                   }
                 ],
                 "disableLocalAuth": true,
+                "publicNetworkAccess": "[if(not(empty(parameters('privateEndpointsSubnetId'))), 'Disabled', 'Enabled')]",
                 "consistencyPolicy": {
                   "defaultConsistencyLevel": "Session"
                 }

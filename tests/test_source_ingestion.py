@@ -122,6 +122,46 @@ def test_text_source_create_review_list_delete_flow():
     assert client.get(f"/api/sources/{created['id']}").status_code == 404
 
 
+def test_text_source_redacts_secrets_from_public_payload_and_review_summary():
+    """source の公開 payload と承認済み要約に token / secret 値を残さない。"""
+    create_response = client.post(
+        "/api/sources/text",
+        json={
+            "conversation_id": "conv-source-secret",
+            "title": "Authorization: Bearer title-secret",
+            "text": "Authorization: Bearer body-secret\n家族旅行では自然体験を重視。",
+            "metadata": {
+                "token": "metadata-secret",
+                "note": "api_key=metadata-key campaign=spring",
+                "campaign": "spring",
+            },
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.json()["source"]
+    serialized_created = json.dumps(created, ensure_ascii=False)
+    assert "title-secret" not in serialized_created
+    assert "body-secret" not in serialized_created
+    assert "metadata-secret" not in serialized_created
+    assert "metadata-key" not in serialized_created
+    assert created["title"] == "[redacted]"
+    assert created["summary"].startswith("[redacted]")
+    assert created["metadata"]["note"] == "[redacted] campaign=spring"
+    assert created["metadata"]["campaign"] == "spring"
+    assert "token" not in created["metadata"]
+
+    review_response = client.post(
+        f"/api/sources/{created['id']}/review",
+        json={"approved": True, "summary": "token=review-secret 家族旅行では自然体験を重視。"},
+    )
+
+    assert review_response.status_code == 200
+    reviewed = review_response.json()["source"]
+    assert "review-secret" not in json.dumps(reviewed, ensure_ascii=False)
+    assert reviewed["summary"] == "[redacted] 家族旅行では自然体験を重視。"
+
+
 def test_source_owner_quota_is_enforced(monkeypatch):
     """owner ごとの保存数上限を超える追加取り込みは拒否する。"""
     monkeypatch.setenv("SOURCE_MAX_ITEMS_PER_OWNER", "1")

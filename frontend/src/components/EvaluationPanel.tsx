@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import { getDelegatedApiAuth } from '../lib/api-auth'
 import type { ChartSpec, EvidenceItem } from '../lib/event-schemas'
+import { sanitizeHttpUrl } from '../lib/safe-url'
 import {
     buildEvaluationFeedback,
     calculateEvaluationOverall,
@@ -461,6 +462,7 @@ export function EvaluationPanel({
   const resultEvidence = result?.evidence ?? evidenceContext.evidence
   const resultCharts = result?.charts ?? evidenceContext.charts
   const regressionGuard = result ? getRegressionGuard(result) : null
+  const foundryPortalUrl = sanitizeHttpUrl(result?.foundry_portal_url)
   const builtinMetrics = result && hasBuiltinMetrics(result.builtin)
     ? Object.entries(result.builtin)
         .filter(([key]) => shouldDisplayBuiltinMetric(key))
@@ -852,9 +854,9 @@ export function EvaluationPanel({
             </div>
           )}
 
-          {result.foundry_portal_url && (
+          {foundryPortalUrl && (
             <a
-              href={result.foundry_portal_url}
+              href={foundryPortalUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs text-[var(--accent-strong)] hover:underline"

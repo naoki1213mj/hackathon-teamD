@@ -425,6 +425,28 @@ describe('EvaluationPanel', () => {
     expect(screen.getByText('Sales Chart')).toBeInTheDocument()
   })
 
+  it('blocks unsafe Foundry portal URLs from evaluation results', () => {
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        artifactVersion={2}
+        evaluations={[{
+          ...evaluationV2,
+          result: {
+            ...evaluationV2.result,
+            foundry_portal_url: 'javascript:alert(1)',
+          },
+        }]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([evaluationV2])]}
+        t={t}
+      />,
+    )
+
+    expect(screen.queryByRole('link', { name: 'View in Foundry Portal' })).toBeNull()
+  })
+
   it('saves new evaluations through the version callback', async () => {
     mockFetch.mockResolvedValueOnce(createJsonResponse({
       plan_quality: evaluationV2.result.plan_quality,

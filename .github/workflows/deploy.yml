@@ -25,11 +25,14 @@ jobs:
     environment: production
     timeout-minutes: 45
     env:
+      DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Azure Login (OIDC)
         uses: azure/login@v3
@@ -50,7 +53,7 @@ jobs:
         run: |
           az acr build \
             --registry ${{ vars.ACR_NAME }} \
-            --image travel-agents:${{ github.sha }} \
+            --image travel-agents:${DEPLOY_SHA} \
             --image travel-agents:latest \
             --file Dockerfile .
 
@@ -68,7 +71,7 @@ jobs:
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --image ${{ vars.ACR_NAME }}.azurecr.io/travel-agents:${{ github.sha }}
+            --image ${{ vars.ACR_NAME }}.azurecr.io/travel-agents:${DEPLOY_SHA}
 
       - name: Configure optional MAI endpoint
         if: ${{ env.IMAGE_PROJECT_ENDPOINT_MAI != '' }}

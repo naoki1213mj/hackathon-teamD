@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isSafeDataImageUrl,
+  sanitizeHttpMediaUrl,
   sanitizeHttpUrl,
   sanitizeImageUrl,
   sanitizeLinkUrl,
@@ -25,6 +26,12 @@ describe('safe URL helpers', () => {
     expect(sanitizeHttpUrl('https://example.com')).toBe('https://example.com')
     expect(sanitizeHttpUrl('mailto:team@example.com')).toBeUndefined()
     expect(sanitizeHttpUrl('https://example.com/report?sig=secret')).toBeUndefined()
+  })
+
+  it('allows signed HTTP(S) media URLs while blocking active protocols', () => {
+    expect(sanitizeHttpMediaUrl('https://example.com/video.mp4?sig=secret')).toBe('https://example.com/video.mp4?sig=secret')
+    expect(sanitizeHttpMediaUrl('javascript:alert(1)')).toBeUndefined()
+    expect(sanitizeHttpMediaUrl('data:text/html,<script>alert(1)</script>')).toBeUndefined()
   })
 
   it('allows HTTP(S) and sanitized data images for images', () => {

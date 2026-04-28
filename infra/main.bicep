@@ -58,7 +58,7 @@ var tags = {
 }
 var apimName = '${abbrs.apim}${resourceToken}'
 var defaultModelDeploymentName = 'gpt-5-4-mini'
-var defaultImageModelDeploymentName = 'gpt-image-1.5'
+var defaultImageModelDeploymentName = 'gpt-image-2'
 var aiServicesApiBase = 'https://${abbrs.aiFoundry}${resourceToken}.services.ai.azure.com'
 var improvementMcpEndpoint = 'https://${apimName}.azure-api.net/improvement-mcp/runtime/webhooks/mcp'
 var containerAppsVnetIntegrationApproved = enableContainerAppsVnetIntegration && containerAppsVnetIntegrationMigrationApproval == 'CONFIRM_CAE_VNET_MIGRATION'
@@ -267,7 +267,7 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
     name: '${abbrs.cosmosDb}${resourceToken}'
     location: location
     tags: tags
-    privateEndpointsSubnetId: vnet.outputs.privateEndpointsSubnetId
+    privateEndpointsSubnetId: containerAppsVnetIntegrationApproved ? vnet.outputs.privateEndpointsSubnetId : ''
     vnetId: vnet.outputs.id
   }
 }
