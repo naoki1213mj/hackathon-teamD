@@ -2489,6 +2489,124 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_on_foundry_
 
 
 @pytest.mark.asyncio
+async def test_workflow_event_generator_continues_when_graph_prefetch_fallback_fails(monkeypatch) -> None:
+    """Foundry Work IQ と Graph prefetch が両方不安定でも企画書生成は継続する。"""
+
+    captured: dict[str, object] = {"marketing_calls": []}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, conversation_id, model_settings, work_iq_session, work_iq_access_token, total_steps, include_done
+        if agent_name == "data-search-agent":
+            return {
+                "events": [],
+                "text": "analysis output",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        captured["marketing_calls"].append(
+            {
+                "prompt": user_input,
+                "workflow_settings": dict(workflow_settings or {}),
+            }
+        )
+        runtime = (workflow_settings or {}).get("work_iq_runtime")
+        if runtime == "graph_prefetch":
+            return {
+                "events": [
+                    chat_module.format_sse(
+                        chat_module.SSEEventType.TEXT,
+                        {"content": "# fallback plan without Work IQ", "agent": "marketing-plan-agent"},
+                    )
+                ],
+                "text": "# fallback plan without Work IQ",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TOOL_EVENT,
+                    {
+                        "tool": "workiq_foundry_tool",
+                        "status": "timeout",
+                        "agent": "marketing-plan-agent",
+                        "error_code": "WORKIQ_TIMEOUT",
+                    },
+                ),
+                chat_module.format_sse(
+                    chat_module.SSEEventType.ERROR,
+                    {"message": "Work IQ の応答がタイムアウトしました。", "code": "WORKIQ_UNAVAILABLE"},
+                ),
+            ],
+            "text": "",
+            "success": False,
+            "latency_seconds": 0.1,
+            "tool_calls": 0,
+        }
+
+    async def fake_generate_workplace_context_brief(**kwargs):
+        del kwargs
+        raise RuntimeError("Graph API temporary failure")
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "春の沖縄ファミリー向け施策を分析して",
+            "conv-workiq-graph-prefetch-failure",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": True, "manager_email": "manager@example.com", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="foundry-token",
+            work_iq_graph_access_token="graph-token",
+            user_time_zone="Asia/Tokyo",
+        )
+    ]
+
+    parsed = [_parse_sse(event) for event in events]
+    tool_events = [payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.TOOL_EVENT]
+    marketing_calls = captured["marketing_calls"]
+
+    assert isinstance(marketing_calls, list)
+    assert len(marketing_calls) == 2
+    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert "職場コンテキスト" not in str(marketing_calls[1]["prompt"])
+    assert any(
+        payload.get("tool") == "generate_workplace_context_brief"
+        and payload.get("status") == "failed"
+        and payload.get("error_code") == "WORKIQ_GRAPH_PREFETCH_FAILED"
+        for payload in tool_events
+    )
+    assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _payload in parsed)
+    assert not any(event_name == chat_module.SSEEventType.ERROR for event_name, _payload in parsed)
+    assert "conv-workiq-graph-prefetch-failure" in chat_module._pending_approvals
+
+
+@pytest.mark.asyncio
 async def test_workflow_event_generator_keeps_foundry_tool_failure_when_graph_token_missing(monkeypatch) -> None:
     """graph token が無い場合は foundry_tool failure をそのまま返す。"""
 

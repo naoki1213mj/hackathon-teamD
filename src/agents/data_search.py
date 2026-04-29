@@ -43,6 +43,8 @@ _LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
     "分析を実行できませんでした",
     "抽出できませんでした",
     "データ未表示",
+    "データなし",
+    "安全に算出できるデータなし",
     "提示できません",
     "表示できません",
     "見つかりませんでした",
@@ -59,6 +61,10 @@ _LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
     "条件に一致",
     "追加提示してください",
     "必要であれば",
+    "ご希望があれば",
+    "gql",
+    "graphql",
+    "json",
     "specific data is unavailable",
     "could not find",
     "not found",
@@ -111,6 +117,8 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     normalized = answer.lower()
     if not normalized.strip():
         return True
+    if re.search(r"```(?:json|gql|graphql)\b|^\s*[{[]\s*\"|query\s*[{(]", answer, re.IGNORECASE | re.MULTILINE):
+        return True
     if any(pattern in normalized for pattern in _PLACEHOLDER_DATA_AGENT_PATTERNS):
         return True
     has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|人|★|/5)", answer))
@@ -144,19 +152,27 @@ def _build_data_agent_question(question: str) -> str:
     """Data Agent に対して、該当ゼロ時も代替集計を返すよう明示する。"""
     return "\n".join(
         [
-            "旅行マーケティング施策のために Lakehouse データを分析してください。",
-            "利用可能な主な列は travel_sales(Transaction_ID, Date, Travel_destination, Category, Schedule, Price, Price_per_person, Number_of_people, Age_group) と travel_review(Transaction_ID, Travel_destination, Rating, Emotions, Comments) です。",
-            "Date は yyyy/MM/dd 形式です。月条件は /06/ /07/ /08/ のようなスラッシュ付き月、または日付として解釈できる方法で扱い、-06- のようなハイフン形式は使わないでください。",
-            "Category は 国内/海外 の区分です。夏季/春季などの季節判定には絶対に使わず、季節は Date の月だけから判断してください。",
-            "「ファミリー」「子連れ」「家族」は travel_sales.Number_of_people >= 3 または Age_group が 30代/40代の販売履歴、review Comments に 子連れ/子ども/家族 を含むレビューとして扱ってください。",
-            "「学生」は Age_group が 20代、または若年グループ旅行として Number_of_people >= 2 を優先し、「若年層」は Age_group が 20代/30代、「シニア」は 50代以上、「春休み」は Date の月が 3/4 月のデータとして扱ってください。",
-            "前年同期比較は複数年の同月データがある場合だけ行い、足りない場合は利用可能な期間のトレンドを示してください。",
-            "売上上位は Travel_destination と Schedule で集計し、Transaction_ID 単位に分解せず、SUM(Price)、COUNT(Transaction_ID)、SUM(Number_of_people) を返してください。",
-            "レビューは Travel_destination で絞り、COUNT、AVG(Rating)、Rating 分布、Comments の代表例を返してください。",
-            "正確な条件一致がない場合でも、回答不能で終わらず、条件を少し広げた近いデータを使ってください。",
-            "必ず売上額、予約件数、人数、レビュー件数、評価分布、代表的なレビューコメントを含めてください。",
-            "実データがない項目は「データなし」と書き、X/XX/XXX や「例」の値は絶対に使わないでください。",
-            "対象データが少ない場合は、その制約を一文で述べたうえで利用可能な上位データを提示してください。",
+            "あなたは Travel Marketing AI 用の Fabric Data Agent です。旅行販売データとレビューを使い、日本語でマーケティング分析を返してください。",
+            "利用できるテーブルは travel_sales(Transaction_ID, Date, Travel_destination, Category, Schedule, Price, Price_per_person, Number_of_people, Age_group) と travel_review(Transaction_ID, Travel_destination, Rating, Emotions, Comments) だけです。",
+            "売上、販売額、収益、予約数、取引数、人数、単価、旅行先別/カテゴリ別/年代別/季節別の分析は travel_sales を使ってください。",
+            "レビュー、口コミ、評価、Rating、感情、Emotions、コメント、満足、不満、顧客の声に関する質問は travel_review を使ってください。",
+            "売上とレビュー評価、カテゴリ別満足度、年代別満足度、高評価旅行先の売上など、両方が必要な質問は Transaction_ID で travel_sales と travel_review を結合してください。",
+            "review-only の質問では travel_review を使い、Rating、Emotions、Comments、Travel_destination で回答してください。travel_sales に無い列が必要という理由で回答不能にしないでください。",
+            "主要指標は、売上=SUM(Price)、予約数=COUNT(DISTINCT Transaction_ID)、旅行者数=SUM(Number_of_people)、平均取引額=AVG(Price)、1人あたり平均単価=AVG(Price_per_person)、平均評価=AVG(Rating)、レビュー件数=COUNT(*)、感情分布=Emotions ごとの COUNT と構成比です。",
+            "Date は yyyy/MM/dd 形式の文字列として扱われる場合があります。月条件は /06/ /07/ /08/ のようなスラッシュ付き月、または日付として解釈できる方法で扱い、-06- のようなハイフン形式は使わないでください。",
+            "春=3/4/5月、夏=6/7/8月、秋=9/10/11月、冬=12/1/2月、春休み=3/4月、ゴールデンウィーク=4月下旬から5月上旬、年末年始=12月下旬から1月上旬として扱ってください。年指定がない場合は利用可能な全期間を対象にし、その仮定を書いてください。",
+            "Category は旅行カテゴリ/顧客カテゴリ/旅行タイプとして扱います。夏季/春季などの季節判定には絶対に使わず、季節は Date の月だけから判断してください。",
+            "「ファミリー」「子連れ」「家族」「family」は Category の Family 表記ゆれを優先し、必要に応じて Number_of_people >= 3 または Age_group が 30代/40代の販売履歴、Comments に 子連れ/子ども/家族 を含むレビューとして扱ってください。",
+            "「学生」は Age_group が 20代、または若年グループ旅行として Number_of_people >= 2 を優先し、「若年層」は Age_group が 20代/30代、「シニア」は 50代以上として扱ってください。",
+            "Travel_destination は旅行先/目的地/観光地/地域/エリア/destination の同義語として扱い、日本語/英語/大文字小文字/部分一致の表記ゆれを考慮してください。",
+            "売上上位は Travel_destination と必要なら Schedule/Category で集計し、Transaction_ID 単位に分解せず、SUM(Price)、COUNT(DISTINCT Transaction_ID)、SUM(Number_of_people) を返してください。",
+            "レビュー評価は Travel_destination や Category で集計し、COUNT(*)、AVG(Rating)、Rating 分布、Emotions 分布、Comments の代表例を返してください。Comments に存在しない声やテーマは創作しないでください。",
+            "前年同期比較は複数年の同月データがある場合だけ行い、足りない場合は利用可能な期間のトレンドや単年比較に切り替え、その制約を書いてください。",
+            "厳密条件で0件または極端に少ない場合は、回答不能で終わらず、表記ゆれ、全年度の同月、関連する Category/Schedule などの順に条件を少し広げ、どの条件を広げたかを明示して近い実データを示してください。",
+            "広告費、利益、原価、Web流入、天気、キャンペーン名など現在のスキーマにない項目は作らず、存在しない理由と売上/予約数/人数/レビュー評価での代替分析を提案してください。",
+            "回答は 1. 結論、2. 使用条件、3. 主要指標、4. 表またはランキング、5. 補足 の順で簡潔にまとめてください。",
+            "内部の GQL、GraphQL、JSON、クエリ実行トレース、ツール呼び出し詳細は出力せず、マーケティング担当者向けの分析結果だけを出力してください。",
+            "必ず実データの数値を使い、X/XX/XXX、架空の例、プレースホルダー値は絶対に使わないでください。実データがない項目は「データなし」と書いてください。",
             f"質問: {question}",
         ]
     )

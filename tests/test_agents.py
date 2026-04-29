@@ -376,11 +376,16 @@ class TestDataSearchTools:
 
         assert "Number_of_people >= 3" in prompt
         assert "yyyy/MM/dd" in prompt
-        assert "Category は 国内/海外" in prompt
+        assert "Category は旅行カテゴリ/顧客カテゴリ/旅行タイプ" in prompt
+        assert "review-only の質問では travel_review を使い" in prompt
+        assert "売上=SUM(Price)" in prompt
+        assert "レビュー件数=COUNT(*)" in prompt
+        assert "Transaction_ID で travel_sales と travel_review を結合" in prompt
         assert "「学生」は Age_group が 20代" in prompt
         assert "Age_group が 30代/40代" in prompt
         assert "SUM(Price)" in prompt
-        assert "Rating 分布" in prompt
+        assert "Emotions 分布" in prompt
+        assert "GQL、GraphQL、JSON" in prompt
         assert "X/XX/XXX" in prompt
 
     def test_low_confidence_data_agent_answer_detection(self):
@@ -392,6 +397,9 @@ class TestDataSearchTools:
         placeholder_answer = "合計売上は ¥X,XXX,XXX、予約件数は XX件です。以下は分析例です。"
         missing_sales_answer = "売上上位・合計売上・予約件数の具体的数値はデータ不足のためデータなしです。レビュー件数は18件です。"
         missing_sales_variant = "売上上位プラン、合計売上金額、予約件数に該当するデータが存在しませんでした。"
+        safe_unavailable_answer = "安全に算出できるデータなし。ご希望があれば条件を変更してください。"
+        gql_leak_answer = '```gql\nquery { travel_sales { Travel_destination Price } }\n```'
+        json_leak_answer = '{"query": "SELECT * FROM travel_sales", "status": "failed"}'
         concrete_answer = "沖縄 2泊3日が売上上位。合計売上 1,022,000 円、予約 8 件。"
 
         assert ds._is_low_confidence_data_agent_answer(weak_answer) is True
@@ -399,6 +407,9 @@ class TestDataSearchTools:
         assert ds._is_low_confidence_data_agent_answer(placeholder_answer) is True
         assert ds._is_low_confidence_data_agent_answer(missing_sales_answer) is True
         assert ds._is_low_confidence_data_agent_answer(missing_sales_variant) is True
+        assert ds._is_low_confidence_data_agent_answer(safe_unavailable_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(gql_leak_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(json_leak_answer) is True
         assert ds._is_low_confidence_data_agent_answer(concrete_answer) is False
 
     def test_extract_data_agent_tool_outputs_prefers_execute_results(self):

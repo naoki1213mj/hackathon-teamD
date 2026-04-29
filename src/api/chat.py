@@ -1090,10 +1090,50 @@ async def _retry_marketing_plan_with_graph_prefetch(
         )
     except ValueError as exc:
         logger.warning("graph_prefetch fallback preparation failed: %s", exc)
-        return None
+        if isinstance(work_iq_session, dict):
+            work_iq_session["status"] = "failed"
+            work_iq_session["warning_code"] = "failed"
+        fallback_events.append(
+            _format_tool_event_sse(
+                _build_agent_tool_event(
+                    "generate_workplace_context_brief",
+                    "failed",
+                    agent_name="marketing-plan-agent",
+                    step=2,
+                    source="workiq",
+                    provider="workiq",
+                    error_code="WORKIQ_GRAPH_PREFETCH_FAILED",
+                    error_message="Work IQ Graph prefetch failed; continuing without workplace context.",
+                    source_scope=list(source_scope),
+                )
+            )
+        )
+        fallback_workflow_settings = dict(workflow_settings or {})
+        fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_input = _build_marketing_plan_prompt(user_input, analysis_markdown, None, "graph_prefetch")
     except Exception as exc:
         logger.warning("graph_prefetch fallback prefetch failed: %s", exc)
-        return None
+        if isinstance(work_iq_session, dict):
+            work_iq_session["status"] = "failed"
+            work_iq_session["warning_code"] = "failed"
+        fallback_events.append(
+            _format_tool_event_sse(
+                _build_agent_tool_event(
+                    "generate_workplace_context_brief",
+                    "failed",
+                    agent_name="marketing-plan-agent",
+                    step=2,
+                    source="workiq",
+                    provider="workiq",
+                    error_code="WORKIQ_GRAPH_PREFETCH_FAILED",
+                    error_message="Work IQ Graph prefetch failed; continuing without workplace context.",
+                    source_scope=list(source_scope),
+                )
+            )
+        )
+        fallback_workflow_settings = dict(workflow_settings or {})
+        fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_input = _build_marketing_plan_prompt(user_input, analysis_markdown, None, "graph_prefetch")
 
     fallback_outcome = await _execute_agent_with_runtime(
         agent_name="marketing-plan-agent",
