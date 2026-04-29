@@ -42,7 +42,7 @@ describe('getDelegatedApiAuth', () => {
     vi.restoreAllMocks()
   })
 
-  it('uses Foundry user auth and optional Graph fallback auth for foundry_tool requests', async () => {
+  it('uses Foundry user auth and Graph fallback auth for interactive foundry_tool requests', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
@@ -50,7 +50,7 @@ describe('getDelegatedApiAuth', () => {
 
     expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
-    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
+    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
     expect(result).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
@@ -60,11 +60,24 @@ describe('getDelegatedApiAuth', () => {
     })
   })
 
-  it('does not block foundry_tool requests when optional Graph fallback auth is unavailable', async () => {
+  it('requires Graph fallback auth for interactive foundry_tool requests', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockResolvedValue({ token: '', status: 'auth_required' })
 
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
+
+    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
+    expect(result).toEqual({
+      headers: {},
+      status: 'auth_required',
+    })
+  })
+
+  it('does not block silent foundry_tool requests when optional Graph fallback auth is unavailable', async () => {
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockResolvedValue({ token: '', status: 'auth_required' })
+
+    const result = await getDelegatedApiAuth({ interactive: false, workIqRuntime: 'foundry_tool' })
 
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
@@ -75,7 +88,35 @@ describe('getDelegatedApiAuth', () => {
     })
   })
 
-  it('does not block foundry_tool requests when optional Graph fallback auth throws', async () => {
+  it('requires retry when interactive foundry_tool Graph fallback auth redirects', async () => {
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockResolvedValue({ token: '', status: 'redirecting' })
+
+    const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
+
+    expect(result).toEqual({
+      headers: {},
+      status: 'redirecting',
+    })
+  })
+
+  it('does not block silent foundry_tool requests when optional Graph fallback auth throws', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockRejectedValue(new Error('graph cache failed'))
+
+    const result = await getDelegatedApiAuth({ interactive: false, workIqRuntime: 'foundry_tool' })
+
+    expect(result).toEqual({
+      headers: {
+        Authorization: 'Bearer foundry-token',
+      },
+      status: 'ok',
+    })
+    expect(warnSpy).toHaveBeenCalledWith('Optional Work IQ Graph auth failed:', expect.any(Error))
+  })
+
+  it('fails closed when interactive foundry_tool Graph fallback auth throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockRejectedValue(new Error('graph cache failed'))
@@ -83,10 +124,8 @@ describe('getDelegatedApiAuth', () => {
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
 
     expect(result).toEqual({
-      headers: {
-        Authorization: 'Bearer foundry-token',
-      },
-      status: 'ok',
+      headers: {},
+      status: 'unavailable',
     })
     expect(warnSpy).toHaveBeenCalledWith('Optional Work IQ Graph auth failed:', expect.any(Error))
   })

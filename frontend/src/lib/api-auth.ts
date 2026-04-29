@@ -99,12 +99,20 @@ export async function getDelegatedApiAuth(
   }
   const headers: Record<string, string> = foundryResult.token ? { Authorization: `Bearer ${foundryResult.token}` } : {}
   try {
-    const graphResult = await getWorkIqGraphAuth(config, false)
+    const graphResult = await getWorkIqGraphAuth(config, options?.interactive === true)
     if (graphResult.status === 'ok' && graphResult.token) {
       headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
+    } else if (options?.interactive === true) {
+      return {
+        headers: {},
+        status: graphResult.status,
+      }
     }
   } catch (error) {
     console.warn('Optional Work IQ Graph auth failed:', error)
+    if (options?.interactive === true) {
+      return { headers: {}, status: 'unavailable' }
+    }
   }
   return {
     headers,

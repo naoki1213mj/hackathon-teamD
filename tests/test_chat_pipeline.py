@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 import urllib.parse
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -529,6 +530,19 @@ class TestMarketingPlanRuntimeSettings:
             {"success": False, "events": [event]}
         ) is True
 
+    def test_foundry_work_iq_timeout_can_fall_back_to_graph_prefetch(self) -> None:
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.TOOL_EVENT,
+            {
+                "tool": "workiq_foundry_tool",
+                "status": "timeout",
+                "error_code": "WORKIQ_TIMEOUT",
+            },
+        )
+        assert chat_module._should_retry_marketing_plan_with_graph_prefetch(
+            {"success": False, "events": [event]}
+        ) is True
+
     def test_build_effective_workflow_settings_rejects_legacy_foundry_tool_combo(self, monkeypatch) -> None:
         monkeypatch.setattr(
             chat_module,
@@ -782,6 +796,50 @@ async def test_execute_agent_maps_foundry_work_iq_timeout_to_unavailable(monkeyp
     )
     assert any(
         event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "WORKIQ_UNAVAILABLE"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_times_out_blocking_foundry_work_iq_call(monkeypatch) -> None:
+    """停止不能な Foundry Work IQ 呼び出しでも SSE 応答は timeout で戻す。"""
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        del model_settings
+        raise AssertionError("Legacy marketing agent should not run for Work IQ timeout failures")
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        time.sleep(0.2)
+        return SimpleNamespace(output_text="late response")
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+    monkeypatch.setattr(chat_module, "_resolve_work_iq_timeout_seconds", lambda: 0.01)
+
+    start = time.monotonic()
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="沖縄プラン",
+        conversation_id="conv-workiq-blocking-timeout",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={
+            "marketing_plan_runtime": "foundry_preprovisioned",
+            "work_iq_runtime": "foundry_tool",
+        },
+        work_iq_session={"enabled": True, "source_scope": ["emails"]},
+        work_iq_access_token="delegated-token",
+    )
+
+    assert time.monotonic() - start < 0.15
+    assert outcome["success"] is False
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "timeout"
+        and payload.get("error_code") == "WORKIQ_TIMEOUT"
         for event_name, payload in parsed
     )
 
@@ -2297,6 +2355,137 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_on_foundry_
     assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _payload in parsed)
     assert not any(event_name == chat_module.SSEEventType.ERROR for event_name, _payload in parsed)
     assert "conv-workiq-obo-fallback" in chat_module._pending_approvals
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_falls_back_to_graph_prefetch_on_foundry_work_iq_timeout(monkeypatch) -> None:
+    """Foundry Work IQ timeout 時も graph_prefetch に退避して企画書生成を継続する。"""
+
+    captured: dict[str, object] = {"marketing_calls": []}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, conversation_id, model_settings, work_iq_session, total_steps, include_done
+        if agent_name == "data-search-agent":
+            return {
+                "events": [],
+                "text": "analysis output",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        captured["marketing_calls"].append(
+            {
+                "prompt": user_input,
+                "workflow_settings": dict(workflow_settings or {}),
+                "access_token": work_iq_access_token,
+            }
+        )
+        runtime = (workflow_settings or {}).get("work_iq_runtime")
+        if runtime == "graph_prefetch":
+            return {
+                "events": [
+                    chat_module.format_sse(
+                        chat_module.SSEEventType.TEXT,
+                        {"content": "# graph fallback plan", "agent": "marketing-plan-agent"},
+                    )
+                ],
+                "text": "# graph fallback plan",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TOOL_EVENT,
+                    {
+                        "tool": "workiq_foundry_tool",
+                        "status": "timeout",
+                        "agent": "marketing-plan-agent",
+                        "error_code": "WORKIQ_TIMEOUT",
+                    },
+                ),
+                chat_module.format_sse(
+                    chat_module.SSEEventType.ERROR,
+                    {
+                        "message": "Work IQ の応答がタイムアウトしました。",
+                        "code": "WORKIQ_UNAVAILABLE",
+                    },
+                ),
+            ],
+            "text": "",
+            "success": False,
+            "latency_seconds": 0.1,
+            "tool_calls": 0,
+        }
+
+    async def fake_generate_workplace_context_brief(**kwargs):
+        captured["work_iq_args"] = kwargs
+        return {
+            "brief_summary": "会議メモでは子連れ安心訴求が重視されていました。",
+            "brief_source_metadata": [{"source": "meeting_notes", "label": "会議メモ", "count": 1}],
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "春の沖縄ファミリー向け施策を分析して",
+            "conv-workiq-timeout-fallback",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": True, "manager_email": "manager@example.com", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="foundry-token",
+            work_iq_graph_access_token="graph-token",
+            user_time_zone="Asia/Tokyo",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+    tool_events = [payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.TOOL_EVENT]
+    marketing_calls = captured["marketing_calls"]
+
+    assert isinstance(marketing_calls, list)
+    assert len(marketing_calls) == 2
+    assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
+    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert "子連れ安心訴求" in str(marketing_calls[1]["prompt"])
+    assert any(
+        payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "timeout"
+        and payload.get("error_code") == "WORKIQ_TIMEOUT"
+        for payload in tool_events
+    )
+    assert any(
+        payload.get("tool") == "generate_workplace_context_brief"
+        and payload.get("status") == "completed"
+        for payload in tool_events
+    )
+    assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _payload in parsed)
+    assert not any(event_name == chat_module.SSEEventType.ERROR for event_name, _payload in parsed)
+    assert "conv-workiq-timeout-fallback" in chat_module._pending_approvals
 
 
 @pytest.mark.asyncio

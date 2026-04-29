@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
@@ -900,7 +900,7 @@ def _build_work_iq_blocked_error(status: str) -> dict[str, str]:
         "consent_required": "Work IQ を使うには追加の権限同意が必要です。権限付与後に再試行してください。",
         "identity_mismatch": "Work IQ のサインイン情報が会話の所有者と一致しません。同じアカウントで再度サインインしてください。",
         "unavailable": "Work IQ が利用できないため、Foundry 経路を安全に続行できません。時間をおいて再試行してください。",
-        "timeout": "Work IQ の認証確認がタイムアウトしました。再度サインインしてから再試行してください。",
+        "timeout": "Work IQ の応答がタイムアウトしました。Graph 先読み経路で再試行するか、時間をおいて再実行してください。",
         "failed": "Work IQ の利用準備に失敗したため、企画書生成を停止しました。再試行してください。",
         "error": "Work IQ の利用準備中にエラーが発生したため、企画書生成を停止しました。",
     }
@@ -1006,8 +1006,16 @@ def _should_retry_marketing_plan_with_graph_prefetch(plan_outcome: dict[str, obj
             continue
         if (
             payload.get("tool") == "workiq_foundry_tool"
-            and payload.get("status") == "auth_required"
-            and payload.get("error_code") == "WORKIQ_OBO_TOKEN_FAILED"
+            and (
+                (
+                    payload.get("status") == "auth_required"
+                    and payload.get("error_code") == "WORKIQ_OBO_TOKEN_FAILED"
+                )
+                or (
+                    payload.get("status") == "timeout"
+                    and payload.get("error_code") == "WORKIQ_TIMEOUT"
+                )
+            )
         ):
             return True
     return False
@@ -2676,6 +2684,16 @@ def _is_code_interpreter_404(exc: Exception) -> bool:
     return "404" in message and "resource not found" in message
 
 
+async def _await_blocking_call_with_timeout(call_coro: Awaitable[object], timeout_seconds: float) -> object:
+    """to_thread 実行を応答待ちだけ timeout し、停止不能な thread を待ち続けない。"""
+    task = asyncio.create_task(call_coro)
+    done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
+    if task in done:
+        return await task
+    task.cancel()
+    raise TimeoutError(f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s")
+
+
 async def _execute_agent(
     agent_name: str,
     agent_step: int,
@@ -2816,12 +2834,7 @@ async def _execute_agent(
                     )
                     if work_iq_enabled_for_prompt:
                         timeout_seconds = _resolve_work_iq_timeout_seconds()
-                        try:
-                            result = await asyncio.wait_for(run_prompt_agent, timeout=timeout_seconds)
-                        except TimeoutError as exc:
-                            raise TimeoutError(
-                                f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s"
-                            ) from exc
+                        result = await _await_blocking_call_with_timeout(run_prompt_agent, timeout_seconds)
                     else:
                         result = await run_prompt_agent
                     used_foundry_prompt_agent = True
@@ -5131,7 +5144,7 @@ async def workflow_event_generator(
             foundry_terminal_events = _extract_terminal_tool_events(
                 plan_outcome.get("events"),
                 tool_names={"workiq_foundry_tool", "foundry_prompt_agent"},
-                statuses={"failed", "auth_required"},
+                statuses={"failed", "auth_required", "timeout"},
             )
             fallback_outcome["events"] = foundry_terminal_events + list(fallback_outcome.get("events", []))
             plan_outcome = fallback_outcome
