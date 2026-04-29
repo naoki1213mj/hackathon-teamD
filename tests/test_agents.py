@@ -231,7 +231,7 @@ class TestDataSearchTools:
         monkeypatch.setattr(
             ds,
             "_get_sales_data_from_fabric",
-            lambda: [
+            lambda **_kwargs: [
                 {
                     "plan_name": "京都 2泊3日",
                     "destination": "京都",
@@ -246,7 +246,7 @@ class TestDataSearchTools:
         monkeypatch.setattr(
             ds,
             "_get_reviews_from_fabric",
-            lambda: [{"plan_name": "京都", "rating": 3, "comment": "寺社仏閣が素晴らしかった"}],
+            lambda **_kwargs: [{"plan_name": "京都", "rating": 3, "comment": "寺社仏閣が素晴らしかった"}],
         )
 
         result = await ds.query_data_agent("人気の旅行先を教えて")
@@ -255,6 +255,141 @@ class TestDataSearchTools:
         assert parsed["source"] == "Fabric SQL fallback"
         assert "京都 2泊3日" in parsed["answer"]
         assert "ws-3iq-demo Lakehouse" in parsed["answer"]
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_supplements_low_confidence_answer_with_fabric_sql(self, monkeypatch):
+        """Data Agent が弱い回答を返した場合は Fabric SQL の具体データで補強する。"""
+        import src.agents.data_search as ds
+
+        async def weak_data_agent(question: str) -> str:
+            return "指定された条件で売上トレンドやレビュー評価の詳細は提示できませんでした。必要であれば追加提示してください。"
+
+        monkeypatch.setattr(ds, "_query_data_agent", weak_data_agent)
+        monkeypatch.setattr(
+            ds,
+            "_get_sales_data_from_fabric",
+            lambda **_kwargs: [
+                {
+                    "plan_name": "沖縄 2泊3日",
+                    "destination": "沖縄",
+                    "season": "spring",
+                    "revenue": 1022000,
+                    "pax": 16,
+                    "customer_segment": "30代",
+                    "booking_count": 8,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            ds,
+            "_get_reviews_from_fabric",
+            lambda **_kwargs: [{"plan_name": "沖縄", "rating": 5, "comment": "シュノーケリングが最高"}],
+        )
+
+        result = await ds.query_data_agent("春の沖縄ファミリー向け施策を分析して")
+        parsed = json.loads(result)
+
+        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert "回答が十分な具体データを含まなかった" in parsed["answer"]
+        assert "沖縄 2泊3日" in parsed["answer"]
+        assert "1,022,000 円" in parsed["answer"]
+
+    def test_fabric_sql_analysis_uses_region_and_season_from_question(self, monkeypatch):
+        """Data Agent 補強用 SQL は質問文の地域・季節を反映する。"""
+        import src.agents.data_search as ds
+
+        captured: dict[str, object] = {}
+
+        def fake_sales(**kwargs):
+            captured["sales_kwargs"] = kwargs
+            return [
+                {
+                    "plan_name": "沖縄 3泊4日",
+                    "destination": "沖縄",
+                    "season": "spring",
+                    "revenue": 929000,
+                    "pax": 12,
+                    "customer_segment": "30代",
+                    "booking_count": 4,
+                }
+            ]
+
+        def fake_reviews(**kwargs):
+            captured["review_kwargs"] = kwargs
+            return [{"plan_name": "沖縄", "rating": 5, "comment": "リゾート気分を満喫"}]
+
+        monkeypatch.setattr(ds, "_get_sales_data_from_fabric", fake_sales)
+        monkeypatch.setattr(ds, "_get_reviews_from_fabric", fake_reviews)
+
+        answer = ds._build_fabric_sql_analysis("春の沖縄ファミリー施策を分析して")
+
+        assert captured["sales_kwargs"] == {"season": "spring", "region": "沖縄"}
+        assert captured["review_kwargs"] == {"plan_name": "沖縄"}
+        assert "適用フィルタ: 地域=沖縄, 季節=spring" in str(answer)
+        assert "沖縄 3泊4日" in str(answer)
+
+    def test_data_agent_question_contains_demo_business_semantics(self):
+        """Data Agent への質問にはデモ用の業務語変換ルールを含める。"""
+        import src.agents.data_search as ds
+
+        prompt = ds._build_data_agent_question("春の沖縄ファミリー施策を分析して")
+
+        assert "Number_of_people >= 3" in prompt
+        assert "Age_group が 30代/40代" in prompt
+        assert "SUM(Price)" in prompt
+        assert "Rating 分布" in prompt
+        assert "X/XX/XXX" in prompt
+
+    def test_low_confidence_data_agent_answer_detection(self):
+        """Data Agent の回答不能文は、数字を含んでいても低信頼として扱う。"""
+        import src.agents.data_search as ds
+
+        weak_answer = "30代ファミリー向けの売上トレンドは提示できませんでした。必要であれば追加提示してください。"
+        placeholder_answer = "合計売上は ¥X,XXX,XXX、予約件数は XX件です。以下は分析例です。"
+        missing_sales_answer = "売上上位・合計売上・予約件数の具体的数値はデータ不足のためデータなしです。レビュー件数は18件です。"
+        missing_sales_variant = "売上上位プラン、合計売上金額、予約件数に該当するデータが存在しませんでした。"
+        concrete_answer = "沖縄 2泊3日が売上上位。合計売上 1,022,000 円、予約 8 件。"
+
+        assert ds._is_low_confidence_data_agent_answer(weak_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(placeholder_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(missing_sales_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(missing_sales_variant) is True
+        assert ds._is_low_confidence_data_agent_answer(concrete_answer) is False
+
+    def test_extract_data_agent_tool_outputs_prefers_execute_results(self):
+        """Data Agent run steps から実行結果 tool output を抽出する。"""
+        import src.agents.data_search as ds
+
+        steps = SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    step_details=SimpleNamespace(
+                        tool_calls=[
+                            SimpleNamespace(
+                                function=SimpleNamespace(
+                                    name="analyze.database.fewshots.loading",
+                                    output="Loaded 0 fewshots",
+                                )
+                            )
+                        ]
+                    )
+                ),
+                SimpleNamespace(
+                    step_details=SimpleNamespace(
+                        tool_calls=[
+                            SimpleNamespace(
+                                function=SimpleNamespace(
+                                    name="analyze.database.execute",
+                                    output="| destination | revenue |\n| 沖縄 | 1022000 |",
+                                )
+                            )
+                        ]
+                    )
+                ),
+            ]
+        )
+
+        assert ds._extract_data_agent_tool_outputs(steps) == ["| destination | revenue | | 沖縄 | 1022000 |"]
 
     def test_fabric_table_names_reject_invalid_identifiers(self, monkeypatch):
         """Fabric table 名は SQL injection にならない identifier だけ許可する。"""

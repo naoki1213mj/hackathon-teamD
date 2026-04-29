@@ -113,6 +113,40 @@ az containerapp update --name <app> --resource-group <rg> \
 GitHub Actions の Deploy workflow は production environment / repository variables の
 `FABRIC_DATA_AGENT_URL`, `FABRIC_SQL_ENDPOINT`, `FABRIC_LAKEHOUSE_DATABASE`, `FABRIC_SALES_TABLE`, `FABRIC_REVIEWS_TABLE` を Container App に同期します。
 
+#### 4.4.1 デモ向け Data Agent チューニング
+
+Fabric Data Agent は、選択した data source の schema と **Data agent instructions / example queries** をもとに NL2SQL / NL2DAX / NL2KQL を実行します。デモでは「春の沖縄ファミリー向け」のような業務語を安定して数値へ変換する必要があるため、`Travel_Ontology_DA` の draft 側で次の設定を入れてから Publish してください。
+
+**Data agent instructions 推奨文:**
+
+```text
+あなたは旅行会社の販売実績とカスタマーレビューを分析する専門データアナリストです。日本語で回答し、金額は円表記、件数・人数・平均評価を必ず実数で示してください。
+
+利用可能な主要データは travel_sales と travel_review です。
+- travel_sales: Transaction_ID, Date, Travel_destination, Category, Schedule, Price, Price_per_person, Number_of_people, Age_group
+- travel_review: Transaction_ID, Travel_destination, Rating, Emotions, Comments
+
+業務語の解釈:
+- 「ファミリー」「家族」「子連れ」は、travel_sales.Number_of_people >= 3、または Age_group が 30代/40代の販売履歴として扱う。レビューでは Comments に「子連れ」「子ども」「家族」を含むものを優先する。
+- 「若年層」は Age_group が 20代/30代、「シニア」は 50代以上として扱う。
+- 「春」は Date の月が 3,4,5、「春休み」は 3,4、「夏」は 6,7,8、「秋」は 9,10,11、「冬」は 12,1,2 として扱う。
+- 「売上上位」は Travel_destination と Schedule で集計し、SUM(Price), COUNT(Transaction_ID), SUM(Number_of_people) を返す。
+- 「レビュー評価」は COUNT(*), AVG(Rating), Rating 分布、代表的な Comments を返す。
+
+厳密条件でデータが少ない場合は、回答不能で終わらず、条件を広げた近いデータを併記する。X/XX/XXX や架空の例、プレースホルダー値は絶対に使わない。実データがない項目は「データなし」と明記し、利用できた近接条件の実数を併記する。
+```
+
+**Example queries 推奨セット:**
+
+| 質問例 | 期待する query 方針 |
+| --- | --- |
+| 春の沖縄ファミリー向け施策を分析して | `Travel_destination='沖縄'`、`MONTH(Date) IN (3,4,5)`、`Number_of_people >= 3 OR Age_group IN ('30代','40代')` を基本条件に、`Schedule` 別の `SUM(Price)` / `COUNT(Transaction_ID)` / `SUM(Number_of_people)` を集計する |
+| 沖縄のレビュー評価と代表コメントを教えて | `travel_review` を `Travel_destination='沖縄'` で絞り、`COUNT(*)`, `AVG(Rating)`, `Rating` 分布、代表 `Comments` を返す |
+| 若年層に人気の旅行先を売上順に出して | `Age_group IN ('20代','30代')` で絞り、`Travel_destination` 別に `SUM(Price)` と `COUNT(Transaction_ID)` を集計する |
+| 2泊3日と3泊4日の売上を比較して | `Schedule IN ('2泊3日','3泊4日')` で絞り、`Travel_destination, Schedule` 別に売上・予約件数・人数を比較する |
+
+Data source を更新した場合は、Fabric Data Agent の Explorer で対象 data source を **Refresh** し、draft chat で上記質問を確認してから **Publish** してください。Ontology を使う場合も、`ファミリー`, `子連れ`, `春休み`, `若年層`, `売上上位`, `レビュー評価` の同義語と、対応する列・条件を追加しておくと安定します。
+
 ### 4.5 上司承認通知 / 承認後アクション (任意)
 
 上司承認ページはアプリに組み込まれています。外部 workflow と連携する場合は、上司通知と承認後アクションの 2 本を分けて設定します:

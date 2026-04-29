@@ -38,6 +38,144 @@ def _safe_evidence_quote(value: object, *, max_length: int = 220) -> str:
     return f"{normalized[: max_length - 1]}…" if len(normalized) > max_length else normalized
 
 
+_LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
+    "分析を実行できませんでした",
+    "抽出できませんでした",
+    "データ未表示",
+    "提示できません",
+    "表示できません",
+    "見つかりませんでした",
+    "見つかりません",
+    "存在しませんでした",
+    "利用可能なデータが無い",
+    "確認できませんでした",
+    "条件に一致",
+    "追加提示してください",
+    "必要であれば",
+    "specific data is unavailable",
+    "could not find",
+    "not found",
+    "no matching",
+    "unable to",
+)
+_PLACEHOLDER_DATA_AGENT_PATTERNS = (
+    "¥x",
+    "￥x",
+    "x,xxx",
+    "xx件",
+    "xxx人",
+    "xx％",
+    "xx%",
+    "数値・内容例",
+    "具体例です",
+    "分析例",
+)
+_MISSING_SALES_DATA_AGENT_PATTERNS = (
+    "売上実績",
+    "売上上位",
+    "合計売上",
+    "予約数",
+    "予約件数",
+    "合計人数",
+)
+_DATA_AGENT_RESULT_TOOL_NAMES = {
+    "trace.analyze_ontology",
+    "analyze.database.execute",
+}
+_KNOWN_DESTINATIONS = (
+    "沖縄",
+    "北海道",
+    "京都",
+    "大阪",
+    "東京",
+    "ハワイ",
+    "パリ",
+    "ニューヨーク",
+    "オーストラリア",
+    "ローマ",
+    "台湾",
+    "韓国",
+)
+
+
+def _is_low_confidence_data_agent_answer(answer: str) -> bool:
+    """Data Agent が接続成功でも実質的に分析できていない回答を検出する。"""
+    normalized = answer.lower()
+    if not normalized.strip():
+        return True
+    if any(pattern in normalized for pattern in _PLACEHOLDER_DATA_AGENT_PATTERNS):
+        return True
+    if any(pattern in answer for pattern in _MISSING_SALES_DATA_AGENT_PATTERNS) and (
+        "データなし" in answer
+        or "データ不足" in answer
+        or "見つからなかった" in answer
+        or "見つかりません" in answer
+        or "存在しません" in answer
+        or "利用可能なデータが無い" in answer
+    ):
+        return True
+    has_weak_phrase = any(pattern.lower() in normalized for pattern in _LOW_CONFIDENCE_DATA_AGENT_PATTERNS)
+    has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|★|/5)", answer))
+    return has_weak_phrase and not has_specific_metric
+
+
+def _build_data_agent_question(question: str) -> str:
+    """Data Agent に対して、該当ゼロ時も代替集計を返すよう明示する。"""
+    return "\n".join(
+        [
+            "旅行マーケティング施策のために Lakehouse データを分析してください。",
+            "利用可能な主な列は travel_sales(Transaction_ID, Date, Travel_destination, Category, Schedule, Price, Price_per_person, Number_of_people, Age_group) と travel_review(Transaction_ID, Travel_destination, Rating, Emotions, Comments) です。",
+            "「ファミリー」「子連れ」「家族」は travel_sales.Number_of_people >= 3 または Age_group が 30代/40代の販売履歴、review Comments に 子連れ/子ども/家族 を含むレビューとして扱ってください。",
+            "「若年層」は Age_group が 20代/30代、「シニア」は 50代以上、「春休み」は Date の月が 3/4 月のデータとして扱ってください。",
+            "売上上位は Travel_destination と Schedule で集計し、SUM(Price)、COUNT(Transaction_ID)、SUM(Number_of_people) を返してください。",
+            "レビューは Travel_destination で絞り、COUNT、AVG(Rating)、Rating 分布、Comments の代表例を返してください。",
+            "正確な条件一致がない場合でも、回答不能で終わらず、条件を少し広げた近いデータを使ってください。",
+            "必ず売上額、予約件数、人数、レビュー件数、評価分布、代表的なレビューコメントを含めてください。",
+            "実データがない項目は「データなし」と書き、X/XX/XXX や「例」の値は絶対に使わないでください。",
+            "対象データが少ない場合は、その制約を一文で述べたうえで利用可能な上位データを提示してください。",
+            f"質問: {question}",
+        ]
+    )
+
+
+def _extract_data_agent_tool_outputs(steps: object, *, max_outputs: int = 3) -> list[str]:
+    """Data Agent の run steps から実クエリ結果だけを抽出する。"""
+    outputs: list[str] = []
+    for step in getattr(steps, "data", []) or []:
+        step_details = getattr(step, "step_details", None)
+        for tool_call in getattr(step_details, "tool_calls", []) or []:
+            function = getattr(tool_call, "function", None)
+            name = str(getattr(function, "name", "") or "")
+            output = str(getattr(function, "output", "") or "").strip()
+            if name not in _DATA_AGENT_RESULT_TOOL_NAMES or not output or output == "Loaded 0 fewshots":
+                continue
+            if output not in outputs:
+                outputs.append(_safe_evidence_quote(output, max_length=1600))
+            if len(outputs) >= max_outputs:
+                return outputs
+    return outputs
+
+
+def _extract_region_filter(question: str) -> str | None:
+    """質問文から既知の旅行先フィルタを抽出する。"""
+    return next((destination for destination in _KNOWN_DESTINATIONS if destination in question), None)
+
+
+def _extract_season_filter(question: str) -> str | None:
+    """質問文から季節フィルタを抽出する。"""
+    normalized = question.lower()
+    season_terms = {
+        "spring": ("春", "春休み", "spring"),
+        "summer": ("夏", "夏休み", "summer"),
+        "autumn": ("秋", "秋旅", "autumn", "fall"),
+        "winter": ("冬", "冬休み", "winter"),
+    }
+    for season, terms in season_terms.items():
+        if any(term in normalized for term in terms):
+            return season
+    return None
+
+
 def _emit_evidence_event(
     tool_name: str,
     *,
@@ -205,7 +343,7 @@ async def _query_data_agent(question: str) -> str | None:
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
-            content=question,
+            content=_build_data_agent_question(question),
         )
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
@@ -241,6 +379,12 @@ async def _query_data_agent(question: str) -> str | None:
                 for content in msg.content:
                     if hasattr(content, "text"):
                         answer_parts.append(content.text.value)
+        tool_outputs: list[str] = []
+        try:
+            steps = client.beta.threads.runs.steps.list(thread_id=thread.id, run_id=run.id, order="asc")
+            tool_outputs = _extract_data_agent_tool_outputs(steps)
+        except (AttributeError, ValueError, OSError) as exc:
+            logger.warning("Fabric Data Agent: run steps 取得失敗: %s", exc)
 
         # クリーンアップ
         try:
@@ -249,6 +393,15 @@ async def _query_data_agent(question: str) -> str | None:
             pass
 
         answer = "\n".join(answer_parts).strip()
+        if answer and tool_outputs and _is_low_confidence_data_agent_answer(answer):
+            tool_answer = "\n\n".join(tool_outputs)
+            if not _is_low_confidence_data_agent_answer(tool_answer):
+                answer = (
+                    "Fabric Data Agent の最終回答が十分な実数を含まなかったため、"
+                    "Data Agent の実行結果を根拠として返します。\n"
+                    f"{tool_answer}\n\n"
+                    f"Data Agent 最終回答:\n{answer}"
+                )
         if answer:
             logger.info("Fabric Data Agent から回答取得: %d 文字", len(answer))
             return answer
@@ -553,16 +706,31 @@ def _get_reviews_from_fabric(
 
 def _build_fabric_sql_analysis(question: str) -> str | None:
     """Data Agent が使えない場合に Fabric SQL から分析要約を生成する。"""
-    sales = _get_sales_data_from_fabric()
-    reviews = _get_reviews_from_fabric()
+    region = _extract_region_filter(question)
+    season = _extract_season_filter(question)
+    sales = _get_sales_data_from_fabric(season=season, region=region)
+    reviews = _get_reviews_from_fabric(plan_name=region)
+    broadened = False
+    if not sales and (season or region):
+        sales = _get_sales_data_from_fabric(region=region)
+        broadened = True
+    if not reviews and region:
+        reviews = _get_reviews_from_fabric()
+        broadened = True
     if not sales and not reviews:
         return None
 
     top_sales = sorted(sales, key=lambda row: int(row.get("revenue") or 0), reverse=True)[:5]
     lines = [
-        "Fabric Data Agent endpoint が利用できないため、同じ ws-3iq-demo Lakehouse の SQL endpoint から分析しました。",
+        "同じ ws-3iq-demo Lakehouse の SQL endpoint から実データを集計しました。",
         f"質問: {question}",
     ]
+    filters = [f"地域={region}" if region else "", f"季節={season}" if season else ""]
+    filters = [value for value in filters if value]
+    if filters:
+        lines.append(f"適用フィルタ: {', '.join(filters)}")
+    if broadened:
+        lines.append("注: 厳密条件のデータが少ないため、一部は条件を広げて補強しました。")
     if top_sales:
         lines.append("売上上位:")
         for row in top_sales:
@@ -668,7 +836,7 @@ async def query_data_agent(question: str) -> str:
     """
     async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
         result = await _query_data_agent(question)
-        if result:
+        if result and not _is_low_confidence_data_agent_answer(result):
             _emit_evidence_event(
                 "query_data_agent",
                 evidence=[
@@ -689,22 +857,37 @@ async def query_data_agent(question: str) -> str:
             )
         fabric_sql_answer = _build_fabric_sql_analysis(question)
         if fabric_sql_answer:
+            answer = fabric_sql_answer
+            source = "Fabric SQL fallback"
+            metadata = {"runtime": "fabric_sql_fallback"}
+            title = "Fabric SQL フォールバック"
+            relevance = 0.75
+            if result:
+                answer = (
+                    "Fabric Data Agent の回答が十分な具体データを含まなかったため、"
+                    "同じ ws-3iq-demo Lakehouse の SQL endpoint で補強しました。\n"
+                    f"{fabric_sql_answer}"
+                )
+                source = "Fabric Data Agent + Fabric SQL"
+                metadata = {"runtime": "fabric_sql_supplement", "data_agent_quality": "low_confidence"}
+                title = "Fabric SQL 補強"
+                relevance = 0.9
             _emit_evidence_event(
                 "query_data_agent",
                 evidence=[
                     {
                         "id": "fabric-sql-data-agent-fallback",
-                        "title": "Fabric SQL フォールバック",
+                        "title": title,
                         "source": "fabric",
-                        "quote": _safe_evidence_quote(fabric_sql_answer),
-                        "relevance": 0.75,
+                        "quote": _safe_evidence_quote(answer),
+                        "relevance": relevance,
                         "retrieved_at": _utc_now_iso(),
-                        "metadata": {"runtime": "fabric_sql_fallback"},
+                        "metadata": metadata,
                     }
                 ],
             )
             return json.dumps(
-                {"source": "Fabric SQL fallback", "answer": fabric_sql_answer},
+                {"source": source, "answer": answer},
                 ensure_ascii=False,
             )
         _emit_evidence_event(
