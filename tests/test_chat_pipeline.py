@@ -2332,6 +2332,7 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_on_foundry_
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
     assert marketing_calls[0]["access_token"] == "foundry-token"
     assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert marketing_calls[1]["workflow_settings"]["marketing_plan_runtime"] == "legacy"
     assert marketing_calls[1]["access_token"] == ""
     assert "家族向け訴求" in str(marketing_calls[1]["prompt"])
     assert captured["work_iq_args"] == {
@@ -2471,6 +2472,7 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_on_foundry_
     assert len(marketing_calls) == 2
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
     assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert marketing_calls[1]["workflow_settings"]["marketing_plan_runtime"] == "legacy"
     assert "子連れ安心訴求" in str(marketing_calls[1]["prompt"])
     assert any(
         payload.get("tool") == "workiq_foundry_tool"
@@ -2594,6 +2596,7 @@ async def test_workflow_event_generator_continues_when_graph_prefetch_fallback_f
     assert isinstance(marketing_calls, list)
     assert len(marketing_calls) == 2
     assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert marketing_calls[1]["workflow_settings"]["marketing_plan_runtime"] == "legacy"
     assert "職場コンテキスト" not in str(marketing_calls[1]["prompt"])
     assert any(
         payload.get("tool") == "generate_workplace_context_brief"

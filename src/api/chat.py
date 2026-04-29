@@ -1082,6 +1082,7 @@ async def _retry_marketing_plan_with_graph_prefetch(
         )
         fallback_workflow_settings = dict(workflow_settings or {})
         fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_workflow_settings["marketing_plan_runtime"] = "legacy"
         fallback_input = _build_marketing_plan_prompt(
             user_input,
             analysis_markdown,
@@ -1110,6 +1111,7 @@ async def _retry_marketing_plan_with_graph_prefetch(
         )
         fallback_workflow_settings = dict(workflow_settings or {})
         fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_workflow_settings["marketing_plan_runtime"] = "legacy"
         fallback_input = _build_marketing_plan_prompt(user_input, analysis_markdown, None, "graph_prefetch")
     except Exception as exc:
         logger.warning("graph_prefetch fallback prefetch failed: %s", exc)
@@ -1133,6 +1135,7 @@ async def _retry_marketing_plan_with_graph_prefetch(
         )
         fallback_workflow_settings = dict(workflow_settings or {})
         fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        fallback_workflow_settings["marketing_plan_runtime"] = "legacy"
         fallback_input = _build_marketing_plan_prompt(user_input, analysis_markdown, None, "graph_prefetch")
 
     fallback_outcome = await _execute_agent_with_runtime(
