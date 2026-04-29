@@ -28,6 +28,9 @@ jobs:
       DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
+      FABRIC_DATA_AGENT_URL: ${{ vars.FABRIC_DATA_AGENT_URL }}
+      FABRIC_SQL_ENDPOINT: ${{ vars.FABRIC_SQL_ENDPOINT }}
+      FABRIC_LAKEHOUSE_DATABASE: ${{ vars.FABRIC_LAKEHOUSE_DATABASE }}
 
     steps:
       - uses: actions/checkout@v6
@@ -80,6 +83,24 @@ jobs:
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
+
+      - name: Configure optional Fabric endpoints
+        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' }}
+        run: |
+          env_vars=()
+          if [ -n "${FABRIC_DATA_AGENT_URL}" ]; then
+            env_vars+=("FABRIC_DATA_AGENT_URL=${FABRIC_DATA_AGENT_URL}")
+          fi
+          if [ -n "${FABRIC_SQL_ENDPOINT}" ]; then
+            env_vars+=("FABRIC_SQL_ENDPOINT=${FABRIC_SQL_ENDPOINT}")
+          fi
+          if [ -n "${FABRIC_LAKEHOUSE_DATABASE}" ]; then
+            env_vars+=("FABRIC_LAKEHOUSE_DATABASE=${FABRIC_LAKEHOUSE_DATABASE}")
+          fi
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --set-env-vars "${env_vars[@]}"
 
       - name: Wait for Container Apps provisioning
         run: |

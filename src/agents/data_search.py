@@ -330,6 +330,7 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
     endpoint = settings.get("fabric_sql_endpoint", "")
     if not endpoint:
         return []
+    database = settings.get("fabric_lakehouse_database", "Travel_Lakehouse") or "Travel_Lakehouse"
 
     try:
         credential = DefaultAzureCredential()
@@ -341,7 +342,7 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
         conn = pyodbc.connect(
             f"Driver={{ODBC Driver 18 for SQL Server}};"
             f"Server={endpoint};"
-            f"Database=Travel_Lakehouse;"
+            f"Database={database};"
             f"Encrypt=yes;"
             f"TrustServerCertificate=no",
             attrs_before={1256: token_struct},

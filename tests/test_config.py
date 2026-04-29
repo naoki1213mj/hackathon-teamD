@@ -28,6 +28,8 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "ENVIRONMENT",
         "COSMOS_DB_ENDPOINT",
         "FABRIC_SQL_ENDPOINT",
+        "FABRIC_LAKEHOUSE_DATABASE",
+        "FABRIC_DATABASE_NAME",
         "ALLOWED_ORIGINS",
         "CONTENT_UNDERSTANDING_ENDPOINT",
         "SPEECH_SERVICE_ENDPOINT",
@@ -125,6 +127,17 @@ def test_work_iq_timeout_default(monkeypatch):
     settings = get_settings()
 
     assert settings["work_iq_timeout_seconds"] == "120"
+
+
+def test_fabric_lakehouse_database_default_and_alias(monkeypatch):
+    """Fabric Lakehouse database 名は既定値と alias で切り替えられる。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("FABRIC_LAKEHOUSE_DATABASE", raising=False)
+    monkeypatch.setenv("FABRIC_DATABASE_NAME", "Travel_Lakehouse_v2")
+
+    settings = get_settings()
+
+    assert settings["fabric_lakehouse_database"] == "Travel_Lakehouse_v2"
 
 
 def test_identity_boundary_defaults_to_untrusted_header_claims(monkeypatch):

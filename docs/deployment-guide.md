@@ -156,8 +156,9 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存 |
 | `SEARCH_ENDPOINT` | 任意 | Azure AI Search endpoint (`search_knowledge_base()` はこれを最優先で使う) |
 | `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー。live tenant では Container Apps secret で保持 |
-| `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
+| `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL (`https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai`) |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
+| `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL フォールバック時の Lakehouse database 名。未設定時は `Travel_Lakehouse` |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
 | `MCP_REGISTRY_ENDPOINT` | 任意 | MCP registry UI / capabilities 用 endpoint |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan runtime（既定: `foundry_preprovisioned`） |

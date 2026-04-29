@@ -5,6 +5,7 @@ import contextvars
 import io
 import json
 import urllib.error
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import openai
@@ -85,6 +86,64 @@ class TestDataSearchTools:
 
         result = ds._query_fabric("SELECT 1")
         assert result == []
+
+    def test_query_fabric_uses_configured_lakehouse_database(self, monkeypatch):
+        """Fabric SQL fallback は移行先 Lakehouse database 名を環境設定から使う。"""
+        import src.agents.data_search as ds
+
+        captured: dict[str, str] = {}
+
+        class DummyToken:
+            token = "token"
+
+        class DummyCredential:
+            def get_token(self, _scope):
+                return DummyToken()
+
+        class DummyCursor:
+            description = [("value",)]
+
+            def execute(self, query, params=None):
+                captured["query"] = query
+                captured["params"] = str(params)
+
+            def fetchall(self):
+                return [(1,)]
+
+            def close(self):
+                captured["cursor_closed"] = "true"
+
+        class DummyConnection:
+            def cursor(self):
+                return DummyCursor()
+
+            def close(self):
+                captured["connection_closed"] = "true"
+
+        def fake_connect(connection_string, attrs_before):
+            captured["connection_string"] = connection_string
+            captured["attrs_before"] = str(bool(attrs_before))
+            return DummyConnection()
+
+        monkeypatch.setattr(ds, "_HAS_PYODBC", True)
+        monkeypatch.setattr(ds, "DefaultAzureCredential", DummyCredential)
+        monkeypatch.setattr(ds, "pyodbc", SimpleNamespace(connect=fake_connect))
+        monkeypatch.setattr(
+            ds,
+            "get_settings",
+            lambda: {
+                "fabric_sql_endpoint": "new.sql.fabric.microsoft.com",
+                "fabric_lakehouse_database": "Travel_Lakehouse_v2",
+            },
+        )
+
+        result = ds._query_fabric("SELECT 1")
+
+        assert result == [{"value": 1}]
+        assert "Server=new.sql.fabric.microsoft.com;" in captured["connection_string"]
+        assert "Database=Travel_Lakehouse_v2;" in captured["connection_string"]
+        assert captured["cursor_closed"] == "true"
+        assert captured["connection_closed"] == "true"
 
 
 class TestRegulationCheckTools:
