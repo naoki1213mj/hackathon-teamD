@@ -145,6 +145,36 @@ class TestDataSearchTools:
         assert captured["cursor_closed"] == "true"
         assert captured["connection_closed"] == "true"
 
+    def test_fabric_queries_use_configured_table_names(self, monkeypatch):
+        """移行先 Fabric workspace の table 名を設定で切り替えられる。"""
+        import src.agents.data_search as ds
+
+        captured: list[str] = []
+
+        monkeypatch.setattr(
+            ds,
+            "get_settings",
+            lambda: {
+                "fabric_sales_table": "travel_sales",
+                "fabric_reviews_table": "travel_review",
+            },
+        )
+        monkeypatch.setattr(ds, "_query_fabric", lambda query, params=None: captured.append(query) or [])
+
+        ds._get_sales_data_from_fabric()
+        ds._get_reviews_from_fabric()
+
+        assert "FROM travel_sales" in captured[0]
+        assert "FROM travel_review" in captured[1]
+
+    def test_fabric_table_names_reject_invalid_identifiers(self, monkeypatch):
+        """Fabric table 名は SQL injection にならない identifier だけ許可する。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_sales_table": "travel_sales;DROP TABLE x"})
+
+        assert ds._fabric_table_name("fabric_sales_table", "sales_results") == "sales_results"
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""

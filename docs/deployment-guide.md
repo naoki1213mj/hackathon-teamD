@@ -159,6 +159,8 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL (`https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai`) |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL フォールバック時の Lakehouse database 名。未設定時は `Travel_Lakehouse` |
+| `FABRIC_SALES_TABLE` | 任意 | Fabric SQL フォールバック時の販売テーブル名。未設定時は `sales_results` |
+| `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL フォールバック時のレビューテーブル名。未設定時は `customer_reviews` |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
 | `MCP_REGISTRY_ENDPOINT` | 任意 | MCP registry UI / capabilities 用 endpoint |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan runtime（既定: `foundry_preprovisioned`） |

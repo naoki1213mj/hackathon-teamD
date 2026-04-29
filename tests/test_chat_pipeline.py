@@ -1425,6 +1425,37 @@ def test_build_work_iq_session_metadata_clears_stale_warning_for_delegated_ident
     assert session["owner_oid"] == "oid-123"
 
 
+def test_build_work_iq_session_metadata_allows_untrusted_identity_with_delegated_token():
+    """署名検証境界外の bearer でも Work IQ delegated token があれば pre-block しない。"""
+    session = chat_module.build_work_iq_session_metadata(
+        {"work_iq_enabled": True, "source_scope": ["emails"]},
+        {
+            "user_id": "anon-123",
+            "auth_mode": "anonymous",
+            "oid": "",
+            "tid": "",
+            "upn": "",
+            "auth_error": "untrusted_token",
+        },
+        existing_session={
+            "enabled": True,
+            "source_scope": ["emails"],
+            "auth_mode": "anonymous",
+            "owner_oid": "",
+            "owner_tid": "",
+            "owner_upn": "",
+            "warning_code": "auth_required",
+            "status": "auth_required",
+        },
+        preflight_status="auth_required",
+        delegated_token_present=True,
+    )
+
+    assert "status" not in session
+    assert "warning_code" not in session
+    assert session["auth_mode"] == "anonymous"
+
+
 @pytest.mark.asyncio
 async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypatch):
     """notification workflow 未設定でも manager approval URL を返して待機する"""

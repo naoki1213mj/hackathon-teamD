@@ -114,7 +114,7 @@ azd up                                    # プロビジョニング + ビルド
 | Search / Foundry IQ | `regulations-index`、`regulations-ks`、`regulations-kb` を **East US** の Azure AI Search に作成済み。アプリには `SEARCH_ENDPOINT` + `SEARCH_API_KEY` で配線済み |
 | モデル配備 | テキストモデルは `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4` を利用します。`gpt-5.5` は East US 2 の Microsoft Foundry catalog で GA（`2026-04-24`、Responses 対応）として見え、UI / postprovision code も認識します。ただし rebuilt `workiq-dev` は現時点で `gpt-5.5` quota が 0 TPM のため、実際に選択する前に deployment を作成してください。アプリの既定画像経路は `gpt-image-2` です。GPT 系画像モデルは `AZURE_AI_PROJECT_ENDPOINT` から導出した AI Services account endpoint に対して Azure OpenAI Images API を呼び、Managed Identity 認証、上限付き retry/backoff、可視 SVG fallback を使います。既定名で配備するか、deployment 名が異なる場合は `GPT_IMAGE_2_DEPLOYMENT_NAME` で上書きしてください。`gpt-image-1.5` も引き続き利用可能です |
 | MAI 画像経路 | `IMAGE_PROJECT_ENDPOINT_MAI` は別の East US AI Services account を指す。現在は subscription に `MAI-Image-2` quota が無いため、`MAI-Image-2` deployment 名を **MAI-Image-2e** の alias として運用 |
-| Fabric | 現在の移行先は workspace `ws-3iq-demo` です。Agent1 は `FABRIC_DATA_AGENT_URL` を最優先で使い、利用不可時は `FABRIC_SQL_ENDPOINT` + `FABRIC_LAKEHOUSE_DATABASE`、最後に CSV fallback へ退避します。以前の workspace は `ws-MG-pod2` / lakehouse `Travel_Lakehouse` です |
+| Fabric | 現在の移行先は workspace `ws-3iq-demo` です。Agent1 は `FABRIC_DATA_AGENT_URL` を最優先で使い、利用不可時は `FABRIC_SQL_ENDPOINT` + `FABRIC_LAKEHOUSE_DATABASE` + 設定済み table 名、最後に CSV fallback へ退避します。以前の workspace は `ws-MG-pod2` / lakehouse `Travel_Lakehouse` です |
 | Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live です。上司承認通知と承認後 Teams channel 通知を再確認済みで、`deploy.yml` は full signed manager trigger URL を Container App secret へ毎回再同期します |
 | live health baseline | このメンテナンス前の live baseline は Container Apps revision `ca-wmbvhdhcsuyb2--0000094` で、`/api/health` は `{"status":"ok"}`、`/api/ready` は `{"status":"ready","missing":[]}` を返していました。revision ID は deploy ごとに進むため、最新確認は GitHub Actions と health endpoint を正としてください |
 | 残る手動作業 | 現状の残件は SharePoint 保存経路が中心です。Fabric、manager approval、Teams 通知は live で復旧・確認済みです |
@@ -132,6 +132,8 @@ azd up                                    # プロビジョニング + ビルド
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL analytics endpoint fallback |
 | `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL fallback 用 Lakehouse database 名（既定: `Travel_Lakehouse`） |
+| `FABRIC_SALES_TABLE` | 任意 | Fabric SQL fallback 用の販売テーブル名（既定: `sales_results`） |
+| `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL fallback 用のレビューテーブル名（既定: `customer_reviews`） |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan の runtime 切替（既定: `foundry_preprovisioned`、`legacy` は rollback / 検証用） |
 | `WORKIQ_RUNTIME` | 任意 | Work IQ runtime 切替（既定: `foundry_tool`、`graph_prefetch` は明示 rollback 用） |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | `graph_prefetch` rollback 経路で Microsoft Graph Copilot Chat API から短い Work IQ brief を取得するときの timeout（既定: `120`） |

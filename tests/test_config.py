@@ -30,6 +30,8 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "FABRIC_SQL_ENDPOINT",
         "FABRIC_LAKEHOUSE_DATABASE",
         "FABRIC_DATABASE_NAME",
+        "FABRIC_SALES_TABLE",
+        "FABRIC_REVIEWS_TABLE",
         "ALLOWED_ORIGINS",
         "CONTENT_UNDERSTANDING_ENDPOINT",
         "SPEECH_SERVICE_ENDPOINT",
@@ -138,6 +140,18 @@ def test_fabric_lakehouse_database_default_and_alias(monkeypatch):
     settings = get_settings()
 
     assert settings["fabric_lakehouse_database"] == "Travel_Lakehouse_v2"
+
+
+def test_fabric_table_defaults(monkeypatch):
+    """Fabric table 名は旧 Lakehouse の既定値を維持する。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("FABRIC_SALES_TABLE", raising=False)
+    monkeypatch.delenv("FABRIC_REVIEWS_TABLE", raising=False)
+
+    settings = get_settings()
+
+    assert settings["fabric_sales_table"] == "sales_results"
+    assert settings["fabric_reviews_table"] == "customer_reviews"
 
 
 def test_identity_boundary_defaults_to_untrusted_header_claims(monkeypatch):

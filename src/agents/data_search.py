@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 import os
+import re
 import struct
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ except ImportError:
     _HAS_PYODBC = False
 
 logger = logging.getLogger(__name__)
+_SQL_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
 
 
 def _utc_now_iso() -> str:
@@ -367,6 +369,15 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
         return []
 
 
+def _fabric_table_name(setting_key: str, default_name: str) -> str:
+    """Fabric table 名を環境設定から安全な SQL identifier として解決する。"""
+    value = str(get_settings().get(setting_key, "") or default_name).strip()
+    if not _SQL_IDENTIFIER_PATTERN.fullmatch(value):
+        logger.warning("Fabric table 名が不正なため既定値を使います: %s", setting_key)
+        return default_name
+    return value
+
+
 # --- デモデータ読み込み（Fabric Lakehouse 未接続時は CSV から読み込む） ---
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -413,6 +424,7 @@ def _get_sales_data_from_fabric(
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
+    sales_table = _fabric_table_name("fabric_sales_table", "sales_results")
     query = f"""
         SELECT
             plan_name,
@@ -427,7 +439,7 @@ def _get_sales_data_from_fabric(
             SUM(CAST(pax AS INT)) AS pax,
             MIN(customer_segment) AS customer_segment,
             COUNT(*) AS booking_count
-        FROM sales_results
+        FROM {sales_table}
         {where_sql}
         GROUP BY
             plan_name,
@@ -464,9 +476,10 @@ def _get_reviews_from_fabric(
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
+    reviews_table = _fabric_table_name("fabric_reviews_table", "customer_reviews")
     query = f"""
         SELECT plan_name, rating, comment
-        FROM customer_reviews
+        FROM {reviews_table}
         {where_sql}
         ORDER BY review_date DESC
     """

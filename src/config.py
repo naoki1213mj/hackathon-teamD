@@ -28,6 +28,8 @@ class AppSettings(TypedDict):
     cosmos_db_endpoint: str
     fabric_sql_endpoint: str
     fabric_lakehouse_database: str
+    fabric_sales_table: str
+    fabric_reviews_table: str
     allowed_origins: str
     content_understanding_endpoint: str
     speech_service_endpoint: str
@@ -90,6 +92,8 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "cosmos_db_endpoint": ("COSMOS_DB_ENDPOINT",),
     "fabric_sql_endpoint": ("FABRIC_SQL_ENDPOINT",),
     "fabric_lakehouse_database": ("FABRIC_LAKEHOUSE_DATABASE", "FABRIC_DATABASE_NAME"),
+    "fabric_sales_table": ("FABRIC_SALES_TABLE",),
+    "fabric_reviews_table": ("FABRIC_REVIEWS_TABLE",),
     "allowed_origins": ("ALLOWED_ORIGINS",),
     "content_understanding_endpoint": ("CONTENT_UNDERSTANDING_ENDPOINT",),
     "speech_service_endpoint": ("SPEECH_SERVICE_ENDPOINT",),
@@ -148,6 +152,8 @@ _DEFAULTS: dict[str, str] = {
     "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "fabric_lakehouse_database": "Travel_Lakehouse",
+    "fabric_sales_table": "sales_results",
+    "fabric_reviews_table": "customer_reviews",
     "allowed_origins": "http://localhost:5173",
     "gpt_image_15_deployment_name": "gpt-image-1.5",
     "gpt_image_2_deployment_name": "gpt-image-2",

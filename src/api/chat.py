@@ -5173,6 +5173,7 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
         caller_identity,
         existing_session=_get_work_iq_session_from_conversation(existing_conversation),
         preflight_status=work_iq_auth_status,
+        delegated_token_present=bool(work_iq_access_token),
     )
 
     project_endpoint_available = bool(settings["project_endpoint"])

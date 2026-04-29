@@ -31,6 +31,8 @@ jobs:
       FABRIC_DATA_AGENT_URL: ${{ vars.FABRIC_DATA_AGENT_URL }}
       FABRIC_SQL_ENDPOINT: ${{ vars.FABRIC_SQL_ENDPOINT }}
       FABRIC_LAKEHOUSE_DATABASE: ${{ vars.FABRIC_LAKEHOUSE_DATABASE }}
+      FABRIC_SALES_TABLE: ${{ vars.FABRIC_SALES_TABLE }}
+      FABRIC_REVIEWS_TABLE: ${{ vars.FABRIC_REVIEWS_TABLE }}
 
     steps:
       - uses: actions/checkout@v6
@@ -85,7 +87,7 @@ jobs:
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
 
       - name: Configure optional Fabric endpoints
-        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' }}
+        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' }}
         run: |
           env_vars=()
           if [ -n "${FABRIC_DATA_AGENT_URL}" ]; then
@@ -96,6 +98,12 @@ jobs:
           fi
           if [ -n "${FABRIC_LAKEHOUSE_DATABASE}" ]; then
             env_vars+=("FABRIC_LAKEHOUSE_DATABASE=${FABRIC_LAKEHOUSE_DATABASE}")
+          fi
+          if [ -n "${FABRIC_SALES_TABLE}" ]; then
+            env_vars+=("FABRIC_SALES_TABLE=${FABRIC_SALES_TABLE}")
+          fi
+          if [ -n "${FABRIC_REVIEWS_TABLE}" ]; then
+            env_vars+=("FABRIC_REVIEWS_TABLE=${FABRIC_REVIEWS_TABLE}")
           fi
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
