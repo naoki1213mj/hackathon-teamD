@@ -3459,7 +3459,7 @@ def test_build_video_poll_completion_events_returns_timeout_message_for_missing_
         {
             "event": "text",
             "data": {
-                "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
+                "content": "⚠️ 販促動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
                 "agent": "video-gen-agent",
                 "content_type": "text",
                 "background_update": True,
@@ -3484,7 +3484,7 @@ def test_build_video_poll_completion_events_returns_failure_detail() -> None:
         {
             "event": "text",
             "data": {
-                "content": "⚠️ アバター動画の生成に失敗しました。 Unsupported gesture for lisa/casual-sitting.",
+                "content": "⚠️ 販促動画の生成に失敗しました。 Unsupported gesture for lisa/casual-sitting.",
                 "agent": "video-gen-agent",
                 "content_type": "text",
                 "background_update": True,
@@ -3623,7 +3623,7 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
     assert (
         "text",
             {
-                "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
+                "content": "⚠️ 販促動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
                 "agent": "video-gen-agent",
                 "content_type": "text",
                 "version": 1,

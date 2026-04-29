@@ -56,7 +56,7 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for detailed Azure 
 | --- | --- |
 | **Multi-Agent Pipeline** | 7 agents in 5 user-facing steps with human-in-the-loop approval and optional manager gate |
 | **AI Image Generation** | GPT Image 1.5 / GPT Image 2 / MAI-Image-2 — hero visuals and SNS banners, selectable in UI |
-| **Video Generation** | Photo Avatar with SSML narration, HD voice, MP4/H.264 |
+| **Video Generation** | Lisa-only Photo Avatar (`casual-sitting`) with SSML narration, HD voice, MP4/H.264 |
 | **Quality Evaluation** | Built-in + custom business metrics with side-by-side version comparison |
 | **Evaluation-Driven Refinement** | Feed results back via APIM-fronted Azure Functions MCP |
 | **Real-Time Streaming** | SSE with per-agent step tracking (15-min timeout) |

@@ -162,7 +162,7 @@
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|
-| `generate_promo_video(summary, avatar_style)` | Photo Avatar プロモ動画生成（SSML ナレーション、イントロジェスチャー、`casual-sitting` スタイル、`ja-JP-Nanami:DragonHDLatestNeural` 音声、MP4/H.264） | ✅ Speech / Photo Avatar API | スキップ |
+| `generate_promo_video(summary, avatar_style)` | Lisa / `casual-sitting` 固定の Photo Avatar プロモ動画生成（SSML ナレーション、イントロジェスチャー、`ja-JP-Nanami:DragonHDLatestNeural` 音声、MP4/H.264）。`avatar_style` は後方互換用で選択肢は表示しない | ✅ Speech / Photo Avatar API | スキップ |
 
 **出力形式**: MP4 動画 URL
 

@@ -119,7 +119,9 @@ GitHub Actions の Deploy workflow は production environment / repository varia
 
 #### 4.4.1 デモ向け Data Agent チューニング
 
-Fabric IQ を source にした `Travel_Ontology_DA` は、現状 portal で **Agent instructions** だけを設定する運用です。Ontology / datasource-specific instructions / example query を別々に管理できない前提で、業務語、指標定義、テーブル選択、条件緩和、レビュー分析、禁止事項を単一の instructions に集約してから Publish してください。
+`ws-3iq-demo` の `Travel_Ontology_DA` は、Fabric item definition API で **Agent instructions** と `travelIQ` ontology datasource instructions を直接更新できます。`POST /v1/workspaces/<workspace-id>/dataAgents/<data-agent-id>/getDefinition` で現在の definition を取得し、`Files/Config/draft/stage_config.json` / `Files/Config/published/stage_config.json` の `aiInstructions` と、`Files/Config/*/ontology-travelIQ/datasource.json` の `dataSourceInstructions` を更新してから、同じ definition payload を `POST /v1/workspaces/<workspace-id>/dataAgents/<data-agent-id>/updateDefinition` に送ってください。どちらも `202 Accepted` の非同期操作なので `Location` を poll し、getDefinition は `<operation-url>/result` で結果を取得します。
+
+現行の source は `travelIQ` ontology（ID `c5c4b957-a9e3-4eb6-a7b6-738a4c27d57d`）、Lakehouse は `Travel_LH` です。instructions は特定プロンプトや固定デモ値ではなく、業務語、指標定義、テーブル選択、条件緩和、レビュー分析、未知列の代替提案、GQL/JSON 非表示を汎用ルールとしてまとめてください。
 
 **Data agent instructions 推奨文:**
 
@@ -127,6 +129,7 @@ Fabric IQ を source にした `Travel_Ontology_DA` は、現状 portal で **Ag
 あなたは Travel Marketing AI デモ用の Microsoft Fabric Data Agent です。目的は、旅行販売データとレビュー分析データを使って、マーケティング担当者が自然言語で売上傾向、顧客セグメント、旅行先、季節性、レビュー評価、感情傾向、改善示唆を分析できるようにすることです。回答は日本語で、実データに基づく数値・表・短い示唆を返してください。
 
 # 利用可能なデータ
+Source ontology: travelIQ
 Lakehouse: Travel_LH
 
 利用できるテーブルは以下のみです。存在しない列を作ったり、外部データを参照したりしないでください。
@@ -206,6 +209,7 @@ Lakehouse: Travel_LH
 - Comments の要約は実データに存在するコメント内容だけを根拠にする。存在しない顧客の声、良い点、不満点を創作しない。
 - 個別コメントを出す場合は最大5件程度に絞る。
 - Rating と Emotions が矛盾して見える場合は両方を併記し、「評価点と感情ラベルに差がある可能性があります」と説明する。
+- レビュー件数と Rating 分布など、同じ母集団の件数は合計が一致するように確認する。一致しない場合は不確かな分布を出さず、制約として説明する。
 
 # 出力形式
 原則として以下の順で回答する。

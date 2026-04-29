@@ -50,6 +50,20 @@ describe('ApprovalBanner', () => {
     expect(onApprove).toHaveBeenCalledWith('承認')
   })
 
+
+  it('does not show a diff for first-run approval without a previous plan', () => {
+    render(
+      <ApprovalBanner
+        request={request}
+        previousPlanMarkdown=""
+        onApprove={vi.fn()}
+        t={t}
+      />,
+    )
+
+    expect(screen.queryByText('変更差分')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /修正/ })).toHaveFocus()
+  })
   it('keeps the revision submission flow unchanged', () => {
     const onApprove = vi.fn()
     render(

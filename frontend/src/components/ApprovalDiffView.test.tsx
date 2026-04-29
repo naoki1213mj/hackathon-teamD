@@ -43,4 +43,23 @@ describe('ApprovalDiffView', () => {
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('strong')).toBeNull()
   })
+  it('renders side-by-side rows for manager comparisons', () => {
+    const { container } = render(
+      <ApprovalDiffView
+        previousText={'# Plan\nOld tagline\nRemoved only'}
+        currentText={'# Plan\nNew tagline\nAdded only'}
+        previousLabel="v1"
+        currentLabel="v2"
+        variant="side-by-side"
+        t={t}
+      />,
+    )
+
+    expect(screen.getByText('v1')).toBeInTheDocument()
+    expect(screen.getByText('v2')).toBeInTheDocument()
+    expect(screen.getByText('Old tagline')).toBeInTheDocument()
+    expect(screen.getByText('New tagline')).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-diff-kind="removed"]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-diff-kind="added"]')).toHaveLength(2)
+  })
 })

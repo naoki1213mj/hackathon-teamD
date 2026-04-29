@@ -61,6 +61,9 @@ describe('ManagerApprovalPage', () => {
     expect(await screen.findByText('変更差分')).toBeInTheDocument()
     expect(screen.getByText('<em>Old copy</em>')).toBeInTheDocument()
     expect(screen.getByText('<strong>New copy</strong>')).toBeInTheDocument()
+    expect(screen.getByText('以前の承認済み版: v1 · Plan')).toBeInTheDocument()
+    expect(screen.getByText('今回の修正版: v2 · Plan')).toBeInTheDocument()
+    expect(screen.getByLabelText('コメント')).toHaveFocus()
     expect(container.querySelector('em')).toBeNull()
     expect(container.querySelector('strong')).toBeNull()
     await waitFor(() => {
@@ -71,5 +74,27 @@ describe('ManagerApprovalPage', () => {
         }),
       )
     })
+  })
+  it('shows current plan without an artificial diff when there is no previous version', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        conversation_id: 'conversation-1',
+        current_version: 1,
+        plan_title: 'First Plan',
+        plan_markdown: '# First Plan\nInitial copy',
+        previous_versions: [],
+      }),
+    } as Response)))
+
+    render(
+      <ManagerApprovalPage conversationId="conversation-1" approvalToken="token" t={t} />,
+    )
+
+    expect(await screen.findByText('今回の修正版: v1 · First Plan')).toBeInTheDocument()
+    expect(screen.queryByText('変更差分')).not.toBeInTheDocument()
+    expect(screen.getByText(/# First Plan/)).toBeInTheDocument()
+    expect(screen.getByText(/Initial copy/)).toBeInTheDocument()
+    expect(screen.getByLabelText('コメント')).toHaveFocus()
   })
 })

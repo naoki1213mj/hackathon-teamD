@@ -12,9 +12,9 @@ const t = (key: string) => ({
   'status.running': '実行中',
   'workflow.brochure.ready': 'ブローシャと画像の生成が完了しました。',
   'workflow.brochure.preview_hint': '右側のタブで確認できます。',
-  'workflow.video.ready': 'アバター動画の生成が完了しました。',
+  'workflow.video.ready': '販促動画の生成が完了しました。',
   'workflow.video.pending': '動画生成イベントを待機中です。',
-  'workflow.video.running': 'アバター動画を生成中…',
+  'workflow.video.running': '販促動画を生成中…',
   'workflow.round': 'ラウンド {n}',
   'workflow.tool_count': 'ツール {n}件',
   'workflow.tool_none': 'このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。',
@@ -263,12 +263,12 @@ describe('WorkflowAccordion', () => {
     expect(screen.getByText('このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。')).toBeInTheDocument()
   })
 
-  it('shows the latest avatar video status message instead of a perpetual running label', () => {
+  it('shows the latest promotional video status message instead of a perpetual running label', () => {
     const contentsWithVideoTimeout: TextContent[] = [
       ...textContents,
       {
         agent: 'video-gen-agent',
-        content: '{"status":"timeout","message":"⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"}',
+        content: '{"status":"timeout","message":"⚠️ 販促動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"}',
       },
     ]
 
@@ -288,8 +288,8 @@ describe('WorkflowAccordion', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: /動画生成/ }).at(-1) as HTMLButtonElement)
 
-    expect(screen.getByText('⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。')).toBeInTheDocument()
-    expect(screen.queryByText('アバター動画を生成中…')).toBeNull()
+    expect(screen.getByText('⚠️ 販促動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。')).toBeInTheDocument()
+    expect(screen.queryByText('販促動画を生成中…')).toBeNull()
   })
 
   it('collapses duplicate running/completed tool events and shows the latest count', () => {

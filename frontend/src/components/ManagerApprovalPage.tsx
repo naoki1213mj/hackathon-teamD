@@ -23,6 +23,22 @@ interface ManagerApprovalPayload {
 
 type ManagerApprovalPageStatus = 'loading' | 'ready' | 'submitting' | 'approved' | 'rejected' | 'error'
 
+function CurrentPlanOnly({ title, content, t }: { title: string, content: string, t: (key: string) => string }) {
+  return (
+    <section className="space-y-3 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4" aria-label={title}>
+      <div>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+        <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+          {t('approval.manager.portal.previous_version.empty')}
+        </p>
+      </div>
+      <div className="max-h-[min(64vh,44rem)] overflow-auto rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-[var(--text-secondary)]">{content}</pre>
+      </div>
+    </section>
+  )
+}
+
 export function ManagerApprovalPage({ conversationId, approvalToken, t }: ManagerApprovalPageProps) {
   const [status, setStatus] = useState<ManagerApprovalPageStatus>('loading')
   const [payload, setPayload] = useState<ManagerApprovalPayload | null>(null)
@@ -167,7 +183,7 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
       </div>
 
       {previousVersions.length > 0 && (
-        <div className="space-y-3 rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+        <section className="space-y-3" aria-label={t('approval.manager.portal.compare')}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
               {t('approval.manager.portal.compare')}
@@ -177,9 +193,9 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
                 key={version.version}
                 type="button"
                 onClick={() => setSelectedPreviousVersion(version.version)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${comparisonTarget?.version === version.version
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
-                  : 'bg-[var(--panel-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${comparisonTarget?.version === version.version
+                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                  : 'border-[var(--panel-border)] bg-[var(--panel-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 v{version.version}
@@ -195,16 +211,15 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
               : t('approval.manager.portal.previous_version.empty')}
             currentLabel={`${t('approval.manager.portal.current_version')}: v${payload.current_version} · ${payload.plan_title}`}
             t={t}
+            variant="side-by-side"
           />
-        </div>
+        </section>
       )}
 
       {previousVersions.length === 0 && (
-        <ApprovalDiffView
-          previousText=""
-          currentText={payload.plan_markdown}
-          previousLabel={t('approval.manager.portal.previous_version.empty')}
-          currentLabel={`${t('approval.manager.portal.current_version')}: v${payload.current_version} · ${payload.plan_title}`}
+        <CurrentPlanOnly
+          title={`${t('approval.manager.portal.current_version')}: v${payload.current_version} · ${payload.plan_title}`}
+          content={payload.plan_markdown}
           t={t}
         />
       )}
@@ -220,6 +235,7 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
           placeholder={t('approval.manager.portal.comment.placeholder')}
           rows={4}
           className="w-full rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] px-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          autoFocus
         />
       </div>
 

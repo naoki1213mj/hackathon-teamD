@@ -56,7 +56,7 @@ flowchart TD
 | --- | --- |
 | **マルチエージェント** | 7 エージェントを 5 ステップに集約、承認ゲート + 任意の上司承認 |
 | **AI 画像生成** | GPT Image 1.5 / GPT Image 2 / MAI-Image-2（UI から選択可） |
-| **動画生成** | Photo Avatar + SSML ナレーション、MP4/H.264 出力 |
+| **動画生成** | Lisa 固定 Photo Avatar（`casual-sitting`）+ SSML ナレーション、MP4/H.264 出力 |
 | **品質評価** | Built-in 指標 + 業務カスタム指標、版比較 UI |
 | **評価起点の改善** | APIM 経由の Azure Functions MCP で改善ブリーフを生成 |
 | **リアルタイム配信** | SSE によるエージェント単位の進捗表示（15 分タイムアウト） |

@@ -143,7 +143,7 @@ _VIDEO_SUBMISSION_TIMEOUT_MESSAGE = (
     "時間をおいて再実行してください。"
 )
 _VIDEO_POLL_TIMEOUT_MESSAGE = (
-    "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"
+    "⚠️ 販促動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。"
 )
 
 
@@ -179,7 +179,7 @@ def _build_video_poll_completion_events(
             logger.warning("Photo Avatar: 無効な video_url を無視: %s", resolved_video_url[:100])
 
         if status in {"failed", "cancelled", "error"}:
-            failure_message = "⚠️ アバター動画の生成に失敗しました。"
+            failure_message = "⚠️ 販促動画の生成に失敗しました。"
             if detail:
                 failure_message = f"{failure_message} {detail}"
             return [_build_text_event(failure_message, "text")]

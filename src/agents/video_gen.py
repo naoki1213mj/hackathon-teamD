@@ -25,6 +25,7 @@ from src.tool_telemetry import trace_tool_invocation
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMO_VOICE = "ja-JP-Nanami:DragonHDLatestNeural"
+_DEFAULT_AVATAR_CHARACTER = "lisa"
 _DEFAULT_AVATAR_STYLE = "casual-sitting"
 _DEFAULT_BACKGROUND_COLOR = "#FFFFFFFF"
 _DEFAULT_BITRATE_KBPS = 4000
@@ -40,15 +41,12 @@ _VIDEO_SECTION_LABELS = {
     "販促チャネル",
     "kpi",
 }
-_AVATAR_PROFILES: dict[str, tuple[str, str]] = {
-    "concierge": ("lisa", "casual-sitting"),
-    "guide": ("lori", "casual"),
-    "presenter": ("lisa", "graceful-sitting"),
-}
 _SUPPORTED_GESTURES: dict[tuple[str, str], list[str]] = {
-    ("lisa", "casual-sitting"): ["show-front-1", "show-front-2", "thumbsup-left-1"],
-    ("lisa", "graceful-sitting"): ["wave-left-1", "show-left-1", "show-right-1"],
-    ("lori", "casual"): ["hello", "open", "thanks"],
+    (_DEFAULT_AVATAR_CHARACTER, _DEFAULT_AVATAR_STYLE): [
+        "show-front-1",
+        "show-front-2",
+        "thumbsup-left-1",
+    ],
 }
 
 # --- Side-channel 動画ジョブストア ---
@@ -105,16 +103,16 @@ def _read_positive_int_env(name: str, default_value: int) -> int:
     return parsed_value
 
 
-def _resolve_avatar_profile(
-    avatar_style: str,
-    configured_character: str,
-    configured_style: str,
-) -> tuple[str, str]:
-    """アバター種別から互換性のある character/style を解決する。"""
-    default_character, default_style = _AVATAR_PROFILES.get(avatar_style, ("lisa", _DEFAULT_AVATAR_STYLE))
-    character = configured_character or default_character
-    style = configured_style or default_style
-    return character, style
+def _resolve_avatar_profile(avatar_style: str) -> tuple[str, str]:
+    """Lisa/casual-sitting のみを返す。
+
+    ``avatar_style`` は既存 API クライアント向けに受け取るが、UI と生成結果の
+    混乱を避けるため他アバターには切り替えない。
+    """
+    requested = str(avatar_style or "").strip()
+    if requested and requested.lower() not in {"concierge", _DEFAULT_AVATAR_CHARACTER, _DEFAULT_AVATAR_STYLE}:
+        logger.info("Lisa-only video generation is ignoring legacy avatar_style: %s", requested)
+    return _DEFAULT_AVATAR_CHARACTER, _DEFAULT_AVATAR_STYLE
 
 
 def _select_avatar_gestures(character: str, avatar_pose: str) -> list[str]:
@@ -363,7 +361,7 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> VideoPollResult | 
 @tool
 async def generate_promo_video(
     summary_text: str,
-    avatar_style: str = "concierge",
+    avatar_style: str = "lisa",
 ) -> str:
     """企画書サマリから Photo Avatar + Voice Live で販促紹介動画を生成する。
 
@@ -372,7 +370,7 @@ async def generate_promo_video(
 
     Args:
         summary_text: 動画で読み上げるテキスト（企画書サマリ）
-        avatar_style: アバタースタイル（concierge/guide/presenter）
+        avatar_style: 後方互換用の任意指定。現在は常に Lisa / casual-sitting に固定します。
     """
     async with trace_tool_invocation("generate_promo_video", agent_name="video-gen-agent"):
         settings = get_settings()
@@ -391,13 +389,11 @@ async def generate_promo_video(
                 ensure_ascii=False,
             )
 
-        configured_character = os.environ.get("VIDEO_GEN_AVATAR_CHARACTER", "").strip()
-        configured_style = os.environ.get("VIDEO_GEN_AVATAR_STYLE", "").strip()
         configured_voice = os.environ.get("VIDEO_GEN_VOICE", _DEFAULT_PROMO_VOICE).strip()
         background_color = os.environ.get("VIDEO_GEN_BACKGROUND_COLOR", _DEFAULT_BACKGROUND_COLOR).strip()
         bitrate_kbps = _read_positive_int_env("VIDEO_GEN_BITRATE_KBPS", _DEFAULT_BITRATE_KBPS)
 
-        character, avatar_pose = _resolve_avatar_profile(avatar_style, configured_character, configured_style)
+        character, avatar_pose = _resolve_avatar_profile(avatar_style)
         voice_name = configured_voice or _DEFAULT_PROMO_VOICE
         gesture_sequence = _select_avatar_gestures(character, avatar_pose)
         ssml_content = _build_avatar_ssml(summary_text, voice_name, gesture_sequence)
@@ -448,8 +444,8 @@ async def generate_promo_video(
                     "status": "submitted",
                     "job_id": actual_job_id,
                     "message": (
-                        f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。"
-                        f"アバター: {character}, スタイル: {avatar_pose}, 音声: {voice_name}"
+                        f"🎬 Lisa による販促動画の生成ジョブを送信しました（ID: {job_id}）。"
+                        f"スタイル: {avatar_pose}, 音声: {voice_name}"
                     ),
                 },
                 ensure_ascii=False,
@@ -488,6 +484,7 @@ INSTRUCTIONS = """\
 
 ## ツール使用ルール
 - `generate_promo_video` を必ず呼び出してください
+- アバター指定は不要です。動画は常に Lisa / casual-sitting で生成されます
 - `summary_text` には顧客向けの短いナレーション台本を渡してください
 - ナレーションは 3〜4 文で、冒頭の導入 → 主な魅力 → 締めの案内、の流れにしてください
 - KPI、売上目標、セグメント分析、競合分析などの社内情報は含めないでください

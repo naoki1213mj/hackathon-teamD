@@ -13,13 +13,13 @@ interface ApprovalBannerProps {
   onApprove: (response: string) => void
   t: (key: string) => string
 }
-
 export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, t }: ApprovalBannerProps) {
   const [mode, setMode] = useState<'action' | 'revise'>('action')
   const [revision, setRevision] = useState('')
   const displayPrompt = request.prompt.trim() && !/承認|修正|approve|revise/i.test(request.prompt)
     ? request.prompt
     : t('approval.message')
+  const shouldShowDiff = Boolean(request.plan_markdown && previousPlanMarkdown.trim())
 
   return (
     <div className="sticky bottom-0 z-30 mx-0 mt-2 rounded-2xl border border-[var(--warning-border)] bg-[var(--warning-surface)] px-6 py-5 shadow-[var(--warning-shadow)] ring-1 ring-[var(--warning-border)] backdrop-blur-lg">
@@ -38,7 +38,7 @@ export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, 
         </div>
       )}
 
-      {request.plan_markdown && (
+      {shouldShowDiff && request.plan_markdown && (
         <ApprovalDiffView
           previousText={previousPlanMarkdown}
           currentText={request.plan_markdown}

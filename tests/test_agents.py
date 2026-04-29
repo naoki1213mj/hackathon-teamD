@@ -1158,8 +1158,6 @@ class TestBrochureGenTools:
         monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://test.cognitiveservices.azure.com")
         monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
         monkeypatch.delenv("VIDEO_GEN_VOICE", raising=False)
-        monkeypatch.delenv("VIDEO_GEN_AVATAR_CHARACTER", raising=False)
-        monkeypatch.delenv("VIDEO_GEN_AVATAR_STYLE", raising=False)
         monkeypatch.delenv("VIDEO_GEN_BACKGROUND_COLOR", raising=False)
         monkeypatch.delenv("VIDEO_GEN_BITRATE_KBPS", raising=False)
         monkeypatch.setattr(vg, "DefaultAzureCredential", lambda: _Credential())
@@ -1185,8 +1183,8 @@ class TestBrochureGenTools:
         assert "<emphasis" not in ssml_content
 
     @pytest.mark.asyncio
-    async def test_generate_promo_video_guide_uses_valid_avatar_style(self, monkeypatch):
-        """guide 指定時は Lori の有効な casual スタイルを使う"""
+    async def test_generate_promo_video_legacy_avatar_style_is_constrained_to_lisa(self, monkeypatch):
+        """legacy avatar_style 指定でも Lisa/casual-sitting に固定する"""
         import src.agents.video_gen as vg
 
         captured: dict[str, object] = {}
@@ -1206,7 +1204,7 @@ class TestBrochureGenTools:
                 return False
 
             def read(self) -> bytes:
-                return b'{"id": "promo-job-guide"}'
+                return b'{"id": "promo-job-legacy"}'
 
         def _fake_urlopen(request, timeout: int = 0):
             del timeout
@@ -1223,13 +1221,14 @@ class TestBrochureGenTools:
         payload = captured["payload"]
 
         assert parsed["status"] == "submitted"
-        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "lori"
-        assert payload["avatarConfig"]["talkingAvatarStyle"] == "casual"
-        assert "gesture.hello" in payload["inputs"][0]["content"]
+        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "lisa"
+        assert payload["avatarConfig"]["talkingAvatarStyle"] == "casual-sitting"
+        assert "gesture.show-front-1" in payload["inputs"][0]["content"]
+        assert "gesture.hello" not in payload["inputs"][0]["content"]
 
     @pytest.mark.asyncio
-    async def test_generate_promo_video_respects_env_overrides(self, monkeypatch):
-        """動画生成は env の voice / avatar / bitrate 上書きを反映する"""
+    async def test_generate_promo_video_respects_env_overrides_without_avatar_config(self, monkeypatch):
+        """動画生成は voice / bitrate 等を反映しつつ avatar は Lisa に固定する"""
         import src.agents.video_gen as vg
 
         captured: dict[str, object] = {}
@@ -1259,20 +1258,18 @@ class TestBrochureGenTools:
         monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://test.cognitiveservices.azure.com")
         monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
         monkeypatch.setenv("VIDEO_GEN_VOICE", "ja-JP-Masaru:DragonHDLatestNeural")
-        monkeypatch.setenv("VIDEO_GEN_AVATAR_CHARACTER", "meg")
-        monkeypatch.setenv("VIDEO_GEN_AVATAR_STYLE", "business-standing")
         monkeypatch.setenv("VIDEO_GEN_BACKGROUND_COLOR", "#11223344")
         monkeypatch.setenv("VIDEO_GEN_BITRATE_KBPS", "5500")
         monkeypatch.setattr(vg, "DefaultAzureCredential", lambda: _Credential())
         monkeypatch.setattr(vg.urllib.request, "urlopen", _fake_urlopen)
 
-        result = await vg.generate_promo_video("沖縄の海と文化を体験できる旅です。", "guide")
+        result = await vg.generate_promo_video("沖縄の海と文化を体験できる旅です。")
         parsed = json.loads(result)
         payload = captured["payload"]
 
         assert parsed["status"] == "submitted"
-        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "meg"
-        assert payload["avatarConfig"]["talkingAvatarStyle"] == "business-standing"
+        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "lisa"
+        assert payload["avatarConfig"]["talkingAvatarStyle"] == "casual-sitting"
         assert payload["avatarConfig"]["backgroundColor"] == "#11223344"
         assert payload["avatarConfig"]["bitrateKbps"] == 5500
         assert "ja-JP-Masaru:DragonHDLatestNeural" in payload["inputs"][0]["content"]
