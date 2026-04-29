@@ -252,20 +252,15 @@ def run_marketing_plan_prompt_agent(
                 raise ValueError(
                     "Work IQ is enabled for the Foundry marketing-plan path, but no WorkIQCopilot RemoteTool connection was found."
                 )
-            work_iq_tool = _build_work_iq_responses_tool(
-                work_iq_connection["server_url"],
-                connection_name=work_iq_connection["connection_name"],
-            )
             response_kwargs: dict[str, object] = {
                 "model": model_name,
                 "input": (
                     f"{_build_work_iq_tool_guidance(work_iq_config)}"
                     f"\n\n---\n\nユーザー入力:\n{user_input}"
                 ),
-                "tools": [work_iq_tool],
-                "tool_choice": _build_work_iq_tool_choice(),
                 "extra_body": {
                     "agent_reference": {"name": agent.name, "type": "agent_reference"},
+                    "tool_choice": "required",
                 },
             }
             openai_client = project_client.get_openai_client(api_key=access_token)
