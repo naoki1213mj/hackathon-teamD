@@ -921,18 +921,30 @@ def _extract_terminal_tool_events(
     return matched_events
 
 
-_FOUNDRY_WORK_IQ_FALLBACK_MARKERS = (
-    "PROMPT_AGENT_RUNTIME_FAILED",
-    "WORKIQ_CONSENT_REQUIRED",
-    "WORKIQ_APPROVAL_REQUIRED",
-    "WORKIQ_NOT_USED",
-)
-
-
 def _should_retry_marketing_plan_with_graph_prefetch(plan_outcome: dict[str, object]) -> bool:
     """Foundry Work IQ の失敗が graph_prefetch fallback 対象か判定する。"""
-    del plan_outcome
-    # Foundry Work IQ を本命経路として扱うため、自動 fallback で成功扱いにしない。
+    if plan_outcome.get("success") is not False:
+        return False
+
+    for event in plan_outcome.get("events", []):
+        if not isinstance(event, str):
+            continue
+        lines = event.strip().split("\n")
+        event_name = lines[0].replace("event: ", "") if lines else ""
+        if event_name != SSEEventType.TOOL_EVENT:
+            continue
+        try:
+            payload = json.loads(lines[1].replace("data: ", "", 1)) if len(lines) > 1 else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if (
+            payload.get("tool") == "workiq_foundry_tool"
+            and payload.get("status") == "auth_required"
+            and payload.get("error_code") == "WORKIQ_OBO_TOKEN_FAILED"
+        ):
+            return True
     return False
 
 

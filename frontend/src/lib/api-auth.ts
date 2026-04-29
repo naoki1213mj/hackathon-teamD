@@ -91,9 +91,24 @@ export async function getDelegatedApiAuth(
   }
 
   const foundryResult = await getWorkIqFoundryAuth(config, options?.interactive === true)
+  if (foundryResult.status !== 'ok') {
+    return {
+      headers: foundryResult.token ? { Authorization: `Bearer ${foundryResult.token}` } : {},
+      status: foundryResult.status,
+    }
+  }
+  const headers: Record<string, string> = foundryResult.token ? { Authorization: `Bearer ${foundryResult.token}` } : {}
+  try {
+    const graphResult = await getWorkIqGraphAuth(config, false)
+    if (graphResult.status === 'ok' && graphResult.token) {
+      headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
+    }
+  } catch (error) {
+    console.warn('Optional Work IQ Graph auth failed:', error)
+  }
   return {
-    headers: foundryResult.token ? { Authorization: `Bearer ${foundryResult.token}` } : {},
-    status: foundryResult.status,
+    headers,
+    status: 'ok',
   }
 }
 
