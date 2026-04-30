@@ -34,6 +34,13 @@ dev = [
 [tool.ruff]
 target-version = "py314"
 line-length = 120
+extend-exclude = [
+    # Phase 9 オーバーホール用の一時的なスクリプト群。
+    # smoke / retry / diag / patch などが ad-hoc に作られており、本番コードではないため
+    # CI Ruff から除外する。本番コードは `scripts/fabric_data_overhaul/warmup_v2.py` のみ。
+    "scripts/fabric_data_overhaul/v2_artifacts",
+    "scripts/fabric_data_overhaul/notebooks",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
