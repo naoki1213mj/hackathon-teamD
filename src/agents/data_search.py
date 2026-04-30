@@ -799,7 +799,7 @@ def _get_sales_data_from_fabric(
         "destination_region",
         "departure_date",
         "total_revenue_jpy",
-        "pax_count",
+        "pax",
     }.issubset(table_columns)
     is_ws3iq_schema = (not is_v2_schema) and {
         "travel_destination",
@@ -846,7 +846,8 @@ def _get_sales_data_from_fabric(
 
     if is_v2_schema:
         # Phase 9 v2 schema: lh_travel_marketing_v2.dbo.booking
-        # 列: destination_region / departure_date / total_revenue_jpy / pax_count / customer_id
+        # 列: destination_region / destination_country / departure_date / season /
+        #     total_revenue_jpy / pax / product_type / customer_id
         query = f"""
             SELECT
                 CONCAT(destination_region, ' ', COALESCE(product_type, '')) AS plan_name,
@@ -858,7 +859,7 @@ def _get_sales_data_from_fabric(
                     ELSE 'winter'
                 END AS season,
                 SUM(CAST(total_revenue_jpy AS BIGINT)) AS revenue,
-                SUM(CAST(pax_count AS INT)) AS pax,
+                SUM(CAST(pax AS INT)) AS pax,
                 MIN(COALESCE(product_type, '')) AS customer_segment,
                 COUNT(*) AS booking_count
             FROM {sales_table}
@@ -940,7 +941,7 @@ def _get_reviews_from_fabric(
     """
     reviews_table = _fabric_table_name("fabric_reviews_table", "customer_reviews")
     table_columns = _fabric_table_columns(reviews_table)
-    is_v2_schema = {"rating", "comment_text"}.issubset(table_columns) and (
+    is_v2_schema = {"rating", "comment"}.issubset(table_columns) and (
         "destination_region" in table_columns or "booking_id" in table_columns
     )
     is_ws3iq_schema = (not is_v2_schema) and {"travel_destination", "rating", "comments"}.issubset(table_columns)
@@ -966,12 +967,13 @@ def _get_reviews_from_fabric(
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
     if is_v2_schema:
-        # Phase 9 v2 schema: lh_travel_marketing_v2.dbo.review
+        # Phase 9 v2 schema: lh_travel_marketing_v2.dbo.tour_review
+        # 列: rating / comment / destination_region / plan_name / review_date / booking_id
         query = f"""
             SELECT
-                COALESCE(destination_region, '旅行プラン') AS plan_name,
+                COALESCE(plan_name, destination_region, '旅行プラン') AS plan_name,
                 rating AS rating,
-                comment_text AS comment
+                comment AS comment
             FROM {reviews_table}
             {where_sql}
             ORDER BY review_date DESC
