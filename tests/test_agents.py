@@ -723,6 +723,123 @@ class TestDataSearchTools:
         assert "Fabric SQL 補強" in evidence_titles
         assert 0.85 not in evidence_relevances
 
+    def test_low_confidence_detected_for_nl2ontology_internal_error(self):
+        """ライブ環境 (2026-04-30 05:33 UTC, conv f94774cc) で観測された
+        NL2Ontology / InternalError の英語インフラエラー文面を低信頼として扱う。
+
+        以前のリリースでは英語の Data Agent インフラ層エラー
+        ("Failed to generate query", "NL2Ontology", '"code":"InternalError"')
+        が STRONG パターンに含まれておらず、Fabric Data Agent 回答カードとして
+        relevance=0.85 で UI に出てしまっていた。Fabric SQL 補強カードに
+        置き換わるよう、これらは低信頼判定する必要がある。
+        """
+        import src.agents.data_search as ds
+
+        nl2ontology_failure = (
+            "Failed to generate query. The error was: Failed to generate "
+            'NL2Ontology query with error "{"code":"InternalError",'
+            '"subCode":0,"message":"An internal error has occurred."}"'
+        )
+
+        # Wrap 後に観測された文面 (prefix + body) が低信頼判定されることも検証する。
+        wrapped_failure = (
+            "Fabric Data Agent の最終回答が十分な実数を含まなかったため、"
+            "Data Agent の実行結果を根拠として返します。\n"
+            f"{nl2ontology_failure}"
+        )
+
+        assert ds._is_low_confidence_data_agent_answer(nl2ontology_failure) is True
+        assert ds._is_low_confidence_data_agent_answer(wrapped_failure) is True
+
+    def test_low_confidence_detected_for_internal_workings_soft_apology(self):
+        """2026-05-01 condition matrix で観測された
+        「内部の仕組み上エラー」系のソフト謝罪文面を低信頼として扱う。
+
+        例 (春のパリ):
+            "「春のパリの売上」について、システムで集計を試みましたが、
+             旅行先別・月別の条件で集計するときに内部の仕組み上エラーが発生しました。"
+
+        これは取得不能を曖昧に伝える文面で、具体的な売上指標を含まない。
+        Fabric SQL 補強カードに置き換わるよう低信頼判定する必要がある。
+        """
+        import src.agents.data_search as ds
+
+        soft_apology = (
+            "「春のパリの売上」について、システムで集計を試みましたが、"
+            "旅行先別・月別の条件で集計するときに内部の仕組み上エラーが発生しました。\n"
+            "現時点では「パリ」の春（3月・4月・5月）について売上サマリー指標を"
+            "直接取得できませんでした。"
+        )
+        assert ds._is_low_confidence_data_agent_answer(soft_apology) is True
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_replaces_nl2ontology_error_with_sql_supplement(
+        self, monkeypatch
+    ):
+        """ライブ環境で観測された NL2Ontology / InternalError 文面を含む Data Agent 回答が、
+        0.85 信頼の Fabric Data Agent 回答カードではなく Fabric SQL 補強カード (relevance=0.9)
+        に置き換わることを検証する。"""
+        import src.agents.data_search as ds
+
+        nl2ontology_failure = (
+            "Failed to generate query. The error was: Failed to generate "
+            'NL2Ontology query with error "{"code":"InternalError",'
+            '"subCode":0,"message":"An internal error has occurred."}"'
+        )
+
+        async def fake_data_agent(question: str) -> str:
+            return nl2ontology_failure
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(
+            ds,
+            "_get_sales_data_from_fabric",
+            lambda **_kwargs: [
+                {
+                    "plan_name": "ハワイ 4泊5日",
+                    "destination": "ハワイ",
+                    "season": "summer",
+                    "revenue": 5892000,
+                    "pax": 12,
+                    "customer_segment": "20代",
+                    "booking_count": 4,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            ds,
+            "_get_reviews_from_fabric",
+            lambda **_kwargs: [{"plan_name": "ハワイ", "rating": 5, "comment": "ビーチが最高でした"}],
+        )
+
+        events: list = []
+        with tool_event_context(events.append, agent_name="data-search-agent", step=1):
+            result = await ds.query_data_agent(
+                "夏のハワイ学生向けの売上、予約数、旅行者数を Fabric Data Agent で分析して。"
+            )
+
+        parsed = json.loads(result)
+        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert "ハワイ 4泊5日" in parsed["answer"]
+
+        evidence_titles: list[str] = []
+        evidence_relevances: list[float] = []
+        evidence_quotes: list[str] = []
+        for event in events:
+            for ev in event.get("evidence", []) or []:
+                evidence_titles.append(ev.get("title", ""))
+                evidence_quotes.append(str(ev.get("quote", "")))
+                relevance = ev.get("relevance")
+                if isinstance(relevance, (int, float)):
+                    evidence_relevances.append(float(relevance))
+        assert "Fabric Data Agent 回答" not in evidence_titles
+        assert "Fabric SQL 補強" in evidence_titles
+        assert 0.85 not in evidence_relevances
+        # NL2Ontology の生エラー文面が evidence card に漏れていないことを確認する。
+        assert not any("NL2Ontology" in quote for quote in evidence_quotes)
+        assert not any("Failed to generate" in quote for quote in evidence_quotes)
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""

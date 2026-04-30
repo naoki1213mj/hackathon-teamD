@@ -130,6 +130,33 @@ _STRONG_DATA_AGENT_FAILURE_PATTERNS = (
     "具体的な分析結果は取得できません",
     "具体的な分析結果は取得できませんでした",
     "詳細な数値やランキング",
+    # 2026-05-01 condition matrix で観測された新しいソフト謝罪文言。
+    # 例 (春のパリ): "システムで集計を試みましたが、…内部の仕組み上エラーが発生しました。"
+    "内部の仕組み上エラー",
+    "内部の仕組みでエラー",
+    "内部の仕組み上の制約",
+    "システムの内部仕組み",
+    "システムの仕様上の制約",
+)
+# Fabric Data Agent インフラ層 (NL2Ontology / NL2SQL / Fabric backend) が返す
+# 英語の内部エラーフレーズ。これらは正規化済み (lower-case) 文字列に対して照合する。
+# Live demo (2026-04-30 05:33 UTC, conv f94774cc) で観測された例:
+#   "Failed to generate query. The error was: Failed to generate NL2Ontology query
+#    with error \"{\"code\":\"InternalError\",\"subCode\":0,\"message\":\"An internal error...\"}\""
+# これらが evidence card の quote として 0.85 信頼で出てしまっていたため、
+# 早い段階で低信頼判定して Fabric SQL 補強カードに置き換える。
+_STRONG_DATA_AGENT_FAILURE_PATTERNS_EN = (
+    "failed to generate query",
+    "failed to generate nl2ontology",
+    "failed to generate nl2sql",
+    "nl2ontology query",
+    "nl2sql query",
+    "internalerror",
+    "an internal error occurred",
+    "an internal error has occurred",
+    "an internal error...",
+    '"code":"internalerror"',
+    "subcode",
 )
 _MISSING_SALES_DATA_AGENT_PATTERNS = (
     "売上実績",
@@ -172,6 +199,10 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     # 失敗を明示する強いフレーズが含まれている場合は、ターゲット説明用の数値（例: 「20代」「2人以上」）に
     # 引きずられて成功扱いにならないよう、この時点で低信頼と判定する。
     if any(pattern in answer for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS):
+        return True
+    # Fabric Data Agent NL2Ontology / NL2SQL / 内部エラーは英語で返ってくるため、
+    # 正規化済み (lower-case) 文字列に対して別途照合する。
+    if any(pattern in normalized for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS_EN):
         return True
     has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|人|★|/5)", answer))
     has_sales_metric = bool(re.search(r"\d[\d,]*(?:\s*)円", answer)) and bool(
