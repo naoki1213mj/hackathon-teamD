@@ -3643,7 +3643,7 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
         for event in [event async for event in chat_module._post_approval_events("承認", "conv-video-timeout")]
     ]
 
-    assert poll_waits == [420]
+    assert poll_waits == [600]
     assert (
         "text",
             {

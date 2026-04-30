@@ -2,30 +2,59 @@
 
 import logging
 import os
-import time
-import uuid
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+import sys
+import time  # noqa: E402  - re-imported below after logging bootstrap
+import uuid  # noqa: E402  - re-imported below after logging bootstrap
+from collections.abc import AsyncGenerator  # noqa: E402  - re-imported below after logging bootstrap
+from contextlib import asynccontextmanager  # noqa: E402  - re-imported below after logging bootstrap
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.api.capabilities import router as capabilities_router
-from src.api.chat import limiter
-from src.api.chat import router as chat_router
-from src.api.conversations import router as conversations_router
-from src.api.evaluate import router as evaluate_router
-from src.api.health import router as health_router
-from src.api.sources import router as sources_router
-from src.api.voice import router as voice_router
-from src.config import get_settings
-from src.foundry_tracing import get_app_insights_association_status
+def _ensure_stdout_logging() -> None:
+    """stdout に StreamHandler を attach し、video_gen 等のアプリログを Container ログ・App Insights に流す。
+
+    azure-monitor-opentelemetry は logging handler を後から attach するが、stdout への
+    StreamHandler は誰もインストールしない。`logging.basicConfig` を `force=False` で呼ぶことで、
+    uvicorn 等の既存ハンドラーが既に登録されている環境では no-op、未設定環境では INFO 以上を
+    stdout に流すようにする。ログレベルは LOG_LEVEL 環境変数で上書きできる。
+    """
+    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(
+            level=level,
+            stream=sys.stdout,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    elif root.level == logging.NOTSET or root.level > level:
+        root.setLevel(level)
+    for module_name in ("src", "src.agents", "src.agents.video_gen", "src.api", "src.api.chat"):
+        module_logger = logging.getLogger(module_name)
+        if module_logger.level == logging.NOTSET or module_logger.level > level:
+            module_logger.setLevel(level)
+
+
+_ensure_stdout_logging()
+
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from slowapi import _rate_limit_exceeded_handler  # noqa: E402
+from slowapi.errors import RateLimitExceeded  # noqa: E402
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
+
+from src.api.capabilities import router as capabilities_router  # noqa: E402
+from src.api.chat import limiter  # noqa: E402
+from src.api.chat import router as chat_router  # noqa: E402
+from src.api.conversations import router as conversations_router  # noqa: E402
+from src.api.evaluate import router as evaluate_router  # noqa: E402
+from src.api.health import router as health_router  # noqa: E402
+from src.api.sources import router as sources_router  # noqa: E402
+from src.api.voice import router as voice_router  # noqa: E402
+from src.config import get_settings  # noqa: E402
+from src.foundry_tracing import get_app_insights_association_status  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

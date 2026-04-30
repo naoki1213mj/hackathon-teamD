@@ -136,8 +136,8 @@ _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
 _BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
 _USER_MESSAGES_METADATA_KEY = "user_messages"
 _PIPELINE_TOTAL_STEPS = 5
-_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS = 75
-_VIDEO_POLL_MAX_WAIT_SECONDS = 420
+_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS = 180
+_VIDEO_POLL_MAX_WAIT_SECONDS = 600
 _VIDEO_BACKGROUND_PENDING_MESSAGE = "販促動画をバックグラウンドで生成しています。動画タブは完了後に自動更新されます。"
 _VIDEO_SUBMISSION_TIMEOUT_MESSAGE = (
     "⚠️ 動画生成ジョブの送信がタイムアウトしました。企画書とブローシャは完了しています。"
@@ -342,6 +342,9 @@ class PostCompletionUpdateContext(TypedDict):
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
+# クライアント切断後も残す必要があるバックグラウンドタスクの参照保持。GC で先に消えないよう
+# strong reference を保持し、完了時に discard する。
+_BACKGROUND_TASK_REGISTRY: set[asyncio.Task] = set()
 _TOOL_EVENT_HINTS: dict[str, list[str]] = {
     "data-search-agent": ["query_data_agent", "search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
@@ -1183,6 +1186,13 @@ async def _apply_work_iq_result_to_session(
 
     work_iq_session.pop("brief_summary", None)
     work_iq_session.pop("brief_source_metadata", None)
+    # 空 summary は brief_status の値に関わらず "unavailable" に正規化する。
+    # graph_prefetch / foundry_tool 双方で "completed" + 空 brief という不整合が
+    # 観測されており、UI では Work IQ 利用済みのように見えて要約が空になる問題があった。
+    if brief_status in ("completed", "succeeded", "success", ""):
+        work_iq_session["status"] = "unavailable"
+        work_iq_session["warning_code"] = warning_code or "empty_result"
+        return
     work_iq_session["status"] = brief_status
     if warning_code:
         work_iq_session["warning_code"] = warning_code
@@ -1488,11 +1498,15 @@ def _build_approval_request_data(
 
 
 def _extract_manager_approval_token(request: Request, body_token: str | None = None) -> str:
-    """body / header / query から manager approval token を抽出する。"""
+    """body / header から manager approval token を抽出する。
+
+    クエリ文字列 (`?token=...`) からの受け取りは、Application Insights の
+    リクエストログ・referer ヘッダー・ブラウザ履歴に平文 token が漏洩するリスクが
+    あるため受け入れない (SEC-H4)。
+    """
     return (
         _sanitize_optional_text(body_token)
         or _sanitize_optional_text(request.headers.get("x-manager-approval-token"))
-        or _sanitize_optional_text(request.query_params.get("token"))
     )
 
 
@@ -3108,7 +3122,8 @@ async def _execute_agent(
                 exc,
             )
             await asyncio.sleep(delay_seconds)
-            delay_seconds = delay_seconds * 2 + random.uniform(0, delay_seconds * 0.3)
+            # 連続失敗時の待ち時間爆発を防ぐため上限を 30 秒に制限
+            delay_seconds = min(delay_seconds * 2 + random.uniform(0, delay_seconds * 0.3), 30.0)
 
     result_text = _extract_result_text(result)
     token_usage = _extract_token_usage(result)
@@ -5488,6 +5503,59 @@ async def approve(
     async def approval_event_generator():
         collected_events: list[dict] = []
         start = time.monotonic()
+        existing_conversation: dict | None = None
+
+        async def _persist_and_register_background_jobs() -> None:
+            """承認後の保存とバックグラウンドジョブ登録を行う。
+
+            SSE 切断 (GeneratorExit) でも確実に走るよう finally から呼ばれる。
+            video poll などの post-completion 更新は asyncio.create_task で
+            起動して、StreamingResponse のライフサイクルから独立させる。
+            """
+            try:
+                previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
+                merged_messages = [*previous_messages, *collected_events]
+                conversation_status = _conversation_status_from_events(merged_messages)
+                user_messages = _append_user_message_history(
+                    existing_conversation,
+                    None if is_approved else body.response,
+                )
+                await save_conversation(
+                    conversation_id=thread_id,
+                    user_input=existing_conversation.get("input", body.response)
+                    if existing_conversation
+                    else body.response,
+                    events=merged_messages,
+                    metrics=replace_conversation_metadata(
+                        _build_conversation_metadata_for_save(
+                            thread_id,
+                            existing_conversation,
+                            conversation_status,
+                            background_updates_pending=bool(background_update_jobs),
+                            user_messages=user_messages,
+                            owner_id=caller_identity["user_id"],
+                        )
+                    ),
+                    status=conversation_status,
+                    owner_id=caller_identity["user_id"],
+                )
+                _schedule_pipeline_monitoring(
+                    background_tasks,
+                    conversation_id=thread_id,
+                    collected_events=collected_events,
+                    conversation_status=conversation_status,
+                )
+            except (ValueError, OSError) as exc:
+                logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
+            except (RuntimeError, TypeError):
+                logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
+
+            # クライアント切断時にも生き残るよう、StreamingResponse の BackgroundTasks ではなく
+            # asyncio.create_task で post-completion 更新を起動する。
+            for update_job in background_update_jobs:
+                task = asyncio.create_task(_append_post_completion_updates_safe(thread_id, update_job))
+                _BACKGROUND_TASK_REGISTRY.add(task)
+                task.add_done_callback(_BACKGROUND_TASK_REGISTRY.discard)
 
         if not shield_result.is_safe:
             yield format_sse(
@@ -5501,76 +5569,39 @@ async def approve(
                 _record_sse_event(collected_events, event, start)
                 yield event
 
-        existing_conversation = await get_conversation(thread_id, owner_id=caller_identity["user_id"])
-        base_url = _build_public_base_url(request)
-        if is_approved:
-            async for event in _collect_and_yield(
-                _post_approval_events(
-                    body.response,
-                    thread_id,
-                    base_url,
-                    owner_id=caller_identity["user_id"],
-                    register_background_job=_register_background_job,
-                )
-            ):
-                yield event
-        else:
-            work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
-            contextual_response = await build_contextual_chat_input(
-                owner_id=caller_identity["user_id"],
-                conversation_id=thread_id,
-                user_input=body.response,
-            )
-            async for event in _collect_and_yield(
-                _refine_events(
-                    contextual_response,
-                    thread_id,
-                    owner_id=caller_identity["user_id"],
-                    work_iq_access_token=work_iq_access_token,
-                )
-            ):
-                yield event
-
         try:
-            previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
-            merged_messages = [*previous_messages, *collected_events]
-            conversation_status = _conversation_status_from_events(merged_messages)
-            user_messages = _append_user_message_history(
-                existing_conversation,
-                None if is_approved else body.response,
-            )
-            await save_conversation(
-                conversation_id=thread_id,
-                user_input=existing_conversation.get("input", body.response)
-                if existing_conversation
-                else body.response,
-                events=merged_messages,
-                metrics=replace_conversation_metadata(
-                    _build_conversation_metadata_for_save(
+            existing_conversation = await get_conversation(thread_id, owner_id=caller_identity["user_id"])
+            base_url = _build_public_base_url(request)
+            if is_approved:
+                async for event in _collect_and_yield(
+                    _post_approval_events(
+                        body.response,
                         thread_id,
-                        existing_conversation,
-                        conversation_status,
-                        background_updates_pending=bool(background_update_jobs),
-                        user_messages=user_messages,
+                        base_url,
                         owner_id=caller_identity["user_id"],
+                        register_background_job=_register_background_job,
                     )
-                ),
-                status=conversation_status,
-                owner_id=caller_identity["user_id"],
-            )
-            _schedule_pipeline_monitoring(
-                background_tasks,
-                conversation_id=thread_id,
-                collected_events=collected_events,
-                conversation_status=conversation_status,
-            )
-        except (ValueError, OSError) as exc:
-            logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
-        except (RuntimeError, TypeError):
-            logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
-
-        for update_job in background_update_jobs:
-            background_tasks.add_task(_append_post_completion_updates_safe, thread_id, update_job)
+                ):
+                    yield event
+            else:
+                work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
+                contextual_response = await build_contextual_chat_input(
+                    owner_id=caller_identity["user_id"],
+                    conversation_id=thread_id,
+                    user_input=body.response,
+                )
+                async for event in _collect_and_yield(
+                    _refine_events(
+                        contextual_response,
+                        thread_id,
+                        owner_id=caller_identity["user_id"],
+                        work_iq_access_token=work_iq_access_token,
+                    )
+                ):
+                    yield event
+        finally:
+            # クライアント切断 (GeneratorExit) や例外でも保存・バックグラウンド登録を必ず実施
+            await _persist_and_register_background_jobs()
 
     return StreamingResponse(
         approval_event_generator(),

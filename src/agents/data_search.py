@@ -549,17 +549,22 @@ async def _query_data_agent(question: str) -> str | None:
         )
 
         # スレッド作成 → メッセージ送信 → 実行 → 結果取得
-        assistant = client.beta.assistants.create(model="not used")
-        thread = client.beta.threads.create()
+        # openai SDK は同期クライアントなので asyncio.to_thread で event loop ブロックを避ける
+        import asyncio as _asyncio
+
+        assistant = await _asyncio.to_thread(client.beta.assistants.create, model="not used")
+        thread = await _asyncio.to_thread(client.beta.threads.create)
         question_payload = (
             _build_data_agent_question_v2(question) if version == "v2" else _build_data_agent_question(question)
         )
-        client.beta.threads.messages.create(
+        await _asyncio.to_thread(
+            client.beta.threads.messages.create,
             thread_id=thread.id,
             role="user",
             content=question_payload,
         )
-        run = client.beta.threads.runs.create(
+        run = await _asyncio.to_thread(
+            client.beta.threads.runs.create,
             thread_id=thread.id,
             assistant_id=assistant.id,
         )
@@ -576,21 +581,25 @@ async def _query_data_agent(question: str) -> str | None:
             if _time.time() - start > _DATA_AGENT_POLL_TIMEOUT_SECONDS:
                 logger.warning("Fabric Data Agent: ポーリングタイムアウト (status=%s)", run.status)
                 break
-            run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-            await __import__("asyncio").sleep(2)
+            run = await _asyncio.to_thread(
+                client.beta.threads.runs.retrieve,
+                thread_id=thread.id,
+                run_id=run.id,
+            )
+            await _asyncio.sleep(2)
 
         if run.status != "completed":
             last_error = getattr(run, "last_error", None)
             logger.warning("Fabric Data Agent: run 失敗 (status=%s, last_error=%s)", run.status, last_error)
             # クリーンアップ
             try:
-                client.beta.threads.delete(thread.id)
+                await _asyncio.to_thread(client.beta.threads.delete, thread.id)
             except (ValueError, OSError):
                 pass
             return None
 
         # 応答メッセージ取得（assistant メッセージごとに分割して保持）
-        messages = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+        messages = await _asyncio.to_thread(client.beta.threads.messages.list, thread_id=thread.id, order="asc")
         assistant_messages: list[str] = []
         for msg in messages:
             if msg.role == "assistant":
@@ -603,14 +612,19 @@ async def _query_data_agent(question: str) -> str | None:
                     assistant_messages.append(joined)
         tool_outputs: list[str] = []
         try:
-            steps = client.beta.threads.runs.steps.list(thread_id=thread.id, run_id=run.id, order="asc")
+            steps = await _asyncio.to_thread(
+                client.beta.threads.runs.steps.list,
+                thread_id=thread.id,
+                run_id=run.id,
+                order="asc",
+            )
             tool_outputs = _extract_data_agent_tool_outputs(steps)
         except (AttributeError, ValueError, OSError) as exc:
             logger.warning("Fabric Data Agent: run steps 取得失敗: %s", exc)
 
         # クリーンアップ
         try:
-            client.beta.threads.delete(thread.id)
+            await _asyncio.to_thread(client.beta.threads.delete, thread.id)
         except (ValueError, OSError):
             pass
 

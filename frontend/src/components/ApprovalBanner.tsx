@@ -16,10 +16,19 @@ interface ApprovalBannerProps {
 export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, t }: ApprovalBannerProps) {
   const [mode, setMode] = useState<'action' | 'revise'>('action')
   const [revision, setRevision] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const displayPrompt = request.prompt.trim() && !/承認|修正|approve|revise/i.test(request.prompt)
     ? request.prompt
     : t('approval.message')
   const shouldShowDiff = Boolean(request.plan_markdown && previousPlanMarkdown.trim())
+
+  const handleApprove = (response: string) => {
+    if (submitting) return
+    // approval を送信したら即座に親が SSE を再開し、ApprovalBanner がアンマウントされる想定。
+    // submitting=true のまま保持し、ボタンを完全に無効化する（連打 / リプレイ攻撃防止）。
+    setSubmitting(true)
+    onApprove(response)
+  }
 
   return (
     <div className="sticky bottom-0 z-30 mx-0 mt-2 rounded-2xl border border-[var(--warning-border)] bg-[var(--warning-surface)] px-6 py-5 shadow-[var(--warning-shadow)] ring-1 ring-[var(--warning-border)] backdrop-blur-lg">
@@ -55,15 +64,17 @@ export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, 
           <button
             type="button"
             onClick={() => setMode('revise')}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--warning-border)] bg-[var(--panel-bg)] px-4 py-2 text-sm font-semibold text-[var(--warning-text)] transition-colors hover:bg-[var(--surface)]"
+            disabled={submitting}
+            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[var(--warning-border)] bg-[var(--panel-bg)] px-4 py-2 text-sm font-semibold text-[var(--warning-text)] transition-colors hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
             autoFocus
           >
             <Pencil className="h-3.5 w-3.5" /> {t('approval.revise')}
           </button>
           <button
             type="button"
-            onClick={() => onApprove(t('approval.approve'))}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--approval-approve-bg)] px-6 py-2 text-sm font-semibold text-[var(--approval-approve-text)] shadow-lg shadow-[var(--approval-approve-shadow)] ring-2 ring-[var(--approval-approve-ring)] ring-offset-2 ring-offset-[var(--warning-surface)] transition-all hover:bg-[var(--approval-approve-hover)]"
+            onClick={() => handleApprove(t('approval.approve'))}
+            disabled={submitting}
+            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-[var(--approval-approve-bg)] px-6 py-2 text-sm font-semibold text-[var(--approval-approve-text)] shadow-lg shadow-[var(--approval-approve-shadow)] ring-2 ring-[var(--approval-approve-ring)] ring-offset-2 ring-offset-[var(--warning-surface)] transition-all hover:bg-[var(--approval-approve-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Check className="h-4 w-4" /> {t('approval.approve')}
           </button>
@@ -74,18 +85,19 @@ export function ApprovalBanner({ request, previousPlanMarkdown = '', onApprove, 
             value={revision}
             onChange={e => setRevision(e.target.value)}
             placeholder={t('approval.prompt')}
-            className="w-full rounded-xl border border-[var(--warning-border)] bg-[var(--panel-bg)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--warning-border)]"
+            disabled={submitting}
+            className="w-full rounded-xl border border-[var(--warning-border)] bg-[var(--panel-bg)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--warning-border)] disabled:cursor-not-allowed disabled:opacity-50"
             rows={3}
             autoFocus
           />
           <div className="flex gap-2">
-            <button type="button" onClick={() => setMode('action')} className="rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)]">
+            <button type="button" onClick={() => setMode('action')} disabled={submitting} className="rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] disabled:cursor-not-allowed disabled:opacity-50">
               {t('approval.back')}
             </button>
             <button
               type="button"
-              onClick={() => { onApprove(revision.trim()); setRevision(''); setMode('action') }}
-              disabled={!revision.trim()}
+              onClick={() => { handleApprove(revision.trim()); setRevision(''); setMode('action') }}
+              disabled={submitting || !revision.trim()}
               className="rounded-full bg-[var(--warning-action-bg)] px-5 py-2 text-sm font-medium text-[var(--warning-action-text)] transition-colors hover:bg-[var(--warning-action-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('input.send')}

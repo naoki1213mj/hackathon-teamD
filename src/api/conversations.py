@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.api.chat import limiter
 from src.conversations import get_conversation, get_replay_data, list_conversations
 from src.request_identity import RequestIdentityError, extract_request_identity
 from src.work_iq_session import (
@@ -95,6 +96,7 @@ def _identity_error_response(exc: RequestIdentityError) -> JSONResponse:
 
 
 @router.get("/conversations")
+@limiter.limit("60/minute")
 async def conversations_list(request: Request, limit: int = 20) -> Response:
     """会話一覧を取得する。"""
     try:
@@ -118,6 +120,7 @@ async def conversations_list(request: Request, limit: int = 20) -> Response:
 
 
 @router.get("/conversations/{conversation_id}")
+@limiter.limit("120/minute")
 async def conversation_detail(conversation_id: str, request: Request) -> Response:
     """会話詳細を取得する。"""
     try:
@@ -142,6 +145,7 @@ async def conversation_detail(conversation_id: str, request: Request) -> Respons
 
 
 @router.get("/replay/{conversation_id}")
+@limiter.limit("10/minute")
 async def replay(request: Request, conversation_id: str, speed: float = Query(5.0, gt=0.0)) -> StreamingResponse:
     """録画済み SSE イベントを高速リプレイする。
 

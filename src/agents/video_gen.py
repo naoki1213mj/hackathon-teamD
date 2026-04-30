@@ -432,8 +432,20 @@ async def generate_promo_video(
                 method="PUT",
             )
 
-            with urllib.request.urlopen(request, timeout=30) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
+            def _put_request() -> dict:
+                """同期 urllib 呼び出しを wrapper 関数に閉じ込めて asyncio.to_thread 可能にする。"""
+                with urllib.request.urlopen(request, timeout=30) as resp:  # noqa: S310 - URL は社内設定の Speech endpoint のみ
+                    return json.loads(resp.read().decode("utf-8"))
+
+            logger.info(
+                "Photo Avatar: バッチ合成 PUT 開始 job_id=%s endpoint=%s",
+                job_id,
+                speech_endpoint,
+            )
+            # urllib は同期 I/O のため async 関数内では event loop をブロックする。
+            # asyncio.to_thread で別スレッドに切り出して並行実行性を維持する。
+            result = await asyncio.to_thread(_put_request)
+            logger.info("Photo Avatar: バッチ合成 PUT 成功 job_id=%s", result.get("id", job_id))
 
             # Side-channel にジョブ情報を保存（スレッドセーフ）
             actual_job_id = result.get("id", job_id)
