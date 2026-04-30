@@ -170,7 +170,12 @@ _DATA_AGENT_RESULT_TOOL_NAMES = {
     "trace.analyze_ontology",
     "analyze.database.execute",
 }
-_DATA_AGENT_POLL_TIMEOUT_SECONDS = 150
+# Fabric Data Agent v2 (Travel_Ontology_DA_v2) は ontology + nl2code + execute の
+# 多段ツール呼び出しで 180-220 秒かかることがある。150 秒だと "年別の売上トレンド"
+# のようなクロス集計プロンプトが in_progress のまま打ち切られ、SQL fallback に逃げて
+# しまう (2026-04-30 live probe で U1=198s, P11=144s)。240 秒まで広げて、デモで
+# よくある時系列・複合集計プロンプトを Data Agent 経由で完走させる。
+_DATA_AGENT_POLL_TIMEOUT_SECONDS = 240
 _KNOWN_DESTINATIONS = (
     "沖縄",
     "北海道",
