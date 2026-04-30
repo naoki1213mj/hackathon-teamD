@@ -197,6 +197,22 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     return has_weak_phrase and not has_specific_metric
 
 
+def _select_data_agent_answer(assistant_messages: list[str]) -> str:
+    """assistant が複数メッセージを emit した場合に最終回答を選ぶ。
+
+    Data Agent は self-retry の過程で「技術的なエラーが発生したので分解します」のような
+    中間ステータスメッセージを途中で出すことがある。全メッセージを単純結合すると、
+    最終メッセージが成功（具体数値あり）でも強い失敗フレーズで低信頼判定される。
+    最終メッセージが高信頼ならそれを単独で返し、そうでなければ全結合を返す。
+    """
+    if not assistant_messages:
+        return ""
+    final_answer = assistant_messages[-1].strip()
+    if final_answer and not _is_low_confidence_data_agent_answer(final_answer):
+        return final_answer
+    return "\n".join(assistant_messages).strip()
+
+
 def _resolve_fabric_data_agent_runtime() -> str:
     """Fabric Data Agent REST を使うか、安定した SQL 経路を優先するかを返す。"""
     raw = str(get_settings().get("fabric_data_agent_runtime", "") or "").strip().lower()
@@ -489,14 +505,18 @@ async def _query_data_agent(question: str) -> str | None:
                 pass
             return None
 
-        # 応答メッセージ取得
+        # 応答メッセージ取得（assistant メッセージごとに分割して保持）
         messages = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
-        answer_parts: list[str] = []
+        assistant_messages: list[str] = []
         for msg in messages:
             if msg.role == "assistant":
+                msg_text_parts: list[str] = []
                 for content in msg.content:
                     if hasattr(content, "text"):
-                        answer_parts.append(content.text.value)
+                        msg_text_parts.append(content.text.value)
+                joined = "\n".join(msg_text_parts).strip()
+                if joined:
+                    assistant_messages.append(joined)
         tool_outputs: list[str] = []
         try:
             steps = client.beta.threads.runs.steps.list(thread_id=thread.id, run_id=run.id, order="asc")
@@ -510,7 +530,11 @@ async def _query_data_agent(question: str) -> str | None:
         except (ValueError, OSError):
             pass
 
-        answer = "\n".join(answer_parts).strip()
+        # 複数の assistant メッセージがある場合は最終メッセージを優先する。
+        # Data Agent は self-retry の過程で「技術的なエラーが発生したので分解します」のような
+        # 中間ステータスメッセージを出すことがあるため、全結合すると最終回答が成功でも
+        # 強い失敗フレーズで低信頼判定されてしまう。最終メッセージが高信頼ならそれを採用する。
+        answer = _select_data_agent_answer(assistant_messages)
         if answer and tool_outputs and _is_low_confidence_data_agent_answer(answer):
             tool_answer = "\n\n".join(tool_outputs)
             if not _is_low_confidence_data_agent_answer(tool_answer):

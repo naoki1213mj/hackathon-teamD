@@ -435,6 +435,48 @@ class TestDataSearchTools:
         assert ds._is_low_confidence_data_agent_answer(placeholder_table_answer) is True
         assert ds._is_low_confidence_data_agent_answer(concrete_answer) is False
 
+    def test_select_data_agent_answer_prefers_high_confidence_final_message(self):
+        """assistant が複数メッセージを出したときに最終メッセージが成功なら採用する。
+
+        Data Agent は self-retry のとき「技術的なエラーが発生したので分解します」のような
+        中間ステータスメッセージを emit する。全結合すると最終回答が具体数値を含んでいても
+        強い失敗フレーズで低信頼扱いされるので、最終メッセージが高信頼なら単独で返す。
+        """
+        import src.agents.data_search as ds
+
+        interim = "技術的なエラーにより一部取得できませんでしたので、質問を分解して再集計します。少々お待ちください。"
+        final = "結論: 沖縄全体の合計売上は 13,664,000 円、予約件数は 68 件、旅行者数は 203 人でした。"
+
+        result = ds._select_data_agent_answer([interim, final])
+
+        assert result == final
+        assert "技術的なエラー" not in result
+
+    def test_select_data_agent_answer_falls_back_to_concat_when_final_low_confidence(self):
+        """最終メッセージが低信頼なら全メッセージ結合した文字列を返す。"""
+        import src.agents.data_search as ds
+
+        interim = "結論: 沖縄全体の合計売上は 5,000,000 円でした。"
+        final_low = "技術的な都合で詳細データ取得ができませんでした。"
+
+        result = ds._select_data_agent_answer([interim, final_low])
+
+        assert interim in result
+        assert final_low in result
+
+    def test_select_data_agent_answer_handles_empty_list(self):
+        """assistant メッセージが空のときは空文字列を返す。"""
+        import src.agents.data_search as ds
+
+        assert ds._select_data_agent_answer([]) == ""
+
+    def test_select_data_agent_answer_single_message(self):
+        """単一メッセージはそのまま返す。"""
+        import src.agents.data_search as ds
+
+        single = "結論: 合計売上 58,166,000 円、予約 79 件、旅行者数 235 人。"
+        assert ds._select_data_agent_answer([single]) == single
+
     def test_extract_data_agent_tool_outputs_prefers_execute_results(self):
         """Data Agent run steps から実行結果 tool output を抽出する。"""
         import src.agents.data_search as ds
