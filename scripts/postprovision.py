@@ -124,11 +124,17 @@ def _is_partial_zip_deploy_success(result: subprocess.CompletedProcess[str]) -> 
     ):
         return True
 
-    return (
+    if (
         "deployment was partially successful" in combined_output
         and "deployment endpoint responded with status code 202" in combined_output
         and "flex consumption" in combined_output
         and "logs you are looking for were not found" in combined_output
+    ):
+        return True
+
+    return (
+        "deployment endpoint responded with status code 202" in combined_output
+        and "failed to retrieve deployment status" in combined_output
     )
 
 

@@ -411,6 +411,44 @@ def test_deploy_improvement_mcp_function_accepts_flex_async_zip_deploy(monkeypat
     assert build_root.exists() is False
 
 
+def test_deploy_improvement_mcp_function_accepts_async_status_timeout(monkeypatch) -> None:
+    """zip deploy が 202 受付後に CLI status 取得 timeout した場合も readiness wait に委ねる。"""
+    build_root = Path(__file__).resolve().parent / ".artifacts-postprovision-status-timeout"
+    package_path = build_root / postprovision_module._IMPROVEMENT_MCP_PACKAGE_NAME
+
+    build_root.mkdir(parents=True, exist_ok=True)
+    package_path.write_bytes(b"zip")
+
+    timeout_stderr = "\n".join(
+        [
+            "WARNING: Getting scm site credentials for zip deployment",
+            "WARNING: Starting zip deployment. This operation can take a while to complete ...",
+            'WARNING: Deployment endpoint responded with status code 202 for deployment id "2f936371"',
+            "ERROR: Failed to retrieve deployment status. Please try again in a few minutes. (40.0秒)",
+        ]
+    )
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=timeout_stderr)
+
+    monkeypatch.setattr(postprovision_module, "ensure_storage_account", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "ensure_improvement_mcp_function_app", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "ensure_improvement_mcp_managed_identity_storage", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "_build_mcp_package", lambda: package_path)
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+
+    result = postprovision_module.deploy_improvement_mcp_function(
+        resource_group="rg-dev",
+        location="eastus2",
+        function_app_name="func-mcp-abc123",
+        storage_account_name="stfnabc123",
+    )
+
+    assert result is True
+    assert build_root.exists() is False
+
+
 def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
     """setup_improvement_mcp は配備後に APIM 登録まで実行する"""
     captured: dict[str, object] = {}
