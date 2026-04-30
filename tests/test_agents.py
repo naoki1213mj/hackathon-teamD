@@ -378,6 +378,12 @@ class TestDataSearchTools:
         assert "yyyy/MM/dd" in prompt
         assert "Category は旅行カテゴリ/顧客カテゴリ/旅行タイプ" in prompt
         assert "review-only の質問では travel_review を使い" in prompt
+        assert "沖縄、ハワイ、春、夏、ファミリー、学生などが明記されているのに全エリア" in prompt
+        assert "どの条件が0件か" in prompt
+        assert "条件緩和はユーザーに再指定を求めず自動で行ってください" in prompt
+        assert "「旅行先A」「○○件」「例のフォーマットです」" in prompt
+        assert "未知の指標を聞かれた場合も、提案だけで終わらず" in prompt
+        assert "同じ旅行先を複数行に出してはいけません" in prompt
         assert "売上=SUM(Price)" in prompt
         assert "レビュー件数=COUNT(*)" in prompt
         assert "Transaction_ID で travel_sales と travel_review を結合" in prompt
@@ -400,6 +406,20 @@ class TestDataSearchTools:
         safe_unavailable_answer = "安全に算出できるデータなし。ご希望があれば条件を変更してください。"
         gql_leak_answer = '```gql\nquery { travel_sales { Travel_destination Price } }\n```'
         json_leak_answer = '{"query": "SELECT * FROM travel_sales", "status": "failed"}'
+        ignored_filter_answer = (
+            "使用条件\n- 旅行先・カテゴリ・年齢層の指定なし／全エリア・全年齢層・全カテゴリ対象\n"
+            "売上 17,000,000 円、予約数 40 件です。"
+        )
+        partial_technical_answer = (
+            "夏のハワイ旅行に関する学生層の売上・予約数・旅行者数は技術的な理由により集計できませんでした。"
+            "レビュー件数は3件、平均評価は4～5です。"
+        )
+        placeholder_table_answer = (
+            "表：旅行先別ランキング（例）\n"
+            "| 旅行先 | 売上 | 予約数 |\n"
+            "| 旅行先A | ○○○○○○ | ○○件 |\n"
+            "※上記は例のフォーマットです。"
+        )
         concrete_answer = "沖縄 2泊3日が売上上位。合計売上 1,022,000 円、予約 8 件。"
 
         assert ds._is_low_confidence_data_agent_answer(weak_answer) is True
@@ -410,6 +430,9 @@ class TestDataSearchTools:
         assert ds._is_low_confidence_data_agent_answer(safe_unavailable_answer) is True
         assert ds._is_low_confidence_data_agent_answer(gql_leak_answer) is True
         assert ds._is_low_confidence_data_agent_answer(json_leak_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(ignored_filter_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(partial_technical_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(placeholder_table_answer) is True
         assert ds._is_low_confidence_data_agent_answer(concrete_answer) is False
 
     def test_extract_data_agent_tool_outputs_prefers_execute_results(self):

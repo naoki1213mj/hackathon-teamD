@@ -62,6 +62,15 @@ _LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
     "追加提示してください",
     "必要であれば",
     "ご希望があれば",
+    "ご希望の場合",
+    "技術的な制約",
+    "技術的制約",
+    "技術的な理由",
+    "集計できません",
+    "集計不可",
+    "抽出できません",
+    "全エリア・全年齢層",
+    "旅行先・カテゴリ・年齢層の指定なし",
     "gql",
     "graphql",
     "json",
@@ -79,6 +88,9 @@ _PLACEHOLDER_DATA_AGENT_PATTERNS = (
     "xxx人",
     "xx％",
     "xx%",
+    "○○",
+    "旅行先a",
+    "例のフォーマット",
     "数値・内容例",
     "具体例です",
     "分析例",
@@ -95,7 +107,7 @@ _DATA_AGENT_RESULT_TOOL_NAMES = {
     "trace.analyze_ontology",
     "analyze.database.execute",
 }
-_DATA_AGENT_POLL_TIMEOUT_SECONDS = 90
+_DATA_AGENT_POLL_TIMEOUT_SECONDS = 150
 _KNOWN_DESTINATIONS = (
     "沖縄",
     "北海道",
@@ -132,8 +144,15 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
         or "見つかりません" in answer
         or "存在しません" in answer
         or "利用可能なデータが無い" in answer
+        or "技術的な制約" in answer
+        or "技術的制約" in answer
+        or "技術的な理由" in answer
+        or "集計できません" in answer
+        or "集計不可" in answer
     ):
         return not has_sales_metric
+    if "全エリア・全年齢層" in answer or "旅行先・カテゴリ・年齢層の指定なし" in answer:
+        return True
     has_weak_phrase = any(pattern.lower() in normalized for pattern in _LOW_CONFIDENCE_DATA_AGENT_PATTERNS)
     return has_weak_phrase and not has_specific_metric
 
@@ -154,6 +173,9 @@ def _build_data_agent_question(question: str) -> str:
         [
             "あなたは Travel Marketing AI 用の Fabric Data Agent です。旅行販売データとレビューを使い、日本語でマーケティング分析を返してください。",
             "利用できるテーブルは travel_sales(Transaction_ID, Date, Travel_destination, Category, Schedule, Price, Price_per_person, Number_of_people, Age_group) と travel_review(Transaction_ID, Travel_destination, Rating, Emotions, Comments) だけです。",
+            "最初に質問から Travel_destination、季節、顧客セグメント、カテゴリ、レビュー専用/売上専用/売上+レビューの分析種別を抽出し、抽出できた条件は必ず WHERE 条件または同等のフィルタに反映してください。沖縄、ハワイ、春、夏、ファミリー、学生などが明記されているのに全エリア・全年齢層・全カテゴリで回答してはいけません。",
+            "厳密条件で売上またはレビューが取れない場合は、勝手に全体集計へ切り替えず、1) どの条件が0件か、2) 緩和した条件、3) 緩和後の実データを明示してください。",
+            "条件緩和はユーザーに再指定を求めず自動で行ってください。例: 春+沖縄+ファミリーが0件なら、沖縄+春の全カテゴリ、沖縄+全季節+ファミリー、沖縄+全期間の順で実データを探し、取得できた近接データを表で示してください。",
             "売上、販売額、収益、予約数、取引数、人数、単価、旅行先別/カテゴリ別/年代別/季節別の分析は travel_sales を使ってください。",
             "レビュー、口コミ、評価、Rating、感情、Emotions、コメント、満足、不満、顧客の声に関する質問は travel_review を使ってください。",
             "売上とレビュー評価、カテゴリ別満足度、年代別満足度、高評価旅行先の売上など、両方が必要な質問は Transaction_ID で travel_sales と travel_review を結合してください。",
@@ -166,13 +188,16 @@ def _build_data_agent_question(question: str) -> str:
             "「学生」は Age_group が 20代、または若年グループ旅行として Number_of_people >= 2 を優先し、「若年層」は Age_group が 20代/30代、「シニア」は 50代以上として扱ってください。",
             "Travel_destination は旅行先/目的地/観光地/地域/エリア/destination の同義語として扱い、日本語/英語/大文字小文字/部分一致の表記ゆれを考慮してください。",
             "売上上位は Travel_destination と必要なら Schedule/Category で集計し、Transaction_ID 単位に分解せず、SUM(Price)、COUNT(DISTINCT Transaction_ID)、SUM(Number_of_people) を返してください。",
+            "「旅行先別」「destination別」「地域別」のランキングでは必ず Travel_destination で GROUP BY し、同じ旅行先を複数行に出してはいけません。取引単位の上位明細は、明細と明示された場合だけ返してください。",
             "レビュー評価は Travel_destination や Category で集計し、COUNT(*)、AVG(Rating)、Rating 分布、Emotions 分布、Comments の代表例を返してください。Comments に存在しない声やテーマは創作しないでください。",
             "前年同期比較は複数年の同月データがある場合だけ行い、足りない場合は利用可能な期間のトレンドや単年比較に切り替え、その制約を書いてください。",
             "厳密条件で0件または極端に少ない場合は、回答不能で終わらず、表記ゆれ、全年度の同月、関連する Category/Schedule などの順に条件を少し広げ、どの条件を広げたかを明示して近い実データを示してください。",
             "広告費、利益、原価、Web流入、天気、キャンペーン名など現在のスキーマにない項目は作らず、存在しない理由と売上/予約数/人数/レビュー評価での代替分析を提案してください。",
+            "広告費やROIなど未知の指標を聞かれた場合も、提案だけで終わらず、旅行先別の売上、予約数、旅行者数、平均単価など実在列で代替ランキングを必ず作成してください。",
             "回答は 1. 結論、2. 使用条件、3. 主要指標、4. 表またはランキング、5. 補足 の順で簡潔にまとめてください。",
             "内部の GQL、GraphQL、JSON、クエリ実行トレース、ツール呼び出し詳細は出力せず、マーケティング担当者向けの分析結果だけを出力してください。",
             "必ず実データの数値を使い、X/XX/XXX、架空の例、プレースホルダー値は絶対に使わないでください。実データがない項目は「データなし」と書いてください。",
+            "表を出す場合は実データの行だけを書いてください。「旅行先A」「○○件」「例のフォーマットです」などのテンプレート表は禁止です。",
             f"質問: {question}",
         ]
     )
@@ -452,8 +477,7 @@ async def _query_data_agent(question: str) -> str | None:
                 answer = (
                     "Fabric Data Agent の最終回答が十分な実数を含まなかったため、"
                     "Data Agent の実行結果を根拠として返します。\n"
-                    f"{tool_answer}\n\n"
-                    f"Data Agent 最終回答:\n{answer}"
+                    f"{tool_answer}"
                 )
         if answer:
             logger.info("Fabric Data Agent から回答取得: %d 文字", len(answer))
