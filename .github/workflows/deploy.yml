@@ -260,6 +260,14 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
           AZURE_CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+          # blue/green CAE migration では Container App だけリネーム (-pn) されるが、
+          # APIM / Function App / Storage は元の resource token で稼働しているため
+          # 明示的に上書きできるようにする。GH variables で値を入れるとデプロイ先
+          # を既存の APIM へ向けられる。
+          AZURE_APIM_NAME: ${{ vars.AZURE_APIM_NAME }}
+          IMPROVEMENT_MCP_FUNCTION_APP_NAME: ${{ vars.IMPROVEMENT_MCP_FUNCTION_APP_NAME }}
+          IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME: ${{ vars.IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME }}
+          IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP: ${{ vars.IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP }}
         # improvement-mcp は APIM 経由で本番アプリから参照されるため、
         # ready-to-run package 配備に失敗した場合はそのまま deploy を失敗させる。
         run: uv run --with azure-identity python scripts/deploy_improvement_mcp.py
