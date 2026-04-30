@@ -501,6 +501,94 @@ class TestDataSearchTools:
 
         assert ds._is_low_confidence_data_agent_answer(answer) is False
 
+    def test_low_confidence_detected_for_technical_error_with_descriptive_numbers(self):
+        """「技術的なエラーが発生」「具体的な分析結果は取得できません」の文面は、
+        ターゲット説明用の数値（「20代」「2人以上のグループ」など）が混在していても低信頼として扱う。
+
+        実環境では Data Agent の最終回答がこの形を取り、説明文中の「2人」が
+        `\\d[\\d,]*(?:\\s*)人` に偶然マッチして has_specific_metric=True となり、
+        SQL フォールバック経路を通らず 0.85 信頼度のカードが表示されていた。
+        """
+        import src.agents.data_search as ds
+
+        regression_answer = (
+            "分析の途中で技術的なエラーが発生し、夏のハワイ学生旅行向けの販売・レビュー詳細データ取得ができませんでした。"
+            "【現状の説明とご提案】"
+            "- 今回はデータ取得プロセスでエラーが発生したため、詳細な数値やランキング、人気ポイント・不満点などの"
+            "具体的な分析結果は取得できませんでした。"
+            "- しかしながら、「学生旅行」ターゲットの抽出や分析可能な切り口としては、年齢（20代中心）、"
+            "Number_of_people（2人以上のグループ）、夏季（6月〜8月）が候補となります。"
+        )
+
+        assert ds._is_low_confidence_data_agent_answer(regression_answer) is True
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_does_not_emit_high_confidence_card_for_technical_error(
+        self, monkeypatch
+    ):
+        """技術的エラーの最終回答が Fabric Data Agent 回答カード (relevance=0.85) として
+        表示されず、Fabric SQL 補強カードに置き換わることを検証する。"""
+        import src.agents.data_search as ds
+
+        regression_answer = (
+            "分析の途中で技術的なエラーが発生し、夏のハワイ学生旅行向けの販売・レビュー詳細データ取得ができませんでした。"
+            "【現状の説明とご提案】"
+            "- 今回はデータ取得プロセスでエラーが発生したため、詳細な数値やランキング、人気ポイント・不満点などの"
+            "具体的な分析結果は取得できませんでした。"
+            "- しかしながら、「学生旅行」ターゲットの抽出や分析可能な切り口としては、年齢（20代中心）、"
+            "Number_of_people（2人以上のグループ）、夏季（6月〜8月）が候補となります。"
+        )
+
+        async def fake_data_agent(question: str) -> str:
+            return regression_answer
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(
+            ds,
+            "_get_sales_data_from_fabric",
+            lambda **_kwargs: [
+                {
+                    "plan_name": "ハワイ 4泊5日",
+                    "destination": "ハワイ",
+                    "season": "summer",
+                    "revenue": 5892000,
+                    "pax": 12,
+                    "customer_segment": "20代",
+                    "booking_count": 4,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            ds,
+            "_get_reviews_from_fabric",
+            lambda **_kwargs: [{"plan_name": "ハワイ", "rating": 5, "comment": "ビーチが最高でした"}],
+        )
+
+        events: list = []
+        with tool_event_context(events.append, agent_name="data-search-agent", step=1):
+            result = await ds.query_data_agent(
+                "夏のハワイ学生向けに、売上・予約数・旅行者数・平均評価・代表レビューから施策の示唆を出してください。"
+            )
+
+        parsed = json.loads(result)
+        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert "ハワイ 4泊5日" in parsed["answer"]
+        assert "5,892,000 円" in parsed["answer"]
+
+        # Evidence の citation card を検証: 0.85 のカードは出さず、補強カード (0.9) に置換する。
+        evidence_titles: list[str] = []
+        evidence_relevances: list[float] = []
+        for event in events:
+            for ev in event.get("evidence", []) or []:
+                evidence_titles.append(ev.get("title", ""))
+                relevance = ev.get("relevance")
+                if isinstance(relevance, (int, float)):
+                    evidence_relevances.append(float(relevance))
+        assert "Fabric Data Agent 回答" not in evidence_titles
+        assert "Fabric SQL 補強" in evidence_titles
+        assert 0.85 not in evidence_relevances
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""

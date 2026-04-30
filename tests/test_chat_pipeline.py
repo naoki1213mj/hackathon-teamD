@@ -501,8 +501,24 @@ class TestMarketingPlanRuntimeSettings:
         assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
 
     def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
+        """env で大きすぎる timeout 値が来ても 90 秒で頭打ちにする。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 45.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+
+    def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_unparseable(self, monkeypatch) -> None:
+        """env 値が数値でない場合は安全側の既定 90 秒を返す。"""
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "not-a-number"})
+        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+
+    def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_zero_or_negative(self, monkeypatch) -> None:
+        """env 値が 0 以下なら既定 90 秒に戻す。"""
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "0"})
+        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+
+    def test_resolve_work_iq_timeout_seconds_honors_lower_value(self, monkeypatch) -> None:
+        """cap 未満の env 値は尊重する。"""
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "30"})
+        assert chat_module._resolve_work_iq_timeout_seconds() == 30.0
 
     def test_foundry_work_iq_no_longer_auto_falls_back(self) -> None:
         event = chat_module.format_sse(
@@ -792,6 +808,14 @@ async def test_execute_agent_maps_foundry_work_iq_timeout_to_unavailable(monkeyp
         and payload.get("tool") == "workiq_foundry_tool"
         and payload.get("status") == "timeout"
         and payload.get("error_code") == "WORKIQ_TIMEOUT"
+        for event_name, payload in parsed
+    )
+    # 実際の timeout 値 (例: "after 95s") を SSE に転送し、UI で原因が分かるようにする。
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "timeout"
+        and "after 95s" in str(payload.get("error_message", ""))
         for event_name, payload in parsed
     )
     assert any(

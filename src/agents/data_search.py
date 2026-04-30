@@ -55,6 +55,13 @@ _LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
     "取得できません",
     "取得できませんでした",
     "技術的な理由",
+    "技術的なエラー",
+    "エラーが発生",
+    "データ取得プロセスでエラー",
+    "詳細データ取得ができません",
+    "詳細データ取得ができませんでした",
+    "具体的な分析結果は取得できません",
+    "具体的な分析結果は取得できませんでした",
     "内部エラー",
     "問題が発生",
     "クエリを実行しましたが",
@@ -95,6 +102,19 @@ _PLACEHOLDER_DATA_AGENT_PATTERNS = (
     "具体例です",
     "分析例",
 )
+# 強い失敗表明: 説明的な数値（「20代」「2人以上のグループ」など）が混在していても、
+# 取得不能を明示する文面はそれ自体で低信頼として扱う。
+_STRONG_DATA_AGENT_FAILURE_PATTERNS = (
+    "技術的なエラー",
+    "エラーが発生し",
+    "エラーが発生したため",
+    "データ取得プロセスでエラー",
+    "詳細データ取得ができません",
+    "詳細データ取得ができませんでした",
+    "具体的な分析結果は取得できません",
+    "具体的な分析結果は取得できませんでした",
+    "詳細な数値やランキング",
+)
 _MISSING_SALES_DATA_AGENT_PATTERNS = (
     "売上実績",
     "売上上位",
@@ -132,6 +152,10 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     if re.search(r"```(?:json|gql|graphql)\b|^\s*[{[]\s*\"|query\s*[{(]", answer, re.IGNORECASE | re.MULTILINE):
         return True
     if any(pattern in normalized for pattern in _PLACEHOLDER_DATA_AGENT_PATTERNS):
+        return True
+    # 失敗を明示する強いフレーズが含まれている場合は、ターゲット説明用の数値（例: 「20代」「2人以上」）に
+    # 引きずられて成功扱いにならないよう、この時点で低信頼と判定する。
+    if any(pattern in answer for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS):
         return True
     has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|人|★|/5)", answer))
     has_sales_metric = bool(re.search(r"\d[\d,]*(?:\s*)円", answer)) and bool(
