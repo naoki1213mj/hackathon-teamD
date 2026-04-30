@@ -1,0 +1,296 @@
+{
+  "_meta": {
+    "purpose": "Aggregate-only distributions from public statistics. NO row-level data, NO PII. Seeds the synthetic generator so the resulting dataset has realistic shape.",
+    "sources": [
+      {
+        "name": "観光庁 主要旅行業者の旅行取扱状況",
+        "use": "yearly/monthly revenue index, domestic vs outbound vs inbound mix",
+        "url_hint": "https://www.mlit.go.jp/kankocho/topics03_000118.html"
+      },
+      {
+        "name": "e-Stat 宿泊旅行統計調査",
+        "use": "prefecture-level overnight share for destination_region distribution",
+        "url_hint": "https://www.e-stat.go.jp/stat-search/files?stat_infid=000040261101"
+      },
+      {
+        "name": "日本銀行 為替相場 (USD/JPY, EUR/JPY 月中平均)",
+        "use": "exchange_rate_to_jpy seed for outbound payment rows",
+        "url_hint": "https://www.boj.or.jp/statistics/market/forex/fxdaily/index.htm"
+      }
+    ],
+    "note": "Values are simplified rounded approximations sufficient for synthetic seeding. They are NOT exact reproductions of the public stats and must not be cited as authoritative numbers."
+  },
+  "yearly_revenue_index": {
+    "_unit": "Index (2019 = 100). Used to scale total bookings per year.",
+    "2019": 100,
+    "2020": 22,
+    "2021": 28,
+    "2022": 50,
+    "2023": 88,
+    "2024": 105,
+    "2025": 112,
+    "2026_partial": 38
+  },
+  "monthly_seasonality": {
+    "_unit": "Multiplier vs annual mean (1.0 = average). Domestic + outbound combined.",
+    "1": 0.85,
+    "2": 0.78,
+    "3": 1.10,
+    "4": 1.20,
+    "5": 1.35,
+    "6": 0.92,
+    "7": 1.15,
+    "8": 1.40,
+    "9": 0.95,
+    "10": 1.05,
+    "11": 1.00,
+    "12": 1.25
+  },
+  "destination_share_domestic": {
+    "_unit": "Share among domestic bookings.",
+    "沖縄": 0.18,
+    "北海道": 0.16,
+    "京都": 0.10,
+    "大阪": 0.08,
+    "東京": 0.07,
+    "福岡": 0.05,
+    "長野": 0.04,
+    "石川": 0.03,
+    "静岡": 0.04,
+    "鹿児島": 0.03,
+    "広島": 0.03,
+    "愛知": 0.03,
+    "三重": 0.02,
+    "宮城": 0.02,
+    "青森": 0.02,
+    "その他": 0.10
+  },
+  "destination_share_outbound": {
+    "_unit": "Share among outbound bookings.",
+    "ハワイ": 0.18,
+    "韓国": 0.14,
+    "台湾": 0.11,
+    "タイ": 0.08,
+    "シンガポール": 0.06,
+    "ベトナム": 0.05,
+    "アメリカ西海岸": 0.06,
+    "ニューヨーク": 0.04,
+    "パリ": 0.05,
+    "ロンドン": 0.03,
+    "イタリア": 0.04,
+    "ドバイ": 0.03,
+    "オーストラリア": 0.04,
+    "中国": 0.03,
+    "その他": 0.06
+  },
+  "destination_country_map": {
+    "ハワイ": {"country": "USA", "city": "Honolulu"},
+    "ニューヨーク": {"country": "USA", "city": "New York"},
+    "アメリカ西海岸": {"country": "USA", "city": "Los Angeles"},
+    "韓国": {"country": "South Korea", "city": "Seoul"},
+    "台湾": {"country": "Taiwan", "city": "Taipei"},
+    "タイ": {"country": "Thailand", "city": "Bangkok"},
+    "シンガポール": {"country": "Singapore", "city": "Singapore"},
+    "ベトナム": {"country": "Vietnam", "city": "Hanoi"},
+    "パリ": {"country": "France", "city": "Paris"},
+    "ロンドン": {"country": "UK", "city": "London"},
+    "イタリア": {"country": "Italy", "city": "Rome"},
+    "ドバイ": {"country": "UAE", "city": "Dubai"},
+    "オーストラリア": {"country": "Australia", "city": "Sydney"},
+    "中国": {"country": "China", "city": "Shanghai"},
+    "沖縄": {"country": "Japan", "city": "那覇"},
+    "北海道": {"country": "Japan", "city": "札幌"},
+    "京都": {"country": "Japan", "city": "京都"},
+    "大阪": {"country": "Japan", "city": "大阪"},
+    "東京": {"country": "Japan", "city": "東京"},
+    "福岡": {"country": "Japan", "city": "福岡"},
+    "長野": {"country": "Japan", "city": "長野"},
+    "石川": {"country": "Japan", "city": "金沢"},
+    "静岡": {"country": "Japan", "city": "静岡"},
+    "鹿児島": {"country": "Japan", "city": "鹿児島"},
+    "広島": {"country": "Japan", "city": "広島"},
+    "愛知": {"country": "Japan", "city": "名古屋"},
+    "三重": {"country": "Japan", "city": "伊勢"},
+    "宮城": {"country": "Japan", "city": "仙台"},
+    "青森": {"country": "Japan", "city": "青森"},
+    "その他": {"country": "Japan", "city": "その他"}
+  },
+  "destination_type_share": {
+    "_unit": "Across all bookings (after COVID rebound). Inbound is small in this travel-agent dataset.",
+    "domestic": 0.62,
+    "outbound": 0.34,
+    "inbound": 0.04
+  },
+  "customer_segment_distribution": {
+    "family": 0.27,
+    "couple": 0.22,
+    "solo": 0.18,
+    "group": 0.12,
+    "senior": 0.10,
+    "student": 0.06,
+    "business": 0.05
+  },
+  "age_band_distribution": {
+    "10s": 0.04,
+    "20s": 0.18,
+    "30s": 0.22,
+    "40s": 0.20,
+    "50s": 0.16,
+    "60s": 0.12,
+    "70s+": 0.08
+  },
+  "loyalty_tier_distribution": {
+    "none": 0.55,
+    "silver": 0.25,
+    "gold": 0.15,
+    "platinum": 0.05
+  },
+  "acquisition_channel_distribution": {
+    "web": 0.55,
+    "agent_store": 0.20,
+    "tel": 0.10,
+    "referral": 0.08,
+    "corporate": 0.07
+  },
+  "prefecture_share": {
+    "_unit": "Customer居住都道府県の概略シェア。simplified.",
+    "東京都": 0.18,
+    "神奈川県": 0.10,
+    "大阪府": 0.10,
+    "愛知県": 0.07,
+    "埼玉県": 0.07,
+    "千葉県": 0.06,
+    "兵庫県": 0.05,
+    "福岡県": 0.04,
+    "北海道": 0.04,
+    "京都府": 0.03,
+    "静岡県": 0.03,
+    "広島県": 0.02,
+    "宮城県": 0.02,
+    "新潟県": 0.02,
+    "岡山県": 0.02,
+    "茨城県": 0.02,
+    "群馬県": 0.02,
+    "栃木県": 0.02,
+    "三重県": 0.01,
+    "その他": 0.08
+  },
+  "product_type_distribution": {
+    "domestic_package": 0.46,
+    "outbound_package": 0.26,
+    "freeplan": 0.14,
+    "cruise": 0.04,
+    "fit": 0.10
+  },
+  "price_per_person_jpy": {
+    "_unit": "千円単位の中央値レンジ。lognormal で seed する際の中央値として使用。",
+    "domestic_package": {"median": 95, "stdev_log": 0.5},
+    "outbound_package": {"median": 240, "stdev_log": 0.55},
+    "freeplan": {"median": 65, "stdev_log": 0.4},
+    "cruise": {"median": 320, "stdev_log": 0.5},
+    "fit": {"median": 180, "stdev_log": 0.6}
+  },
+  "duration_days_distribution": {
+    "domestic_package": {"mean": 3.2, "min": 1, "max": 9},
+    "outbound_package": {"mean": 5.6, "min": 3, "max": 14},
+    "freeplan": {"mean": 3.0, "min": 1, "max": 7},
+    "cruise": {"mean": 7.5, "min": 4, "max": 14},
+    "fit": {"mean": 4.5, "min": 2, "max": 21}
+  },
+  "lead_time_days_distribution": {
+    "_unit": "予約日と出発日のギャップ (日)。lognormal の中央値.",
+    "median": 35,
+    "stdev_log": 0.7,
+    "min": 0,
+    "max": 365
+  },
+  "booking_status_distribution": {
+    "_unit": "予約 status の最終確率分布 (年経過後の終局状態)",
+    "completed": 0.82,
+    "confirmed": 0.06,
+    "cancelled": 0.10,
+    "no_show": 0.02
+  },
+  "cancellation_reason_distribution": {
+    "personal": 0.35,
+    "weather": 0.08,
+    "health": 0.12,
+    "change_of_plan": 0.18,
+    "price_dissatisfaction": 0.04,
+    "force_majeure": 0.05,
+    "airline_cancel": 0.06,
+    "other": 0.12
+  },
+  "review_rate": {
+    "_unit": "completed booking のうちレビュー投稿率",
+    "rate": 0.20
+  },
+  "rating_distribution": {
+    "_unit": "5段階評価。skewed positive (現実のレビュー分布に倣う)",
+    "5": 0.36,
+    "4": 0.34,
+    "3": 0.17,
+    "2": 0.08,
+    "1": 0.05
+  },
+  "exchange_rate_usd_jpy": {
+    "_unit": "USD/JPY 月中平均の概略 (日銀公表値)",
+    "2022": 130.0,
+    "2023": 140.0,
+    "2024": 150.0,
+    "2025": 152.0,
+    "2026": 148.0
+  },
+  "exchange_rate_eur_jpy": {
+    "2022": 140.0,
+    "2023": 152.0,
+    "2024": 162.0,
+    "2025": 165.0,
+    "2026": 159.0
+  },
+  "campaign_per_quarter": {
+    "_unit": "1 quarter あたりのキャンペーン平均件数",
+    "mean": 10
+  },
+  "inquiry_per_booking": {
+    "_unit": "1 booking あたりの問い合わせ件数 mean (Poisson lambda)",
+    "lambda": 0.4
+  },
+  "csat_distribution": {
+    "5": 0.40,
+    "4": 0.32,
+    "3": 0.18,
+    "2": 0.06,
+    "1": 0.04
+  },
+  "season_to_months": {
+    "spring": [3, 4, 5],
+    "summer": [6, 7, 8],
+    "autumn": [9, 10, 11],
+    "winter": [12, 1, 2]
+  },
+  "special_period_dates": {
+    "_unit": "5 年分の特殊期間 (出発日が含まれると season を上書き)。",
+    "gw": [
+      ["2022-04-29", "2022-05-08"],
+      ["2023-04-29", "2023-05-07"],
+      ["2024-04-27", "2024-05-06"],
+      ["2025-04-26", "2025-05-06"],
+      ["2026-04-29", "2026-05-06"]
+    ],
+    "obon": [
+      ["2022-08-11", "2022-08-16"],
+      ["2023-08-11", "2023-08-16"],
+      ["2024-08-10", "2024-08-15"],
+      ["2025-08-09", "2025-08-17"],
+      ["2026-08-08", "2026-08-16"]
+    ],
+    "new_year": [
+      ["2021-12-29", "2022-01-03"],
+      ["2022-12-29", "2023-01-03"],
+      ["2023-12-29", "2024-01-03"],
+      ["2024-12-28", "2025-01-05"],
+      ["2025-12-27", "2026-01-04"]
+    ]
+  }
+}
