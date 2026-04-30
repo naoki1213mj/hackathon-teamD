@@ -1,0 +1,46 @@
+
+=== P08: 春のパリの売上を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:210: DeprecationWarning: deprecated
+  assistant = client.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:211: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  thread = client.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:212: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.messages.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:215: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:225: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:249: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:263: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=completed grade=C (no_data_no_grounding) 38.2s
+  preview: 結論：春（3〜5月）のパリ（destination_region＝「パリ」）について売上データがありませんでした。  使用条件： - destination_region＝パリ - season＝春（spring） - 値の正規化済み（「パリ」「春」を英語コードに変換）  主要指標： - 売上、予約数、旅行者数、平均単価：いずれもデータなし  補足： 実データ上、春のパリ行き予約（出発日ベース）はありませんでした。他シーズンや緩和条件（例：全季節のパリ、春のフランス全体）で集計したい場合はご指定ください。
+
+=== P11: リピート顧客の比率を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:165: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  steps = client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run_id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:237: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=failed grade=C (run.failed) 72.7s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_G1SPrSqKylLYYH1VYNlNXpx2/runs/run_aPrBexcxeWd0Zh5TSj5T9lmM/submit_tool_outputs' failed."}
+
+=== P12: キャンセル率が高いプラン上位5位は？
+  -> status=completed grade=A (grounded_numeric) 135.0s
+  preview: 結論： キャンセル率が高いプランの上位5位は、いずれも「沖縄」または「北海道」発着のファミリープラン・カップルプラン・ひとり旅プラン（主に春・夏・秋）で、キャンセル件数が多い傾向です。  使用条件： - プラン名（plan_name）ごとに集計 - 予約件数が30件以上のプランに限定 - キャンセル件数の多い順ランキング - データは最新実績を反映  主要指標・上位5位一覧：  | 順位 | プラン名                                | 予約件数 | キャンセル件数 | キャンセル率      | |-----|-----------------------------------------|--------|-------------|-------------------| | 1位 | 沖縄6泊7日ファミリープラン (春)               
+
+=== P13: 円安後の海外売上回復の度合いを教えてください
+  -> status=failed grade=C (run.failed) 105.5s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_CBOHAnZyi36NSB0cbdQe4zmY/runs/run_ISJZG9n8bhpD43aPU7sdXcTx/submit_tool_outputs' failed."}
+
+=== P14: インバウンド比率の四半期推移を教えてください
+  -> status=in_progress grade=C (run.in_progress) 311.7s
+
+Results written to C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_results_v6_after_ontology.json
+
+=== SUMMARY ===
+A (grounded): 1/5
+B (coherent): 0/5
+C (failed):   4/5
+
+Target >=12/14 grade A: NOT MET (1/5)

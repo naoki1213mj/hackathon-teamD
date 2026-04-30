@@ -1,0 +1,37 @@
+
+=== P11: リピート顧客の比率を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:210: DeprecationWarning: deprecated
+  assistant = client.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:211: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  thread = client.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:212: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.messages.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:215: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:225: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:249: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:263: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=completed grade=A (grounded_numeric) 58.3s
+  preview: 結論: リピート顧客の比率は約96.6%です。  使用条件: 全期間（2022〜2026年4月）、全商品タイプ・全セグメント・全顧客を対象。  主要指標: - アクティブ顧客数（期間内で1件以上予約のあった顧客数）：9,930人 - リピート顧客数（期間内で2件以上予約した顧客）：9,594人 - リピート率：96.6%（9,594人 / 9,930人）  補足: 非常に高いリピート率が特徴です。ロイヤルカスタマーが多いことを示しています。分析の次のステップとして、年代やセグメント別にリピート率の差異を見ると改善ポイントが見えてきます。
+
+=== P13: 円安後の海外売上回復の度合いを教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:165: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  steps = client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run_id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:237: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=in_progress grade=C (run.in_progress) 313.6s
+
+=== P14: インバウンド比率の四半期推移を教えてください
+  -> status=in_progress grade=C (run.in_progress) 314.1s
+
+Results written to C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_results_v6_retry2.json
+
+=== SUMMARY ===
+A (grounded): 1/3
+B (coherent): 0/3
+C (failed):   2/3
+
+Target >=12/14 grade A: NOT MET (1/3)

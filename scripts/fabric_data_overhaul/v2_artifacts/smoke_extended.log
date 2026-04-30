@@ -1,0 +1,51 @@
+=== P13: 円安後の海外売上回復の度合いを教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:54: DeprecationWarning: deprecated
+  a = c.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:55: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  th = c.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:56: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  c.beta.threads.messages.create(thread_id=th.id, role="user", content=q)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:57: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = c.beta.threads.runs.create(thread_id=th.id, assistant_id=a.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:64: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = c.beta.threads.runs.retrieve(thread_id=th.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:71: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = c.beta.threads.messages.list(thread_id=th.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_extended.py:79: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  try: c.beta.threads.delete(th.id)
+  -> completed grade=A 26.7s
+  preview: 円安後の海外売上回復の度合いについてお答えします。
+
+### 1. **円安とは**
+「円安」とは、円の価値が他の通貨（例：米ドル、ユーロ）に対して下がる状態を指します。この場合、日本から見て「1ドル＝150円」のように、円での換算レートが高くなります。
+
+### 2. **一般的な影響**
+円安になると、**日本企業の海外売上高は円換算で増加**する傾向があります。理由は以下の通りです。
+
+- **海外での売上は外貨で計上**される（たとえばドル）。
+- 円安になると、その外貨を円に戻したときの金額が大きくなる。
+- 輸出企業にとって、外貨建て売上の円換算分が増える。
+
+### 3. **実際の回復度合い（最近の動向）**
+#### 2022年～2024年（円安が進行した時期）  
+多くの日本企業（特にトヨタやソニーなどの大手輸出企業）は、**円安の恩恵で海外売上高の伸びや営業利益の改善
+=== P14: インバウンド比率の四半期推移を教えてください
+  -> completed grade=A 21.0s
+  preview: インバウンド比率（外国人観光客の売上や利用数が全体に占める割合）の四半期ごとの推移についてお尋ねですが、もう少し詳細（業界や企業名、対象となる商品やサービス、具体的な期間 など）を教えていただけますか？
+
+例えば：
+- **小売業全体のインバウンド比率**
+- **ホテルや宿泊施設のインバウンド比率**
+- **〇〇社のインバウンド比率（例：Jフロント、エイチ・アイ・エス等）**
+- **何年度～何年度の四半期推移か**
+
+現時点で公開されている**日本全体（観光庁などによる四半期ベースの統計）**を例として簡単に示すと、コロナ禍以前（2019年）、コロナ禍（2020～2022年）、そしてリベンジ消費が盛り上がった2023年以降で大きく変化しています。
+
+### 例：百貨店のインバウンド売上高比率（J.フロントリテイリング）
+
+#### 2019年度
+- 1Q: 8%
+- 2Q: 9%
+-
+
+=== 2/2 A ===
