@@ -1,0 +1,25 @@
+[
+  {
+    "qid": "P10",
+    "question": "年別の売上トレンドを教えてください",
+    "status": "failed",
+    "answer": null,
+    "elapsed_s": 208.7,
+    "error": "LastError(code='server_error', message=\"Status code BadRequest: OpenAI request to 'openai/threads/thread_W5B2AzPAuz9OWnkYZgd5orGG/runs/run_Lf4dKc5MIOtDwrpTaSXDVSOv/submit_tool_outputs' failed.\")"
+  },
+  {
+    "qid": "P13",
+    "question": "円安後の海外売上回復の度合いを教えてください",
+    "status": "completed",
+    "answer": "結論：現時点で「USD/JPYが145を超えた円安後」と「その前」の時期で海外（アウトバウンド）売上を比較したデータが取得できませんでした。\n\n使用条件・適用フィルタ：\n- 円安の定義：「支払いの為替レート（exchange_rate_to_jpy）がUSD/JPYで145を超えた時点」を採用予定\n- 対象：海外旅行（outbound）売上（payment.amount_jpy * payment.exchange_rate_to_jpyの合計）\n\n取得結果：\n- 指定の条件（為替レートが145を境とした売上比較）で有効なデータが見つかりませんでした。\n\n補足：\n- 技術的な制約または該当条件に売上データが存在しなかった可能性があります。\n- 実際の為替影響や「円安」の閾値が異なる場合、条件を変更して再度確認することも可能です。\n- 「海外売上」の全期間サマリ、「直近1年の月別海外売上推移」など粒度や区切りを変えた分析もご提案できます。必要であれば追加でご指示ください。",
+    "elapsed_s": 68.4
+  },
+  {
+    "qid": "P14",
+    "question": "インバウンド比率の四半期推移を教えてください",
+    "status": "in_progress",
+    "answer": null,
+    "elapsed_s": 371.0,
+    "error": "None"
+  }
+]

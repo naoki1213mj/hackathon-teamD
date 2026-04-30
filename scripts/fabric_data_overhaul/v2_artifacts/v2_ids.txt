@@ -1,0 +1,11 @@
+# v2 Fabric Item IDs (Phase 9.4)
+# Workspace: ws-3iq-demo / 096ff72a-6174-4aba-8f0c-140454fa6c3f
+# Lakehouse v2: lh_travel_marketing_v2 / 5e02348e-d2a4-47fb-b63d-257ed3be7731
+
+SM_V2_ID=ce2bb828-d850-46aa-bc5e-224ea9a60667
+ONTOLOGY_V2_ID=10cd6675-405a-4366-b91b-d57242a28914
+DATA_AGENT_V2_ID=b85b67a4-bac4-4852-95e1-443c02032844
+
+# Data Agent OpenAI-compatible URL pattern (note lowercase 'dataagents'):
+#   https://api.fabric.microsoft.com/v1/workspaces/{ws}/dataagents/{da}/aiassistant/openai
+# Token audience: https://analysis.windows.net/powerbi/api/.default
