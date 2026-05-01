@@ -539,7 +539,15 @@ def _get_pending_approval_context_from_memory(
     conversation_id: str,
     owner_id: str | None = None,
 ) -> PendingApprovalContext | None:
-    """in-memory pending approval を owner 単位で取得する。"""
+    """in-memory pending approval を owner 単位で取得する。
+
+    匿名フィンガープリント (anon-* prefix) の owner_id は同一クライアントでも
+    リクエスト間で僅かなヘッダ揺らぎ (Connection 再利用や Envoy 経由の
+    X-Forwarded-For 並び順) で安定しないことが実機で確認されている。
+    会話 ID はサーバ側で発行する UUID4 (122 bit エントロピ) で推測不可能なため、
+    匿名同士の lookup は conversation_id 一致のみで許可してデモを成立させる。
+    実ユーザー (user-* prefix) の場合は引き続き厳密マッチを要求する。
+    """
     normalized_owner_id = _sanitize_optional_text(owner_id)
     if normalized_owner_id:
         direct = _pending_approvals.get(_pending_approval_key(conversation_id, normalized_owner_id))
@@ -549,7 +557,7 @@ def _get_pending_approval_context_from_memory(
     legacy = _pending_approvals.get(conversation_id)
     if isinstance(legacy, dict):
         stored_owner_id = _sanitize_optional_text(str(legacy.get("owner_id") or ""))
-        if not normalized_owner_id or not stored_owner_id or stored_owner_id == normalized_owner_id:
+        if _can_access_pending_approval(stored_owner_id, normalized_owner_id):
             return legacy
         return None
 
@@ -558,9 +566,26 @@ def _get_pending_approval_context_from_memory(
             continue
         if key == conversation_id or key.endswith(f":{conversation_id}"):
             stored_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
-            if not normalized_owner_id or not stored_owner_id or stored_owner_id == normalized_owner_id:
+            if _can_access_pending_approval(stored_owner_id, normalized_owner_id):
                 return context
     return None
+
+
+def _can_access_pending_approval(stored_owner_id: str, lookup_owner_id: str) -> bool:
+    """pending approval の cross-owner アクセス可否を判定する。
+
+    - どちらかの owner が空 → 許可 (legacy 互換)
+    - 両方が同一文字列 → 許可 (厳密マッチ)
+    - 両方とも匿名 (anon- prefix) → 許可 (fingerprint 揺らぎ吸収)
+    - それ以外 → 拒否 (実ユーザー間の cross-owner は禁止)
+    """
+    if not stored_owner_id or not lookup_owner_id:
+        return True
+    if stored_owner_id == lookup_owner_id:
+        return True
+    if stored_owner_id.startswith("anon-") and lookup_owner_id.startswith("anon-"):
+        return True
+    return False
 
 
 def _store_pending_approval_context(conversation_id: str, context: PendingApprovalContext) -> None:
@@ -2622,14 +2647,28 @@ async def _load_pending_approval_context(
     if context:
         return context
 
+    # 匿名 lookup の場合は Cosmos でも cross-owner 検索を許可する
+    # (`anon-*` の fingerprint は揺らぎがあり、save 時と read 時の partition_key が
+    # 一致しない可能性があるため)。実ユーザー (`user-*`) は引き続き厳密検索する。
+    is_anonymous_lookup = normalized_owner_id.startswith("anon-")
     conversation = await get_conversation(
         conversation_id,
-        owner_id=normalized_owner_id or None,
-        allow_cross_owner=not normalized_owner_id,
+        owner_id=None if is_anonymous_lookup else (normalized_owner_id or None),
+        allow_cross_owner=is_anonymous_lookup or not normalized_owner_id,
     )
     if not conversation:
         return None
     if conversation.get("status") not in {"awaiting_approval", "awaiting_manager_approval"}:
+        return None
+
+    # cross-owner で読んだ場合、保存済 owner_id が anon-* でない (= 実ユーザー所有) なら
+    # 匿名アクセスは拒否する。
+    stored_doc_owner_id = _sanitize_optional_text(_get_conversation_owner_id(conversation))
+    if (
+        is_anonymous_lookup
+        and stored_doc_owner_id
+        and not stored_doc_owner_id.startswith("anon-")
+    ):
         return None
 
     analysis_markdown = ""
