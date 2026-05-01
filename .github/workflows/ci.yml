@@ -32,7 +32,18 @@ jobs:
         run: uv run ruff check .
 
       - name: pytest
-        run: uv run python -m pytest tests/ -v
+        run: uv run python -m pytest tests/ -v --ignore=tests/test_fabric_data_agent_integration.py
+
+      - name: pytest (Fabric integration, opt-in)
+        # Runs only when secrets are configured. Falls back to skip otherwise.
+        env:
+          FABRIC_DATA_AGENT_URL_V2: ${{ vars.FABRIC_DATA_AGENT_URL_V2 }}
+          AZURE_CLIENT_ID: ${{ secrets.FABRIC_TEST_AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.FABRIC_TEST_AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        if: ${{ vars.FABRIC_DATA_AGENT_URL_V2 != '' && secrets.FABRIC_TEST_AZURE_CLIENT_SECRET != '' }}
+        run: uv run python -m pytest tests/test_fabric_data_agent_integration.py -v
+        continue-on-error: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

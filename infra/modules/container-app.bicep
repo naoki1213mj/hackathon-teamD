@@ -27,6 +27,20 @@ param logicAppCallbackUrl string = ''
 @secure()
 param managerApprovalTriggerUrl string = ''
 
+// Foundry IQ / Fabric / Work IQ 用 env
+param searchEndpoint string = ''
+@secure()
+param searchApiKey string = ''
+param fabricSqlEndpoint string = ''
+param fabricLakehouseDatabase string = ''
+param fabricSalesTable string = ''
+param fabricReviewsTable string = ''
+param fabricDataAgentUrl string = ''
+param fabricDataAgentUrlV2 string = ''
+param fabricDataAgentRuntime string = ''
+param fabricDataAgentRuntimeVersion string = ''
+param workIqTimeoutSeconds string = ''
+
 var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
   {
     name: 'logic-app-callback-url'
@@ -36,6 +50,11 @@ var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
   {
     name: 'manager-approval-trigger-url'
     value: managerApprovalTriggerUrl
+  }
+] : [], !empty(searchApiKey) ? [
+  {
+    name: 'search-api-key'
+    value: searchApiKey
   }
 ] : [])
 
@@ -112,6 +131,61 @@ var containerEnv = concat([
   {
     name: 'IMPROVEMENT_MCP_ENDPOINT'
     value: improvementMcpEndpoint
+  }
+] : [], !empty(searchEndpoint) ? [
+  {
+    name: 'SEARCH_ENDPOINT'
+    value: searchEndpoint
+  }
+] : [], !empty(searchApiKey) ? [
+  {
+    name: 'SEARCH_API_KEY'
+    secretRef: 'search-api-key'
+  }
+] : [], !empty(fabricSqlEndpoint) ? [
+  {
+    name: 'FABRIC_SQL_ENDPOINT'
+    value: fabricSqlEndpoint
+  }
+] : [], !empty(fabricLakehouseDatabase) ? [
+  {
+    name: 'FABRIC_LAKEHOUSE_DATABASE'
+    value: fabricLakehouseDatabase
+  }
+] : [], !empty(fabricSalesTable) ? [
+  {
+    name: 'FABRIC_SALES_TABLE'
+    value: fabricSalesTable
+  }
+] : [], !empty(fabricReviewsTable) ? [
+  {
+    name: 'FABRIC_REVIEWS_TABLE'
+    value: fabricReviewsTable
+  }
+] : [], !empty(fabricDataAgentUrl) ? [
+  {
+    name: 'FABRIC_DATA_AGENT_URL'
+    value: fabricDataAgentUrl
+  }
+] : [], !empty(fabricDataAgentUrlV2) ? [
+  {
+    name: 'FABRIC_DATA_AGENT_URL_V2'
+    value: fabricDataAgentUrlV2
+  }
+] : [], !empty(fabricDataAgentRuntime) ? [
+  {
+    name: 'FABRIC_DATA_AGENT_RUNTIME'
+    value: fabricDataAgentRuntime
+  }
+] : [], !empty(fabricDataAgentRuntimeVersion) ? [
+  {
+    name: 'FABRIC_DATA_AGENT_RUNTIME_VERSION'
+    value: fabricDataAgentRuntimeVersion
+  }
+] : [], !empty(workIqTimeoutSeconds) ? [
+  {
+    name: 'WORK_IQ_TIMEOUT_SECONDS'
+    value: workIqTimeoutSeconds
   }
 ] : [])
 

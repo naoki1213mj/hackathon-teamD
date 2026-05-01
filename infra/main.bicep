@@ -51,6 +51,45 @@ param imageProjectEndpointMai string = ''
 @description('MAI-Image-2 用の別 Azure AI / Foundry アカウント名（同一 RG 前提、任意）')
 param maiResourceName string = ''
 
+// ----- Foundry IQ / Fabric Data Agent / Work IQ env vars -----
+// blue/green CAE 移行で env が痩せる事故を防ぐため、Bicep 側でも宣言する。
+// 値は azd env set または .env から渡す。空のまま残すと Container App spec から
+// その env が省かれる (container-app.bicep の !empty(...) ガードによる)。
+
+@description('Foundry IQ Knowledge Base 用 Azure AI Search エンドポイント')
+param searchEndpoint string = ''
+
+@secure()
+@description('Azure AI Search 管理キー（secret として注入）')
+param searchApiKey string = ''
+
+@description('Fabric Lakehouse SQL endpoint FQDN（pyodbc + Azure AD トークン認証）')
+param fabricSqlEndpoint string = ''
+
+@description('Fabric Lakehouse データベース名 (例: lh_travel_marketing_v2)')
+param fabricLakehouseDatabase string = ''
+
+@description('Fabric Lakehouse 売上テーブル名 (例: booking)')
+param fabricSalesTable string = ''
+
+@description('Fabric Lakehouse レビューテーブル名 (例: tour_review)')
+param fabricReviewsTable string = ''
+
+@description('Fabric Data Agent v1 URL (rest runtime)')
+param fabricDataAgentUrl string = ''
+
+@description('Fabric Data Agent v2 URL (rest runtime)')
+param fabricDataAgentUrlV2 string = ''
+
+@description('Fabric Data Agent ランタイム ("rest" のみサポート)')
+param fabricDataAgentRuntime string = ''
+
+@description('Fabric Data Agent runtime version: v1 または v2')
+param fabricDataAgentRuntimeVersion string = ''
+
+@description('Work IQ ツール呼び出しのタイムアウト秒数 (実効値はアプリ側で 90s に cap)')
+param workIqTimeoutSeconds string = ''
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -204,6 +243,17 @@ module containerApp 'modules/container-app.bicep' = {
     tenantId: tenant().tenantId
     improvementMcpEndpoint: improvementMcpEndpoint
     maxReplicas: containerAppMaxReplicas
+    searchEndpoint: searchEndpoint
+    searchApiKey: searchApiKey
+    fabricSqlEndpoint: fabricSqlEndpoint
+    fabricLakehouseDatabase: fabricLakehouseDatabase
+    fabricSalesTable: fabricSalesTable
+    fabricReviewsTable: fabricReviewsTable
+    fabricDataAgentUrl: fabricDataAgentUrl
+    fabricDataAgentUrlV2: fabricDataAgentUrlV2
+    fabricDataAgentRuntime: fabricDataAgentRuntime
+    fabricDataAgentRuntimeVersion: fabricDataAgentRuntimeVersion
+    workIqTimeoutSeconds: workIqTimeoutSeconds
   }
 }
 

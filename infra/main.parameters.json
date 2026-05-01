@@ -40,6 +40,42 @@
     },
     "maiResourceName": {
       "value": "${MAI_RESOURCE_NAME=}"
+    },
+    "voiceSpaClientId": {
+      "value": "${VOICE_SPA_CLIENT_ID=}"
+    },
+    "searchEndpoint": {
+      "value": "${SEARCH_ENDPOINT=}"
+    },
+    "searchApiKey": {
+      "value": "${SEARCH_API_KEY=}"
+    },
+    "fabricSqlEndpoint": {
+      "value": "${FABRIC_SQL_ENDPOINT=}"
+    },
+    "fabricLakehouseDatabase": {
+      "value": "${FABRIC_LAKEHOUSE_DATABASE=}"
+    },
+    "fabricSalesTable": {
+      "value": "${FABRIC_SALES_TABLE=}"
+    },
+    "fabricReviewsTable": {
+      "value": "${FABRIC_REVIEWS_TABLE=}"
+    },
+    "fabricDataAgentUrl": {
+      "value": "${FABRIC_DATA_AGENT_URL=}"
+    },
+    "fabricDataAgentUrlV2": {
+      "value": "${FABRIC_DATA_AGENT_URL_V2=}"
+    },
+    "fabricDataAgentRuntime": {
+      "value": "${FABRIC_DATA_AGENT_RUNTIME=}"
+    },
+    "fabricDataAgentRuntimeVersion": {
+      "value": "${FABRIC_DATA_AGENT_RUNTIME_VERSION=}"
+    },
+    "workIqTimeoutSeconds": {
+      "value": "${WORK_IQ_TIMEOUT_SECONDS=}"
     }
   }
 }
