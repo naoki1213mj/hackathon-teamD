@@ -1098,7 +1098,7 @@ class TestBrochureGenTools:
             "_conversation_id_var",
             contextvars.ContextVar("brochure_conversation_id_test", default=""),
         )
-        monkeypatch.setattr(bg, "_conversation_id_fallback", "banner-fallback")
+        monkeypatch.setattr(bg, "_recent_conversation_id", "banner-fallback")
 
         await bg.generate_banner_image(prompt="travel banner", platform="instagram")
 
@@ -1124,6 +1124,58 @@ class TestBrochureGenTools:
         bg._pending_images = {}
         result = bg.pop_pending_images("nonexistent")
         assert result == {}
+
+    def test_image_settings_are_isolated_per_conversation(self):
+        """並行する 2 つの conversation の image_settings がクロス汚染しないこと
+
+        Regression test for the cross-user data leak fixed by replacing the
+        single global ``_image_settings_fallback`` mutable with a
+        conversation-keyed ``_conversation_image_settings`` dict.
+        """
+        import src.agents.brochure_gen as bg
+
+        # Reset state
+        bg._conversation_image_settings.clear()
+        bg._recent_conversation_id = ""
+        bg._image_settings_var.set({})
+
+        # User A: select GPT Image 2 with conversation conv-A
+        bg.set_current_conversation_id("conv-A")
+        bg.set_current_image_settings({"image_model": "gpt-image-2"})
+
+        # User B (different async context, simulated): select MAI with conv-B
+        bg.set_current_conversation_id("conv-B")
+        bg.set_current_image_settings({"image_model": "MAI-Image-2"})
+
+        # B's set must NOT have overwritten A's stored settings
+        assert bg._conversation_image_settings["conv-A"] == {"image_model": "gpt-image-2"}
+        assert bg._conversation_image_settings["conv-B"] == {"image_model": "MAI-Image-2"}
+
+        # Re-entering conv-A's context must read A's settings, not B's
+        bg.set_current_conversation_id("conv-A")
+        bg._image_settings_var.set({})  # simulate context lost
+        assert bg._get_current_image_settings() == {"image_model": "gpt-image-2"}
+
+        # Cleanup
+        bg.clear_image_settings_for_conversation("conv-A")
+        bg.clear_image_settings_for_conversation("conv-B")
+        assert "conv-A" not in bg._conversation_image_settings
+        assert "conv-B" not in bg._conversation_image_settings
+
+    def test_set_current_image_settings_no_conversation_does_not_leak(self):
+        """conversation_id 未設定なら global state を汚さないこと"""
+        import src.agents.brochure_gen as bg
+
+        bg._conversation_image_settings.clear()
+        bg._recent_conversation_id = ""
+        bg._conversation_id_var.set("")
+        bg._image_settings_var.set({})
+
+        bg.set_current_image_settings({"image_model": "gpt-image-2"})
+
+        # ContextVar はセットされるが、conversation スコープ辞書には書かれない
+        assert bg._image_settings_var.get() == {"image_model": "gpt-image-2"}
+        assert bg._conversation_image_settings == {}
 
     def test_pop_pending_video_job_returns_and_clears(self):
         """pop_pending_video_job がジョブ情報を返しクリアする"""

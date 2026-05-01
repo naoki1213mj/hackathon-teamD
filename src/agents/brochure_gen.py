@@ -145,30 +145,89 @@ _MAI_MAX_ATTEMPTS = 3
 _mai_request_lock = asyncio.Lock()
 _mai_last_request_started_at = 0.0
 
-# 画像設定コンテキスト変数（ツール関数から参照）
+# --- 並行リクエスト分離: 画像生成 + side-channel 動画ジョブ用の ContextVar / Lock ---
+# Agent Framework が子 task に ContextVar を伝播しないケースに備え、conversation_id
+# でスコープを切ったフォールバック辞書を併用する。グローバル mutable 値を直接
+# 書き換える従来パターンは複数ユーザー同時実行時に他人の設定を上書きするため使わない。
+_conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "brochure_conversation_id",
+    default="",
+)
 _image_settings_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
     "brochure_image_settings",
     default={},
 )
+_state_lock = threading.Lock()
+_conversation_image_settings: dict[str, dict] = {}
+_recent_conversation_id: str = ""
 
-# モジュールレベルフォールバック（Agent Framework がコンテキスト変数をコピーしない場合の保険）
-_image_settings_fallback: dict = {}
+
+def set_current_conversation_id(conversation_id: str) -> None:
+    """現在実行中の conversation_id をコンテキスト変数にセットする。
+
+    `_recent_conversation_id` は ContextVar が空のときの最終フォールバック。
+    set される conversation_id 自体は server-issued UUID4 で漏洩しても害が少ない
+    ため legacy 互換で global を残す。一方、`image_settings` のような per-user
+    の設定値は `_conversation_image_settings` 経由で conversation_id に紐づけ、
+    クロスユーザー上書きを防ぐ。
+    """
+    global _recent_conversation_id
+    _conversation_id_var.set(conversation_id)
+    if conversation_id:
+        _recent_conversation_id = conversation_id
 
 
 def set_current_image_settings(settings: dict) -> None:
-    """現在の画像生成設定をコンテキスト変数にセットする。"""
-    global _image_settings_fallback
+    """現在の画像生成設定をコンテキスト変数にセットする。
+
+    conversation_id がセット済なら `_conversation_image_settings[conv_id]` にも保存し、
+    Agent Framework が ContextVar を子 task に伝播しなかった場合の保険にする。
+    """
     _image_settings_var.set(settings)
-    _image_settings_fallback = settings
+    conversation_id = _conversation_id_var.get() or _recent_conversation_id
+    if not conversation_id:
+        return
+    with _state_lock:
+        _conversation_image_settings[conversation_id] = dict(settings)
+
+
+def clear_image_settings_for_conversation(conversation_id: str) -> None:
+    """conversation 完了時にスコープ済 fallback を破棄する (リーク防止)。"""
+    if not conversation_id:
+        return
+    with _state_lock:
+        _conversation_image_settings.pop(conversation_id, None)
+
+
+def _get_current_conversation_id() -> str:
+    """現在の非同期コンテキストに紐づく conversation_id を返す。"""
+    conversation_id = _conversation_id_var.get()
+    if conversation_id:
+        return conversation_id
+    if _recent_conversation_id:
+        # ContextVar が空のときの最終フォールバック。conversation_id 自体は
+        # 設定値ではないので legacy 互換で last-set-wins を許容する。
+        return _recent_conversation_id
+    logger.warning("conversation_id が未設定のため、side-channel 画像を安定保存できません")
+    return ""
 
 
 def _get_current_image_settings() -> dict:
     """現在の非同期コンテキストに紐づく画像設定を返す。"""
     settings = _image_settings_var.get()
-    if not settings and _image_settings_fallback:
-        logger.info("コンテキスト変数が空。モジュールレベルフォールバックを使用: %s", _image_settings_fallback)
-        return _image_settings_fallback
-    return settings
+    if settings:
+        return settings
+    conversation_id = _get_current_conversation_id()
+    if conversation_id:
+        with _state_lock:
+            scoped = _conversation_image_settings.get(conversation_id)
+        if scoped:
+            logger.info(
+                "ContextVar が空。conversation スコープのフォールバックを使用 (conv=%s)",
+                conversation_id,
+            )
+            return dict(scoped)
+    return {}
 
 
 def _resolve_gpt_image_deployment(image_model: str) -> str:
@@ -526,30 +585,9 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
 # conversation_id でスコープし、並行リクエスト間の競合を防止する
 _images_lock = threading.Lock()
 _pending_images: dict[str, dict[str, str]] = {}
-_conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "brochure_conversation_id",
-    default="",
-)
-_conversation_id_fallback: str = ""
-
-
-def set_current_conversation_id(conversation_id: str) -> None:
-    """現在実行中の conversation_id を設定する。"""
-    global _conversation_id_fallback
-    _conversation_id_var.set(conversation_id)
-    _conversation_id_fallback = conversation_id
-
-
-def _get_current_conversation_id() -> str:
-    """現在の非同期コンテキストに紐づく conversation_id を返す。"""
-    conversation_id = _conversation_id_var.get()
-    if conversation_id:
-        return conversation_id
-    if _conversation_id_fallback:
-        logger.warning("conversation_id の context が空です。モジュールレベルフォールバックを使用します")
-        return _conversation_id_fallback
-    logger.warning("conversation_id が未設定のため、side-channel 画像を安定保存できません")
-    return ""
+# `_conversation_id_var` / `set_current_conversation_id()` / `_get_current_image_settings()` /
+# `_get_current_conversation_id()` 等は cross-user データリークを防ぐため、ファイル冒頭の
+# 「並行リクエスト分離」セクションで定義済み。ここで再定義しない。
 
 
 def pop_pending_images(conversation_id: str) -> dict[str, str]:
