@@ -80,6 +80,9 @@ FILES = [
     "smoke_results_v6_postonto.json",
     "smoke_results_v6_retry2.json",
     "smoke_results_v6_extended.json",
+    "smoke_baseline_pre_phase10.json",
+    "smoke_after_phase10_enrich.json",
+    "smoke_after_phase10_tune.json",
 ]
 
 best = {}

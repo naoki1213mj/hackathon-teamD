@@ -1,0 +1,173 @@
+entities=10 bindings=10 rels=9 ctxs=9
+
+[100000000001] customer: properties=14, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000010000']
+  prop  customer_id                    String
+  prop  customer_code                  String
+  prop  last_name_kana                 String
+  prop  first_name_kana                String
+  prop  gender                         String
+  prop  age_band                       String
+  prop  birth_year                     BigInt
+  prop  customer_segment               String
+  prop  loyalty_tier                   String
+  prop  acquisition_channel            String
+  prop  prefecture                     String
+  prop  email_opt_in                   Boolean
+  prop  created_at                     DateTime
+  prop  updated_at                     DateTime
+
+[100000000002] booking: properties=15, timeseries=7, displayNamePropertyId=None, entityIdParts=['3000000000020000']
+  prop  booking_id                     String
+  prop  booking_code                   String
+  prop  customer_id                    String
+  prop  campaign_id                    String
+  prop  plan_name                      String
+  prop  product_type                   String
+  prop  destination_country            String
+  prop  destination_region             String
+  prop  destination_city               String
+  prop  destination_type               String
+  prop  season                         String
+  prop  departure_date                 DateTime
+  prop  return_date                    DateTime
+  prop  booking_date                   DateTime
+  prop  booking_status                 String
+  TS    duration_days                  BigInt
+  TS    pax                            BigInt
+  TS    pax_adult                      BigInt
+  TS    pax_child                      BigInt
+  TS    total_revenue_jpy              BigInt
+  TS    price_per_person_jpy           BigInt
+  TS    lead_time_days                 BigInt
+
+[100000000003] payment: properties=6, timeseries=3, displayNamePropertyId=None, entityIdParts=['3000000000030000']
+  prop  payment_id                     String
+  prop  booking_id                     String
+  prop  payment_method                 String
+  prop  payment_status                 String
+  prop  currency                       String
+  prop  paid_at                        DateTime
+  TS    amount_jpy                     BigInt
+  TS    exchange_rate_to_jpy           Double
+  TS    installment_count              BigInt
+
+[100000000004] cancellation: properties=5, timeseries=3, displayNamePropertyId=None, entityIdParts=['3000000000040000']
+  prop  cancellation_id                String
+  prop  booking_id                     String
+  prop  cancelled_at                   DateTime
+  prop  cancellation_reason            String
+  prop  refund_status                  String
+  TS    cancellation_lead_days         BigInt
+  TS    cancellation_fee_jpy           BigInt
+  TS    refund_amount_jpy              BigInt
+
+[100000000005] itinerary_item: properties=12, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000050000']
+  prop  itinerary_item_id              String
+  prop  booking_id                     String
+  prop  item_type                      String
+  prop  item_name                      String
+  prop  hotel_id                       String
+  prop  flight_id                      String
+  prop  start_date                     DateTime
+  prop  end_date                       DateTime
+  prop  nights                         Double
+  prop  unit_price_jpy                 BigInt
+  prop  quantity                       BigInt
+  prop  total_price_jpy                BigInt
+
+[100000000006] hotel: properties=12, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000060000']
+  prop  hotel_id                       String
+  prop  hotel_code                     String
+  prop  name                           String
+  prop  country                        String
+  prop  region                         String
+  prop  city                           String
+  prop  category                       String
+  prop  star_rating                    BigInt
+  prop  room_count                     BigInt
+  prop  avg_price_per_night_jpy        BigInt
+  prop  latitude                       Double
+  prop  longitude                      Double
+
+[100000000007] flight: properties=9, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000070000']
+  prop  flight_id                      String
+  prop  airline_code                   String
+  prop  airline_name                   String
+  prop  departure_airport              String
+  prop  arrival_airport                String
+  prop  route_label                    String
+  prop  flight_class                   String
+  prop  distance_km                    BigInt
+  prop  avg_duration_min               BigInt
+
+[100000000008] tour_review: properties=10, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000080000']
+  prop  review_id                      String
+  prop  booking_id                     String
+  prop  customer_id                    String
+  prop  plan_name                      String
+  prop  destination_region             String
+  prop  rating                         BigInt
+  prop  nps                            BigInt
+  prop  comment                        String
+  prop  sentiment                      String
+  prop  review_date                    DateTime
+
+[100000000009] campaign: properties=11, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000090000']
+  prop  campaign_id                    String
+  prop  campaign_code                  String
+  prop  campaign_name                  String
+  prop  campaign_type                  String
+  prop  target_segment                 String
+  prop  target_destination_type        String
+  prop  start_date                     DateTime
+  prop  end_date                       DateTime
+  prop  discount_percent               Double
+  prop  total_budget_jpy               BigInt
+  prop  total_redemptions              BigInt
+
+[100000000010] inquiry: properties=11, timeseries=0, displayNamePropertyId=None, entityIdParts=['3000000000100000']
+  prop  inquiry_id                     String
+  prop  customer_id                    String
+  prop  channel                        String
+  prop  inquiry_type                   String
+  prop  subject                        String
+  prop  body                           String
+  prop  received_at                    DateTime
+  prop  resolved_at                    DateTime
+  prop  resolution_minutes             Double
+  prop  csat                           Double
+  prop  assigned_team                  String
+
+--- relationships ---
+  3176499813071171500 booking_has_customer src=100000000002 tgt=100000000001
+  3176499813071171501 booking_has_campaign src=100000000002 tgt=100000000009
+  3176499813071171502 payment_has_booking src=100000000003 tgt=100000000002
+  3176499813071171503 cancellation_has_booking src=100000000004 tgt=100000000002
+  3176499813071171504 tour_review_has_booking src=100000000008 tgt=100000000002
+  3176499813071171505 itinerary_item_has_booking src=100000000005 tgt=100000000002
+  3176499813071171506 itinerary_item_has_hotel src=100000000005 tgt=100000000006
+  3176499813071171507 itinerary_item_has_flight src=100000000005 tgt=100000000007
+  3176499813071171508 inquiry_has_customer src=100000000010 tgt=100000000001
+
+--- bindings (table -> sourceTable) ---
+  entity=100000000001 type=NonTimeSeries table=dbo.customer timestamp=None
+  entity=100000000002 type=TimeSeries table=dbo.booking timestamp=departure_date
+  entity=100000000003 type=TimeSeries table=dbo.payment timestamp=paid_at
+  entity=100000000004 type=TimeSeries table=dbo.cancellation timestamp=cancelled_at
+  entity=100000000005 type=NonTimeSeries table=dbo.itinerary_item timestamp=None
+  entity=100000000006 type=NonTimeSeries table=dbo.hotel timestamp=None
+  entity=100000000007 type=NonTimeSeries table=dbo.flight timestamp=None
+  entity=100000000008 type=NonTimeSeries table=dbo.tour_review timestamp=None
+  entity=100000000009 type=NonTimeSeries table=dbo.campaign timestamp=None
+  entity=100000000010 type=NonTimeSeries table=dbo.inquiry timestamp=None
+
+--- contextualizations (relationship -> binding table) ---
+  rel=3176499813071171500 table=dbo.booking srcKey=booking_id fk=customer_id
+  rel=3176499813071171501 table=dbo.booking srcKey=booking_id fk=campaign_id
+  rel=3176499813071171502 table=dbo.payment srcKey=payment_id fk=booking_id
+  rel=3176499813071171503 table=dbo.cancellation srcKey=cancellation_id fk=booking_id
+  rel=3176499813071171504 table=dbo.tour_review srcKey=review_id fk=booking_id
+  rel=3176499813071171505 table=dbo.itinerary_item srcKey=itinerary_item_id fk=booking_id
+  rel=3176499813071171506 table=dbo.itinerary_item srcKey=itinerary_item_id fk=hotel_id
+  rel=3176499813071171507 table=dbo.itinerary_item srcKey=itinerary_item_id fk=flight_id
+  rel=3176499813071171508 table=dbo.inquiry srcKey=inquiry_id fk=customer_id

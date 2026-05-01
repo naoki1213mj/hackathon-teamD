@@ -1,0 +1,82 @@
+
+=== P01: ハワイの売上を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:210: DeprecationWarning: deprecated
+  assistant = client.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:211: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  thread = client.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:212: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.messages.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:215: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:225: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:249: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:263: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=completed grade=A (grounded_numeric) 75.4s
+  preview: 結論：直近の年度におけるハワイの総売上は約¥3,286,928,770です。  使用条件：destination_region='ハワイ'／フィルタ緩和なし、最新年度。  主要指標：  | 指標       | 金額(¥)         | |------------|-----------------| | 売上金額合計 | ¥3,286,928,770  |  補足：旅行販売データ全体から「ハワイ」地域のみ抽出、最新年度のみの集計です。
+
+=== P02: 夏のハワイの売上を教えてください
+  -> status=completed grade=C (no_data_no_grounding) 30.6s
+  preview: ハワイの夏シーズンの売上データは見つかりませんでした。該当期間・条件での販売実績がまだ登録されていない可能性があります。  使用条件: 夏（season='summer'）・ハワイ（destination_region='ハワイ'）で集計 主要指標: 売上（total_revenue_jpy）＝0 件  補足: 条件を緩和（例: 期間や地域を広げるなど）して再検索するとデータが得られる可能性があります。
+
+=== P03: ハワイで20代の旅行者の売上を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:165: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  steps = client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run_id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:237: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=failed grade=C (run.failed) 41.6s
+  last_error: {'code': 'server_error', 'message': 'Sorry, something went wrong.'}
+
+=== P04: 夏のハワイで20代の旅行者の売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 32.3s
+  preview: 夏のハワイを訪れた20代旅行者の売上データは見つかりませんでした。該当期間・条件での実績がない可能性があります。  使用条件：夏（6〜8月）、目的地「ハワイ」、年齢は20代。 主要指標：該当売上 0円  補足：入力条件を一部緩和することで近いデータが得られる場合があります。ご希望があれば別の年代や時期でも再検索可能です。
+
+=== P05: 夏のハワイで20代の旅行者の売上、予約数、平均評価を教えてください
+  -> status=completed grade=A (grounded_numeric) 31.4s
+  preview: 夏のハワイで20代の旅行者に該当するデータは見つかりませんでした。該当期間・条件での予約やレビューの記録が存在しない可能性があります。  使用条件：destination_region='ハワイ'、season='夏'、age_band='20代' で集計（緩和なし） 主要指標：各指標ともに該当データなし  補足：条件を緩和（年齢層や時期を拡大）すれば別の集計も可能です。希望があれば再度ご指示ください。
+
+=== P06: ハワイのレビュー評価分布を教えてください
+  -> status=completed grade=A (grounded_numeric) 35.0s
+  preview: ハワイのレビュー評価分布は「5（最高）」が最も多く、次いで「4」が続いています。5段階評価のうち4と5の比率が全体の約65%を占めており、満足度は非常に高い傾向です。  【条件】目的地：ハワイ（全レビュー／最新集計）  | 評価 | 件数 | |------|------| | 5    | 89   | | 4    | 78   | | 3    | 49   | | 2    | 19   | | 1    | 15   |  ※計250件。件数割合：5（36%）、4（31%）、3（20%）、2（8%）、1（6%）。 ※データは全期間対象、サンプル件数十分あり。
+
+=== P07: 夏の沖縄でファミリー向けの売上を教えてください
+  -> status=failed grade=C (run.failed) 192.9s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_CCtqgyiWAsefUBN8Qw9qiM2S/runs/run_LjTw5Sg5QtpCA3GZypXWYCwc/submit_tool_outputs' failed."}
+
+=== P08: 春のパリの売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 61.4s
+  preview: 春（3月～5月）のパリエリア（destination_regionに「パリ」または「フランス」を含む予約）の合計売上は約¥152,341,096です。  【使用条件】「春」シーズン・ヨーロッパ地域（パリおよびフランス該当分を抽出）、期間制限なしで集計しました。  | 集計指標        | 値         | |----------------|------------| | 春パリ売上合計 | ¥152,341,096 |  補足：抽出条件が正規化されていないため、フランス全体の売上も一部含む可能性があります。パリのみ限定の厳密データが必要な場合は、destination_city等のカラム値確認が必要です。
+
+=== P09: 旅行先別の売上ランキングを教えてください
+  -> status=completed grade=A (grounded_numeric) 32.3s
+  preview: ハワイが1位（売上約¥3,286,928,770）、次いで沖縄（約¥2,650,483,372）、韓国（約¥2,542,436,197）と、海外・国内リゾートが上位を占めています。  【使用条件】旅行先別全体、期間・セグメント指定なし  | 順位 | 旅行先          | 売上合計 (¥)       | |---|---------------|--------------------| | 1 | ハワイ          | ¥3,286,928,770     | | 2 | 沖縄           | ¥2,650,483,372     | | 3 | 韓国           | ¥2,542,436,197     | | 4 | その他          | ¥2,425,707,161     | | 5 | 北海道          | ¥2,276,972
+
+=== P10: 年別の売上トレンドを教えてください
+  -> status=failed grade=C (run.failed) 200.6s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_1Kj6eJO8H5eaVcZEHFXSJyJX/runs/run_4MfrhPlRS54IMj9tFJI0krca/submit_tool_outputs' failed."}
+
+=== P11: リピート顧客の比率を教えてください
+  -> status=completed grade=A (grounded_numeric) 74.7s
+  preview: リピート顧客の比率は約96%です（9,594人／10,000人中がリピーターです）。  | 指標         | 件数     | |:------------|:---------| | 全顧客数     | 10,000   | | リピート顧客 | 9,594    | | リピート比率 | 95.9%    |  使用条件：フィルタなし（全期間・全顧客対象）。 補足：重複顧客などは除外されている前提です。
+
+=== P12: キャンセル率が高いプラン上位5位は？
+  -> status=completed grade=A (grounded_numeric) 63.5s
+  preview: キャンセル率が高いプランの上位5位は、いずれもキャンセル率100%（全件キャンセル）となっています。いずれも予約件数が少ないため、動向にご注意ください。  【使用条件】全期間・全顧客対象、キャンセル率＝(キャンセル件数/予約件数)。  | プラン名　　　　　　　　　　　　           | キャンセル件数 | 予約件数 | キャンセル率     | |:---------------------------------------------|:--------------:|:--------:|:--------------:| | 京都3泊4日ひとり旅プラン (春)                | 6              | 6        | 100%           | | その他6泊7日グループプラン (夏)               | 3       
+
+=== P13: 円安後の海外売上回復の度合いを教えてください
+  -> status=failed grade=C (run.failed) 210.3s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_exyb0tkOFcsyy1pWWaHlfi1f/runs/run_gzJMqye32QoUAYUOEHPX0633/submit_tool_outputs' failed."}
+
+=== P14: インバウンド比率の四半期推移を教えてください
+  -> status=in_progress grade=C (run.in_progress) 314.5s
+
+Results written to C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_after_phase10_tune.json
+
+=== SUMMARY ===
+A (grounded): 8/14
+B (coherent): 0/14
+C (failed):   6/14
+
+Target >=12/14 grade A: NOT MET (8/14)

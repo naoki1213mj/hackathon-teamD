@@ -1,0 +1,35 @@
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:210: DeprecationWarning: deprecated
+  assistant = client.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:211: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  thread = client.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:212: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.messages.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:215: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:225: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:165: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  steps = client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run_id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:237: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:249: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:263: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+
+=== P01: ハワイの売上を教えてください
+  -> status=failed grade=C (run.failed) 45.2s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_z3oaRiVk7bD8ZXX32gKj0BPr/runs/run_ufNCqEyvIJYzIb0NiUrf3Gdo/submit_tool_outputs' failed."}
+
+=== P02: 夏のハワイの売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 38.0s
+  preview: 結論: 夏のハワイ（『ハワイ』地域、夏 season）の売上は約6.47億円でした。  使用条件: - フィルタ: destination_region = 'ハワイ'（日本語）、season = 'summer'（夏）、booking_status in ('confirmed', 'completed') - 期間: 全期間（2022〜2026年）  主要指標: - 売上（総額）: ¥647,010,686 - 予約件数: 632 件 - 旅行者数（合計pax）: 2,162 人 - 1人あたり平均単価: ¥311,245  補足: - 2026年は1〜4月のみ（夏は含まれません）が、集計対象に偏りはありません。 - 季節・目的地でさらに年次推移などが必要な場合はご指定ください。
+
+Results written to C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_warmup.json
+
+=== SUMMARY ===
+A (grounded): 1/2
+B (coherent): 0/2
+C (failed):   1/2
+
+Target >=12/14 grade A: NOT MET (1/2)

@@ -1,0 +1,2122 @@
+[
+  {
+    "path": "definition.json",
+    "kind": "rootDefinition",
+    "payload": {}
+  },
+  {
+    "path": "EntityTypes/100000000001/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000001",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "customer",
+      "entityIdParts": [
+        "3000000000010000"
+      ],
+      "displayNamePropertyId": "3000000000010001",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000010000",
+          "name": "customer_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010001",
+          "name": "customer_code",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010002",
+          "name": "last_name_kana",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010003",
+          "name": "first_name_kana",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010004",
+          "name": "gender",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010005",
+          "name": "age_band",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010006",
+          "name": "birth_year",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000010007",
+          "name": "customer_segment",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010008",
+          "name": "loyalty_tier",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010009",
+          "name": "acquisition_channel",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010010",
+          "name": "prefecture",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000010011",
+          "name": "email_opt_in",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Boolean"
+        },
+        {
+          "id": "3000000000010012",
+          "name": "created_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000010013",
+          "name": "updated_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000001/DataBindings/3a4c3a75-6cb0-4398-9750-2a43b8cb158c.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "3a4c3a75-6cb0-4398-9750-2a43b8cb158c",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "customer_id",
+            "targetPropertyId": "3000000000010000"
+          },
+          {
+            "sourceColumnName": "customer_code",
+            "targetPropertyId": "3000000000010001"
+          },
+          {
+            "sourceColumnName": "last_name_kana",
+            "targetPropertyId": "3000000000010002"
+          },
+          {
+            "sourceColumnName": "first_name_kana",
+            "targetPropertyId": "3000000000010003"
+          },
+          {
+            "sourceColumnName": "gender",
+            "targetPropertyId": "3000000000010004"
+          },
+          {
+            "sourceColumnName": "age_band",
+            "targetPropertyId": "3000000000010005"
+          },
+          {
+            "sourceColumnName": "birth_year",
+            "targetPropertyId": "3000000000010006"
+          },
+          {
+            "sourceColumnName": "customer_segment",
+            "targetPropertyId": "3000000000010007"
+          },
+          {
+            "sourceColumnName": "loyalty_tier",
+            "targetPropertyId": "3000000000010008"
+          },
+          {
+            "sourceColumnName": "acquisition_channel",
+            "targetPropertyId": "3000000000010009"
+          },
+          {
+            "sourceColumnName": "prefecture",
+            "targetPropertyId": "3000000000010010"
+          },
+          {
+            "sourceColumnName": "email_opt_in",
+            "targetPropertyId": "3000000000010011"
+          },
+          {
+            "sourceColumnName": "created_at",
+            "targetPropertyId": "3000000000010012"
+          },
+          {
+            "sourceColumnName": "updated_at",
+            "targetPropertyId": "3000000000010013"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "customer",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000002/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000002",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "booking",
+      "entityIdParts": [
+        "3000000000020000"
+      ],
+      "displayNamePropertyId": "3000000000020004",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000020000",
+          "name": "booking_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020001",
+          "name": "booking_code",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020002",
+          "name": "customer_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020003",
+          "name": "campaign_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020004",
+          "name": "plan_name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020005",
+          "name": "product_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020006",
+          "name": "destination_country",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020007",
+          "name": "destination_region",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020008",
+          "name": "destination_city",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020009",
+          "name": "destination_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020010",
+          "name": "season",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000020011",
+          "name": "departure_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000020012",
+          "name": "return_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000020019",
+          "name": "booking_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000020021",
+          "name": "booking_status",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        }
+      ],
+      "timeseriesProperties": [
+        {
+          "id": "3000000000020013",
+          "name": "duration_days",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020014",
+          "name": "pax",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020015",
+          "name": "pax_adult",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020016",
+          "name": "pax_child",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020017",
+          "name": "total_revenue_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020018",
+          "name": "price_per_person_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000020020",
+          "name": "lead_time_days",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ]
+    }
+  },
+  {
+    "path": "EntityTypes/100000000002/DataBindings/0df602f1-17b7-448b-bd7c-5ca901db2f6c.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "0df602f1-17b7-448b-bd7c-5ca901db2f6c",
+      "dataBindingConfiguration": {
+        "dataBindingType": "TimeSeries",
+        "timestampColumnName": "departure_date",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "booking_id",
+            "targetPropertyId": "3000000000020000"
+          },
+          {
+            "sourceColumnName": "booking_code",
+            "targetPropertyId": "3000000000020001"
+          },
+          {
+            "sourceColumnName": "customer_id",
+            "targetPropertyId": "3000000000020002"
+          },
+          {
+            "sourceColumnName": "campaign_id",
+            "targetPropertyId": "3000000000020003"
+          },
+          {
+            "sourceColumnName": "plan_name",
+            "targetPropertyId": "3000000000020004"
+          },
+          {
+            "sourceColumnName": "product_type",
+            "targetPropertyId": "3000000000020005"
+          },
+          {
+            "sourceColumnName": "destination_country",
+            "targetPropertyId": "3000000000020006"
+          },
+          {
+            "sourceColumnName": "destination_region",
+            "targetPropertyId": "3000000000020007"
+          },
+          {
+            "sourceColumnName": "destination_city",
+            "targetPropertyId": "3000000000020008"
+          },
+          {
+            "sourceColumnName": "destination_type",
+            "targetPropertyId": "3000000000020009"
+          },
+          {
+            "sourceColumnName": "season",
+            "targetPropertyId": "3000000000020010"
+          },
+          {
+            "sourceColumnName": "departure_date",
+            "targetPropertyId": "3000000000020011"
+          },
+          {
+            "sourceColumnName": "return_date",
+            "targetPropertyId": "3000000000020012"
+          },
+          {
+            "sourceColumnName": "duration_days",
+            "targetPropertyId": "3000000000020013"
+          },
+          {
+            "sourceColumnName": "pax",
+            "targetPropertyId": "3000000000020014"
+          },
+          {
+            "sourceColumnName": "pax_adult",
+            "targetPropertyId": "3000000000020015"
+          },
+          {
+            "sourceColumnName": "pax_child",
+            "targetPropertyId": "3000000000020016"
+          },
+          {
+            "sourceColumnName": "total_revenue_jpy",
+            "targetPropertyId": "3000000000020017"
+          },
+          {
+            "sourceColumnName": "price_per_person_jpy",
+            "targetPropertyId": "3000000000020018"
+          },
+          {
+            "sourceColumnName": "booking_date",
+            "targetPropertyId": "3000000000020019"
+          },
+          {
+            "sourceColumnName": "lead_time_days",
+            "targetPropertyId": "3000000000020020"
+          },
+          {
+            "sourceColumnName": "booking_status",
+            "targetPropertyId": "3000000000020021"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "booking",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000003/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000003",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "payment",
+      "entityIdParts": [
+        "3000000000030000"
+      ],
+      "displayNamePropertyId": "3000000000030000",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000030000",
+          "name": "payment_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000030001",
+          "name": "booking_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000030002",
+          "name": "payment_method",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000030003",
+          "name": "payment_status",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000030005",
+          "name": "currency",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000030007",
+          "name": "paid_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        }
+      ],
+      "timeseriesProperties": [
+        {
+          "id": "3000000000030004",
+          "name": "amount_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000030006",
+          "name": "exchange_rate_to_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000030008",
+          "name": "installment_count",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ]
+    }
+  },
+  {
+    "path": "EntityTypes/100000000003/DataBindings/17e9d026-263d-4a57-bfc1-b18c47515b1b.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "17e9d026-263d-4a57-bfc1-b18c47515b1b",
+      "dataBindingConfiguration": {
+        "dataBindingType": "TimeSeries",
+        "timestampColumnName": "paid_at",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "payment_id",
+            "targetPropertyId": "3000000000030000"
+          },
+          {
+            "sourceColumnName": "booking_id",
+            "targetPropertyId": "3000000000030001"
+          },
+          {
+            "sourceColumnName": "payment_method",
+            "targetPropertyId": "3000000000030002"
+          },
+          {
+            "sourceColumnName": "payment_status",
+            "targetPropertyId": "3000000000030003"
+          },
+          {
+            "sourceColumnName": "amount_jpy",
+            "targetPropertyId": "3000000000030004"
+          },
+          {
+            "sourceColumnName": "currency",
+            "targetPropertyId": "3000000000030005"
+          },
+          {
+            "sourceColumnName": "exchange_rate_to_jpy",
+            "targetPropertyId": "3000000000030006"
+          },
+          {
+            "sourceColumnName": "paid_at",
+            "targetPropertyId": "3000000000030007"
+          },
+          {
+            "sourceColumnName": "installment_count",
+            "targetPropertyId": "3000000000030008"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "payment",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000004/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000004",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "cancellation",
+      "entityIdParts": [
+        "3000000000040000"
+      ],
+      "displayNamePropertyId": "3000000000040000",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000040000",
+          "name": "cancellation_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000040001",
+          "name": "booking_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000040002",
+          "name": "cancelled_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000040003",
+          "name": "cancellation_reason",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000040007",
+          "name": "refund_status",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        }
+      ],
+      "timeseriesProperties": [
+        {
+          "id": "3000000000040004",
+          "name": "cancellation_lead_days",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000040005",
+          "name": "cancellation_fee_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000040006",
+          "name": "refund_amount_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ]
+    }
+  },
+  {
+    "path": "EntityTypes/100000000004/DataBindings/89b83d8d-e1f4-494a-9529-aa2e3c5e7b61.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "89b83d8d-e1f4-494a-9529-aa2e3c5e7b61",
+      "dataBindingConfiguration": {
+        "dataBindingType": "TimeSeries",
+        "timestampColumnName": "cancelled_at",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "cancellation_id",
+            "targetPropertyId": "3000000000040000"
+          },
+          {
+            "sourceColumnName": "booking_id",
+            "targetPropertyId": "3000000000040001"
+          },
+          {
+            "sourceColumnName": "cancelled_at",
+            "targetPropertyId": "3000000000040002"
+          },
+          {
+            "sourceColumnName": "cancellation_reason",
+            "targetPropertyId": "3000000000040003"
+          },
+          {
+            "sourceColumnName": "cancellation_lead_days",
+            "targetPropertyId": "3000000000040004"
+          },
+          {
+            "sourceColumnName": "cancellation_fee_jpy",
+            "targetPropertyId": "3000000000040005"
+          },
+          {
+            "sourceColumnName": "refund_amount_jpy",
+            "targetPropertyId": "3000000000040006"
+          },
+          {
+            "sourceColumnName": "refund_status",
+            "targetPropertyId": "3000000000040007"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "cancellation",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000005/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000005",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "itinerary_item",
+      "entityIdParts": [
+        "3000000000050000"
+      ],
+      "displayNamePropertyId": "3000000000050003",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000050000",
+          "name": "itinerary_item_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050001",
+          "name": "booking_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050002",
+          "name": "item_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050003",
+          "name": "item_name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050004",
+          "name": "hotel_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050005",
+          "name": "flight_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000050006",
+          "name": "start_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000050007",
+          "name": "end_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000050008",
+          "name": "nights",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000050009",
+          "name": "unit_price_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000050010",
+          "name": "quantity",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000050011",
+          "name": "total_price_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000005/DataBindings/d3e35450-8dd3-4ba7-be5b-c77439ed67ba.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "d3e35450-8dd3-4ba7-be5b-c77439ed67ba",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "itinerary_item_id",
+            "targetPropertyId": "3000000000050000"
+          },
+          {
+            "sourceColumnName": "booking_id",
+            "targetPropertyId": "3000000000050001"
+          },
+          {
+            "sourceColumnName": "item_type",
+            "targetPropertyId": "3000000000050002"
+          },
+          {
+            "sourceColumnName": "item_name",
+            "targetPropertyId": "3000000000050003"
+          },
+          {
+            "sourceColumnName": "hotel_id",
+            "targetPropertyId": "3000000000050004"
+          },
+          {
+            "sourceColumnName": "flight_id",
+            "targetPropertyId": "3000000000050005"
+          },
+          {
+            "sourceColumnName": "start_date",
+            "targetPropertyId": "3000000000050006"
+          },
+          {
+            "sourceColumnName": "end_date",
+            "targetPropertyId": "3000000000050007"
+          },
+          {
+            "sourceColumnName": "nights",
+            "targetPropertyId": "3000000000050008"
+          },
+          {
+            "sourceColumnName": "unit_price_jpy",
+            "targetPropertyId": "3000000000050009"
+          },
+          {
+            "sourceColumnName": "quantity",
+            "targetPropertyId": "3000000000050010"
+          },
+          {
+            "sourceColumnName": "total_price_jpy",
+            "targetPropertyId": "3000000000050011"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "itinerary_item",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000006/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000006",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "hotel",
+      "entityIdParts": [
+        "3000000000060000"
+      ],
+      "displayNamePropertyId": "3000000000060002",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000060000",
+          "name": "hotel_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060001",
+          "name": "hotel_code",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060002",
+          "name": "name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060003",
+          "name": "country",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060004",
+          "name": "region",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060005",
+          "name": "city",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060006",
+          "name": "category",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000060007",
+          "name": "star_rating",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000060008",
+          "name": "room_count",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000060009",
+          "name": "avg_price_per_night_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000060010",
+          "name": "latitude",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000060011",
+          "name": "longitude",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000006/DataBindings/5b82095b-0810-4b2e-bb59-d2978226dd7e.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "5b82095b-0810-4b2e-bb59-d2978226dd7e",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "hotel_id",
+            "targetPropertyId": "3000000000060000"
+          },
+          {
+            "sourceColumnName": "hotel_code",
+            "targetPropertyId": "3000000000060001"
+          },
+          {
+            "sourceColumnName": "name",
+            "targetPropertyId": "3000000000060002"
+          },
+          {
+            "sourceColumnName": "country",
+            "targetPropertyId": "3000000000060003"
+          },
+          {
+            "sourceColumnName": "region",
+            "targetPropertyId": "3000000000060004"
+          },
+          {
+            "sourceColumnName": "city",
+            "targetPropertyId": "3000000000060005"
+          },
+          {
+            "sourceColumnName": "category",
+            "targetPropertyId": "3000000000060006"
+          },
+          {
+            "sourceColumnName": "star_rating",
+            "targetPropertyId": "3000000000060007"
+          },
+          {
+            "sourceColumnName": "room_count",
+            "targetPropertyId": "3000000000060008"
+          },
+          {
+            "sourceColumnName": "avg_price_per_night_jpy",
+            "targetPropertyId": "3000000000060009"
+          },
+          {
+            "sourceColumnName": "latitude",
+            "targetPropertyId": "3000000000060010"
+          },
+          {
+            "sourceColumnName": "longitude",
+            "targetPropertyId": "3000000000060011"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "hotel",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000007/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000007",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "flight",
+      "entityIdParts": [
+        "3000000000070000"
+      ],
+      "displayNamePropertyId": "3000000000070005",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000070000",
+          "name": "flight_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070001",
+          "name": "airline_code",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070002",
+          "name": "airline_name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070003",
+          "name": "departure_airport",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070004",
+          "name": "arrival_airport",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070005",
+          "name": "route_label",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070006",
+          "name": "flight_class",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000070007",
+          "name": "distance_km",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000070008",
+          "name": "avg_duration_min",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000007/DataBindings/702b3daa-c38d-41e7-8960-fb952fa07441.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "702b3daa-c38d-41e7-8960-fb952fa07441",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "flight_id",
+            "targetPropertyId": "3000000000070000"
+          },
+          {
+            "sourceColumnName": "airline_code",
+            "targetPropertyId": "3000000000070001"
+          },
+          {
+            "sourceColumnName": "airline_name",
+            "targetPropertyId": "3000000000070002"
+          },
+          {
+            "sourceColumnName": "departure_airport",
+            "targetPropertyId": "3000000000070003"
+          },
+          {
+            "sourceColumnName": "arrival_airport",
+            "targetPropertyId": "3000000000070004"
+          },
+          {
+            "sourceColumnName": "route_label",
+            "targetPropertyId": "3000000000070005"
+          },
+          {
+            "sourceColumnName": "flight_class",
+            "targetPropertyId": "3000000000070006"
+          },
+          {
+            "sourceColumnName": "distance_km",
+            "targetPropertyId": "3000000000070007"
+          },
+          {
+            "sourceColumnName": "avg_duration_min",
+            "targetPropertyId": "3000000000070008"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "flight",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000008/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000008",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "tour_review",
+      "entityIdParts": [
+        "3000000000080000"
+      ],
+      "displayNamePropertyId": "3000000000080003",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000080000",
+          "name": "review_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080001",
+          "name": "booking_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080002",
+          "name": "customer_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080003",
+          "name": "plan_name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080004",
+          "name": "destination_region",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080005",
+          "name": "rating",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000080006",
+          "name": "nps",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000080007",
+          "name": "comment",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080008",
+          "name": "sentiment",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000080009",
+          "name": "review_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000008/DataBindings/1183d040-74b6-4754-bea1-45628f154a0f.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "1183d040-74b6-4754-bea1-45628f154a0f",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "review_id",
+            "targetPropertyId": "3000000000080000"
+          },
+          {
+            "sourceColumnName": "booking_id",
+            "targetPropertyId": "3000000000080001"
+          },
+          {
+            "sourceColumnName": "customer_id",
+            "targetPropertyId": "3000000000080002"
+          },
+          {
+            "sourceColumnName": "plan_name",
+            "targetPropertyId": "3000000000080003"
+          },
+          {
+            "sourceColumnName": "destination_region",
+            "targetPropertyId": "3000000000080004"
+          },
+          {
+            "sourceColumnName": "rating",
+            "targetPropertyId": "3000000000080005"
+          },
+          {
+            "sourceColumnName": "nps",
+            "targetPropertyId": "3000000000080006"
+          },
+          {
+            "sourceColumnName": "comment",
+            "targetPropertyId": "3000000000080007"
+          },
+          {
+            "sourceColumnName": "sentiment",
+            "targetPropertyId": "3000000000080008"
+          },
+          {
+            "sourceColumnName": "review_date",
+            "targetPropertyId": "3000000000080009"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "tour_review",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000009/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000009",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "campaign",
+      "entityIdParts": [
+        "3000000000090000"
+      ],
+      "displayNamePropertyId": "3000000000090002",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000090000",
+          "name": "campaign_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090001",
+          "name": "campaign_code",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090002",
+          "name": "campaign_name",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090003",
+          "name": "campaign_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090004",
+          "name": "target_segment",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090005",
+          "name": "target_destination_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000090006",
+          "name": "start_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000090007",
+          "name": "end_date",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000090008",
+          "name": "discount_percent",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000090009",
+          "name": "total_budget_jpy",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        },
+        {
+          "id": "3000000000090010",
+          "name": "total_redemptions",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "BigInt"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000009/DataBindings/bbe9f5fc-4c43-4eed-a7f1-1edf63d458c2.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "bbe9f5fc-4c43-4eed-a7f1-1edf63d458c2",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "campaign_id",
+            "targetPropertyId": "3000000000090000"
+          },
+          {
+            "sourceColumnName": "campaign_code",
+            "targetPropertyId": "3000000000090001"
+          },
+          {
+            "sourceColumnName": "campaign_name",
+            "targetPropertyId": "3000000000090002"
+          },
+          {
+            "sourceColumnName": "campaign_type",
+            "targetPropertyId": "3000000000090003"
+          },
+          {
+            "sourceColumnName": "target_segment",
+            "targetPropertyId": "3000000000090004"
+          },
+          {
+            "sourceColumnName": "target_destination_type",
+            "targetPropertyId": "3000000000090005"
+          },
+          {
+            "sourceColumnName": "start_date",
+            "targetPropertyId": "3000000000090006"
+          },
+          {
+            "sourceColumnName": "end_date",
+            "targetPropertyId": "3000000000090007"
+          },
+          {
+            "sourceColumnName": "discount_percent",
+            "targetPropertyId": "3000000000090008"
+          },
+          {
+            "sourceColumnName": "total_budget_jpy",
+            "targetPropertyId": "3000000000090009"
+          },
+          {
+            "sourceColumnName": "total_redemptions",
+            "targetPropertyId": "3000000000090010"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "campaign",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "EntityTypes/100000000010/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/entityType/1.0.0/schema.json",
+      "id": "100000000010",
+      "namespace": "usertypes",
+      "baseEntityTypeId": null,
+      "name": "inquiry",
+      "entityIdParts": [
+        "3000000000100000"
+      ],
+      "displayNamePropertyId": "3000000000100004",
+      "namespaceType": "Imported",
+      "visibility": "Visible",
+      "properties": [
+        {
+          "id": "3000000000100000",
+          "name": "inquiry_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100001",
+          "name": "customer_id",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100002",
+          "name": "channel",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100003",
+          "name": "inquiry_type",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100004",
+          "name": "subject",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100005",
+          "name": "body",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        },
+        {
+          "id": "3000000000100006",
+          "name": "received_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000100007",
+          "name": "resolved_at",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "DateTime"
+        },
+        {
+          "id": "3000000000100008",
+          "name": "resolution_minutes",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000100009",
+          "name": "csat",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "Double"
+        },
+        {
+          "id": "3000000000100010",
+          "name": "assigned_team",
+          "redefines": null,
+          "baseTypeNamespaceType": null,
+          "valueType": "String"
+        }
+      ],
+      "timeseriesProperties": []
+    }
+  },
+  {
+    "path": "EntityTypes/100000000010/DataBindings/31516460-d3b0-4384-8070-953d2c7e944c.json",
+    "kind": "dataBinding",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+      "id": "31516460-d3b0-4384-8070-953d2c7e944c",
+      "dataBindingConfiguration": {
+        "dataBindingType": "NonTimeSeries",
+        "propertyBindings": [
+          {
+            "sourceColumnName": "inquiry_id",
+            "targetPropertyId": "3000000000100000"
+          },
+          {
+            "sourceColumnName": "customer_id",
+            "targetPropertyId": "3000000000100001"
+          },
+          {
+            "sourceColumnName": "channel",
+            "targetPropertyId": "3000000000100002"
+          },
+          {
+            "sourceColumnName": "inquiry_type",
+            "targetPropertyId": "3000000000100003"
+          },
+          {
+            "sourceColumnName": "subject",
+            "targetPropertyId": "3000000000100004"
+          },
+          {
+            "sourceColumnName": "body",
+            "targetPropertyId": "3000000000100005"
+          },
+          {
+            "sourceColumnName": "received_at",
+            "targetPropertyId": "3000000000100006"
+          },
+          {
+            "sourceColumnName": "resolved_at",
+            "targetPropertyId": "3000000000100007"
+          },
+          {
+            "sourceColumnName": "resolution_minutes",
+            "targetPropertyId": "3000000000100008"
+          },
+          {
+            "sourceColumnName": "csat",
+            "targetPropertyId": "3000000000100009"
+          },
+          {
+            "sourceColumnName": "assigned_team",
+            "targetPropertyId": "3000000000100010"
+          }
+        ],
+        "sourceTableProperties": {
+          "sourceType": "LakehouseTable",
+          "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+          "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+          "sourceTableName": "inquiry",
+          "sourceSchema": "dbo"
+        }
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171500/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171500",
+      "name": "booking_has_customer",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000002"
+      },
+      "target": {
+        "entityTypeId": "100000000001"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171500/Contextualizations/050aa084-e9ac-4414-99ea-180ab8f43376.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "050aa084-e9ac-4414-99ea-180ab8f43376",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "booking",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "customer_id",
+          "targetPropertyId": "3000000000010000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171501/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171501",
+      "name": "booking_has_campaign",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000002"
+      },
+      "target": {
+        "entityTypeId": "100000000009"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171501/Contextualizations/e8b2846a-c0f9-48f6-bd4a-7e1b27297946.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "e8b2846a-c0f9-48f6-bd4a-7e1b27297946",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "booking",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "campaign_id",
+          "targetPropertyId": "3000000000090000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171502/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171502",
+      "name": "payment_has_booking",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000003"
+      },
+      "target": {
+        "entityTypeId": "100000000002"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171502/Contextualizations/f53b41fd-d776-46db-984b-a51b04424427.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "f53b41fd-d776-46db-984b-a51b04424427",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "payment",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "payment_id",
+          "targetPropertyId": "3000000000030000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171503/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171503",
+      "name": "cancellation_has_booking",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000004"
+      },
+      "target": {
+        "entityTypeId": "100000000002"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171503/Contextualizations/6384a66d-12a5-4d27-9a3e-482638379b00.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "6384a66d-12a5-4d27-9a3e-482638379b00",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "cancellation",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "cancellation_id",
+          "targetPropertyId": "3000000000040000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171504/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171504",
+      "name": "tour_review_has_booking",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000008"
+      },
+      "target": {
+        "entityTypeId": "100000000002"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171504/Contextualizations/1a1561f8-6c2a-4850-98da-3c4773596c3d.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "1a1561f8-6c2a-4850-98da-3c4773596c3d",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "tour_review",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "review_id",
+          "targetPropertyId": "3000000000080000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171505/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171505",
+      "name": "itinerary_item_has_booking",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000005"
+      },
+      "target": {
+        "entityTypeId": "100000000002"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171505/Contextualizations/24291c6f-c786-4f77-8058-12d46ae61deb.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "24291c6f-c786-4f77-8058-12d46ae61deb",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "itinerary_item",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "itinerary_item_id",
+          "targetPropertyId": "3000000000050000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "booking_id",
+          "targetPropertyId": "3000000000020000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171506/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171506",
+      "name": "itinerary_item_has_hotel",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000005"
+      },
+      "target": {
+        "entityTypeId": "100000000006"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171506/Contextualizations/4a06ddfe-c403-440f-8d70-836e19da2991.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "4a06ddfe-c403-440f-8d70-836e19da2991",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "itinerary_item",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "itinerary_item_id",
+          "targetPropertyId": "3000000000050000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "hotel_id",
+          "targetPropertyId": "3000000000060000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171507/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171507",
+      "name": "itinerary_item_has_flight",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000005"
+      },
+      "target": {
+        "entityTypeId": "100000000007"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171507/Contextualizations/ae9ae6ca-b1b5-4fd3-bf5f-4bc54766d430.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "ae9ae6ca-b1b5-4fd3-bf5f-4bc54766d430",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "itinerary_item",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "itinerary_item_id",
+          "targetPropertyId": "3000000000050000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "flight_id",
+          "targetPropertyId": "3000000000070000"
+        }
+      ]
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171508/definition.json",
+    "kind": "unknown",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/relationshipType/1.0.0/schema.json",
+      "namespace": "usertypes",
+      "id": "3176499813071171508",
+      "name": "inquiry_has_customer",
+      "namespaceType": "Imported",
+      "source": {
+        "entityTypeId": "100000000010"
+      },
+      "target": {
+        "entityTypeId": "100000000001"
+      }
+    }
+  },
+  {
+    "path": "RelationshipTypes/3176499813071171508/Contextualizations/fecc8f24-8b03-4259-ac70-d1eb1a2e2d5b.json",
+    "kind": "contextualization",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/contextualization/1.0.0/schema.json",
+      "id": "fecc8f24-8b03-4259-ac70-d1eb1a2e2d5b",
+      "dataBindingTable": {
+        "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+        "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+        "sourceTableName": "inquiry",
+        "sourceSchema": "dbo",
+        "sourceType": "LakehouseTable"
+      },
+      "sourceKeyRefBindings": [
+        {
+          "sourceColumnName": "inquiry_id",
+          "targetPropertyId": "3000000000100000"
+        }
+      ],
+      "targetKeyRefBindings": [
+        {
+          "sourceColumnName": "customer_id",
+          "targetPropertyId": "3000000000010000"
+        }
+      ]
+    }
+  },
+  {
+    "path": ".platform",
+    "kind": "platform",
+    "payload": {
+      "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+      "metadata": {
+        "type": "Ontology",
+        "displayName": "travelIQ_v2"
+      },
+      "config": {
+        "version": "2.0",
+        "logicalId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  }
+]

@@ -1,0 +1,82 @@
+
+=== P01: ハワイの売上を教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:210: DeprecationWarning: deprecated
+  assistant = client.beta.assistants.create(model="not used")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:211: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  thread = client.beta.threads.create()
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:212: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.messages.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:215: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.create(
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:225: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:249: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  msgs = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:263: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=completed grade=A (grounded_numeric) 78.5s
+  preview: 結論: ハワイ地域の売上は約29.5億円（¥2,946,473,690）、予約件数は2,673件、旅行者数は9,057人、平均単価は約¥327,928です。  使用条件: - destination_region = 'ハワイ' - 期間: 2022年〜2026年4月（全期間） - 予約状態: booking_status='confirmed'または'completed' - 条件の緩和や値の正規化は不要でした  主要指標:  | 指標            | 実績                   | |-----------------|------------------------| | 売上            | ¥2,946,473,690         | | 予約件数        | 2,673                  | | 旅行者数（pax） |
+
+=== P02: 夏のハワイの売上を教えてください
+  -> status=completed grade=C (no_data_no_grounding) 28.4s
+  preview: 結論: 「夏（6～8月）のハワイ（destination_region='ハワイ'）」の売上で該当する予約はありませんでした。  使用条件: - 適用フィルタ：destination_region='ハワイ'、season='summer'、booking_status IN ('confirmed','completed') - 条件緩和前（正規値で実行済み）  主要指標: - 売上（夏・ハワイ）：データなし - 予約件数・旅行者数・平均単価：データなし  補足: - データが存在しない理由として、実データ上でこの組み合わせの予約がなかった可能性が高いです。 - 他の季節や目的地で集計する場合はご指定ください。条件緩和も可能です。
+
+=== P03: ハワイで20代の旅行者の売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 37.7s
+  preview: 結論: ハワイに旅行した20代の顧客による売上は、約42億円、予約件数は約406件、旅行者数（pax）は1,460人、1人あたり平均単価は約29.0万円でした。  使用条件: - フィルタ：「destination_region='ハワイ'」「age_band='20s'」 - 値マッピング正しく適用済（「ハワイ」→destination_region） - 厳密な年指定なしの全期間合算 - サンプル十分  主要指標（ハワイ×20代）：  | 指標           | 値                    | |----------------|----------------------| | 売上           | ¥4,208,076,045       | | 予約数         | 406 件               | | 旅行者数       | 1,4
+
+=== P04: 夏のハワイで20代の旅行者の売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 71.1s
+  preview: 結論： 夏のハワイで20代の旅行者による売上は、合計約¥98,910,000です。予約件数は99件、合計旅行者数は306人で、1人あたりの平均単価は約¥323,290でした。  使用条件： destination_region = 'ハワイ'（ハワイ）、season = 'summer'（夏）、age_band = '20s'（20代）。売上集計はconfirmed/completed予約のみで算出。  主要指標： - 売上合計：¥98,910,000 - 予約件数：99件 - 旅行者数合計：306人 - 平均客単価：¥323,290  補足： - 条件の正規化（「ハワイ」は destination_region、『夏』は season、『20代』は age_band）を実施。 - サンプル件数は十分です（99件）。 - 次のステップとして、他の年代やシーズンとの比較も可能です。
+
+=== P05: 夏のハワイで20代の旅行者の売上、予約数、平均評価を教えてください
+  -> status=completed grade=A (grounded_numeric) 33.0s
+  preview: 結論： 「夏（6〜8月）」に「ハワイ」を訪れた「20代」の旅行者について、売上・予約数・平均評価を集計しましたが、該当するデータは見つかりませんでした。  使用条件： - destination_region = 'ハワイ'（ハワイ） - season = 'summer'（夏：6〜8月） - age_band = '20s'（20代） - booking_status IN ('confirmed', 'completed')（確定・完了予約のみ）  主要指標： - 売上：データなし - 予約数：データなし - 平均評価：データなし  補足： 過去4年分の予約データに基づいていますが、条件に該当する「夏のハワイ旅行（20代）」の実績はありませんでした。20代向けのハワイ夏プランやプロモーションの検討時は、他のシーズンや年代も含めて傾向分析/ニーズ調査することをおすすめします。条件の緩和希
+
+=== P06: ハワイのレビュー評価分布を教えてください
+  -> status=completed grade=C (fail_phrase:技術的制約) 237.7s
+  preview: 「ハワイ」のレビュー評価分布について、テーブルから直接件数集計クエリを実行しましたが、現状GROUP BY構文の技術的制約があるため rating 別の件数が取得できませんでした。  制約： - ハワイ＝destination_region『ハワイ』で条件指定は正しく変換済み - GROUP BY rating でreview件数を出そうとしましたが、現在のツール仕様により集計不可  今後の対応例： - 将来、GROUP BYがサポートされ次第、各評価ごとの件数分布を返すことが可能です。 - 現時点では平均評価や件数のみを単体で返すことはできます。  他に知りたい指標（平均評価や総レビュー数、評価4以上＝高評価率 など）があれば、お知らせください。
+
+=== P07: 夏の沖縄でファミリー向けの売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 37.6s
+  preview: 結論： 夏の沖縄でファミリー向け商品の売上は、合計約¥148,427,529、予約件数は225件、旅行者数は1,058人、平均客単価は約¥140,345でした。  使用条件： 適用フィルタ：destination_region =「沖縄」、season =「summer」、customer_segment =「family」  主要指標まとめ：  | 項目               | 数値          | |--------------------|--------------| | 売上合計           | ¥148,427,529 | | 予約件数           | 225 件       | | 旅行者数（pax）    | 1,058 人     | | 平均客単価         | ¥140,345     |  補足： - 売上・予約データは沖縄・夏・
+
+=== P08: 春のパリの売上を教えてください
+  -> status=completed grade=A (grounded_numeric) 91.1s
+  preview: 結論： 春のパリ（destination_region='パリ', season='spring'）の売上は、複数の予約が確認され、総売上は約1億2,700万円（計算値）、予約件数は約38件、旅行者数は約134人、平均単価は約33.4万円/人です。  使用条件： - 厳密条件：destination_region = 'パリ'、season = 'spring'（春） - 正規化済み：目的地「パリ」、季節「春」  主要指標（春のみの集計・概算値）：  | 指標             | 値           | |------------------|------------| | 売上合計         | ¥127,000,000前後   | | 予約件数         | 38件         | | 旅行者数         | 134人         | | 平均単価
+
+=== P09: 旅行先別の売上ランキングを教えてください
+  -> status=completed grade=A (grounded_numeric) 39.6s
+  preview: 結論: 全旅行先の中で売上が最も高いのは「ハワイ」で、沖縄、韓国、その他、北海道が続きます。  使用条件: 期間の指定がなかったため、直近データ全体（2022年〜2026年4月）を対象にdestination_region別で集計しています。  主要指標: - 売上（total_revenue_jpy_sum） - 予約件数 - 旅行者数（pax合計） - 平均客単価  旅行先別 売上ランキング（上位10地域）  | 順位 | 旅行先   | 売上         | 予約数 | 旅行者数 | 平均客単価 | |------|----------|--------------|--------|----------|------------| | 1    | ハワイ   | ¥3,286,928,770 | 3,013  | 10,115   | ¥328,373   | | 2    
+
+=== P10: 年別の売上トレンドを教えてください
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:165: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  steps = client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run_id)
+C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_test_v6.py:237: DeprecationWarning: The Assistants API is deprecated in favor of the Responses API
+  client.beta.threads.delete(thread.id)
+  -> status=in_progress grade=C (run.in_progress) 312.8s
+
+=== P11: リピート顧客の比率を教えてください
+  -> status=completed grade=C (fail_phrase:技術的制約) 186.3s
+  preview: 結論: リピート顧客比率（期間内で2回以上予約した顧客の比率）はシステムの自動集計で取得を試みましたが、現在ツールの技術的制約により直接的な計算ができませんでした。  使用条件・処理内容: - 予約データ（booking）で"confirmed"または"completed"の予約のみを対象。 - 顧客単位で予約件数を集計し、2回以上予約した顧客がリピート顧客。 - 何度も集計条件を調整（§D値正規化、集計緩和）して再試行しましたが、現在の自動集計ツールでは「グループ化した上で2件以上のみカウント」の機能が正しく動作しませんでした。  補足: 実データの規模感や集計要件は全て満たしていましたので、本来は約10,000名の顧客のうち、アクティブな顧客に対し2件以上予約顧客の比率＝リピート率という形でお出しできるはずです。 （SQL換算例：全アクティブ顧客数≒9,000〜10,000名、リピート
+
+=== P12: キャンセル率が高いプラン上位5位は？
+  -> status=completed grade=A (grounded_numeric) 137.3s
+  preview: 結論 キャンセル率が高いプラン上位5位は下記のとおりです。沖縄・北海道のファミリーやカップル向け春・夏プランでキャンセル数が多い傾向です。  使用条件 plan_nameごとに集計し、予約件数が30件以上のプランのみ対象。キャンセル率の算出がうまくいかなかったため、キャンセル件数が多い順で上位を出しています。  主要指標（キャンセル件数／予約件数 上位5プラン）  | プラン名                        | 予約件数 | キャンセル件数 | 想定キャンセル率(参考) | |:-------------------------------|:-------|:-----------|:---------------------| | 沖縄6泊7日ファミリープラン (春) | 80     | 14        | 約17.5%              | | 沖縄4泊
+
+=== P13: 円安後の海外売上回復の度合いを教えてください
+  -> status=failed grade=C (run.failed) 53.2s
+  last_error: {'code': 'server_error', 'message': "Status code BadRequest: OpenAI request to 'openai/threads/thread_eQnegZMoIMUbSAUpE0fynIGw/runs/run_jGR0EMCf3oIbaOe1acbZp8R4/submit_tool_outputs' failed."}
+
+=== P14: インバウンド比率の四半期推移を教えてください
+  -> status=failed grade=C (run.failed) 32.2s
+  last_error: {'code': 'server_error', 'message': 'Sorry, something went wrong.'}
+
+Results written to C:\Users\nmatsumoto\projects\hackathon-teamD\scripts\fabric_data_overhaul\v2_artifacts\smoke_after_phase10_enrich.json
+
+=== SUMMARY ===
+A (grounded): 8/14
+B (coherent): 0/14
+C (failed):   6/14
+
+Target >=12/14 grade A: NOT MET (8/14)
