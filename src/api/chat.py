@@ -2756,6 +2756,18 @@ async def _load_pending_approval_context(
     if is_anonymous_lookup and stored_doc_token and not normalized_token:
         # 匿名 + token 必須の doc に対し token なし lookup は拒否
         return None
+    # 実ユーザー → 実ユーザー の cross-owner は token 一致でも拒否する
+    # (rubber-duck 監査 2026-05-01)。authenticated user の漏洩 token を別の
+    # authenticated user が使って approve できないようにする (anon の
+    # fingerprint shift だけ token rescue を許す)。
+    lookup_is_real_user = bool(normalized_owner_id) and not is_anonymous_lookup
+    stored_is_real_user = bool(stored_doc_owner_id) and not stored_doc_owner_id.startswith("anon-")
+    if (
+        lookup_is_real_user
+        and stored_is_real_user
+        and stored_doc_owner_id != normalized_owner_id
+    ):
+        return None
 
     analysis_markdown = ""
     plan_markdown = ""
@@ -2802,6 +2814,11 @@ async def _load_pending_approval_context(
         "conversation_settings": conversation_settings,
         "work_iq_session": work_iq_session,
     }
+    # Preserve approval_token in restored context so re-caching in memory does not
+    # drop it (rubber-duck audit 2026-05-01). Without this, a 2nd /approve POST
+    # after restore would lose the token binding and degrade to anonymous lookup.
+    if stored_doc_token:
+        context["approval_token"] = stored_doc_token
     if previous_versions:
         context["previous_versions"] = previous_versions
     _store_pending_approval_context(conversation_id, context)
@@ -5644,6 +5661,15 @@ async def approve(
         collected_events: list[dict] = []
         start = time.monotonic()
         existing_conversation: dict | None = None
+        # Resolve canonical owner from pending approval context. Anon user_id
+        # is documented as unstable across requests (see line 554-557), so
+        # `caller_identity["user_id"]` cannot be trusted as the partition key.
+        # Loading context first (with cross-partition query via approval_token)
+        # gives us the owner_id that was used at /chat time, which is the
+        # correct partition for both the existing_conversation read and the
+        # final save_conversation write.
+        pending_context: PendingApprovalContext | None = None
+        save_owner_id: str = _sanitize_optional_text(caller_identity["user_id"])
 
         async def _persist_and_register_background_jobs() -> None:
             """承認後の保存とバックグラウンドジョブ登録を行う。
@@ -5673,11 +5699,11 @@ async def approve(
                             conversation_status,
                             background_updates_pending=bool(background_update_jobs),
                             user_messages=user_messages,
-                            owner_id=caller_identity["user_id"],
+                            owner_id=save_owner_id,
                         )
                     ),
                     status=conversation_status,
-                    owner_id=caller_identity["user_id"],
+                    owner_id=save_owner_id,
                 )
                 _schedule_pipeline_monitoring(
                     background_tasks,
@@ -5710,7 +5736,40 @@ async def approve(
                 yield event
 
         try:
-            existing_conversation = await get_conversation(thread_id, owner_id=caller_identity["user_id"])
+            normalized_token = _sanitize_optional_text(body.approval_token)
+            caller_owner_id = _sanitize_optional_text(caller_identity["user_id"])
+            # Load pending context FIRST (uses cross-partition query when token
+            # is present) so we can derive the canonical partition owner before
+            # any other Cosmos call.
+            pending_context = await _load_pending_approval_context(
+                thread_id, caller_owner_id, normalized_token
+            )
+            context_owner_id, allow_cross_owner = _resolve_context_owner_lookup(
+                pending_context, caller_owner_id
+            )
+            if context_owner_id:
+                save_owner_id = context_owner_id
+            # Diagnostic log: anon fingerprint shifts make APPROVAL_CONTEXT_NOT_FOUND
+            # hard to reproduce. Record the lookup state explicitly so live
+            # failures can be diagnosed from App Insights without re-running.
+            logger.info(
+                "approve POST: conv=%s caller_owner_kind=%s save_owner_kind=%s "
+                "context_owner_kind=%s has_token=%s token_len=%d context_resolved=%s "
+                "is_approved=%s",
+                thread_id,
+                "anon" if caller_owner_id.startswith("anon-") else ("auth" if caller_owner_id else "none"),
+                "anon" if save_owner_id.startswith("anon-") else ("auth" if save_owner_id else "none"),
+                "anon" if context_owner_id and context_owner_id.startswith("anon-") else ("auth" if context_owner_id else "none"),
+                bool(normalized_token),
+                len(normalized_token),
+                pending_context is not None,
+                is_approved,
+            )
+            existing_conversation = await get_conversation(
+                thread_id,
+                owner_id=context_owner_id or None,
+                allow_cross_owner=allow_cross_owner,
+            )
             base_url = _build_public_base_url(request)
             if is_approved:
                 async for event in _collect_and_yield(
@@ -5718,8 +5777,9 @@ async def approve(
                         body.response,
                         thread_id,
                         base_url,
-                        owner_id=caller_identity["user_id"],
-                        approval_token=body.approval_token,
+                        approval_context=pending_context,
+                        owner_id=save_owner_id,
+                        approval_token=normalized_token,
                         register_background_job=_register_background_job,
                     )
                 ):
@@ -5727,7 +5787,7 @@ async def approve(
             else:
                 work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
                 contextual_response = await build_contextual_chat_input(
-                    owner_id=caller_identity["user_id"],
+                    owner_id=save_owner_id,
                     conversation_id=thread_id,
                     user_input=body.response,
                 )
@@ -5735,9 +5795,9 @@ async def approve(
                     _refine_events(
                         contextual_response,
                         thread_id,
-                        owner_id=caller_identity["user_id"],
+                        owner_id=save_owner_id,
                         work_iq_access_token=work_iq_access_token,
-                        approval_token=body.approval_token,
+                        approval_token=normalized_token,
                     )
                 ):
                     yield event

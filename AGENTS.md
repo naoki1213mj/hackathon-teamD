@@ -349,6 +349,7 @@ docker run -p 8000:8000 --env-file .env travel-agents
 - 既存のスタイルに合わせる
 - コミット・push は、現在の会話で明示依頼がある場合だけ行う
 - Azure 本番への直接反映は、理由と影響範囲を先に説明して了承を得る
+- **rubber-duck エージェントを毎回使う**: 些細な変更でも実装前または実装後に rubber-duck で critique を取り、blocking 指摘を反映してから push する。「trivial だから skip」はしない (User 明示要望 2026-05-01)
 
 ## Breaking Changes<https://learn.microsoft.com/en-us/agent-framework/support/upgrade/python-2026-significant-changes>
 

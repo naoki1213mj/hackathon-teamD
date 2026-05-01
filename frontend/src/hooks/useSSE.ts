@@ -1080,6 +1080,23 @@ export function buildRestoredPipelineState(
     }
   }
 
+  // Hydrate approval_token from conversation metadata when restore did not
+  // capture it from an approval_request event (e.g. early-saved doc emitted
+  // before the event reached the persisted messages array, or browser was
+  // launched directly with the conversation URL). Without this, /approve POST
+  // would lose the bearer token binding and degrade to anonymous lookup,
+  // causing APPROVAL_CONTEXT_NOT_FOUND on anon fingerprint shifts.
+  if (approvalRequest && !approvalRequest.approval_token) {
+    const pendingTokenRaw = metadata.pending_approval_token
+    const pendingToken = typeof pendingTokenRaw === 'string' ? pendingTokenRaw.trim() : ''
+    if (pendingToken) {
+      approvalRequest = {
+        ...approvalRequest,
+        approval_token: pendingToken,
+      }
+    }
+  }
+
   const status = doc.status === 'awaiting_approval' || doc.status === 'awaiting_manager_approval'
     ? 'approval'
     : doc.status === 'running'
@@ -1149,12 +1166,17 @@ export function buildRestoredPipelineState(
     textContents: cloneTextContents(textContents),
     images: cloneImages(images),
     approvalRequest: status === 'approval'
-      ? approvalRequest ?? {
-          prompt: '',
-          conversation_id: conversationId,
-          plan_markdown: getLatestPlanMarkdown(textContents),
-          approval_scope: doc.status === 'awaiting_manager_approval' ? 'manager' : 'user',
-        }
+      ? approvalRequest ?? (() => {
+          const pendingTokenRaw = metadata.pending_approval_token
+          const pendingToken = typeof pendingTokenRaw === 'string' ? pendingTokenRaw.trim() : ''
+          return {
+            prompt: '',
+            conversation_id: conversationId,
+            plan_markdown: getLatestPlanMarkdown(textContents),
+            approval_scope: doc.status === 'awaiting_manager_approval' ? 'manager' as const : 'user' as const,
+            approval_token: pendingToken || undefined,
+          }
+        })()
       : null,
     metrics,
     error,

@@ -77,6 +77,66 @@ describe('buildRestoredPipelineState', () => {
     expect(state.textContents).toHaveLength(2)
   })
 
+  it('hydrates approval_token from metadata.pending_approval_token when restored event lacks it', () => {
+    // Regression for APPROVAL_CONTEXT_NOT_FOUND after pod restart + anon
+    // fingerprint shift (rubber-duck audit 2026-05-01). When the SSE event
+    // saved in messages does not carry approval_token (e.g. older docs or
+    // doc saved before approval_request event reached the messages array),
+    // restore must hydrate the token from conversation metadata so the
+    // /approve POST still binds to the correct pending plan.
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_approval',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: 'analysis', agent: 'data-search-agent' } },
+          { event: 'text', data: { content: '# Plan', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: {
+              prompt: '確認してください',
+              conversation_id: 'conv-token-restore',
+              plan_markdown: '# Plan',
+              // No approval_token field — older event format
+            },
+          },
+        ],
+        metadata: {
+          pending_approval_token: 'restored-bearer-token',
+        },
+      },
+      'conv-token-restore',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('approval')
+    expect(state.approvalRequest?.approval_token).toBe('restored-bearer-token')
+  })
+
+  it('uses metadata.pending_approval_token for the fallback approvalRequest when no approval_request event exists', () => {
+    // Edge case: doc was saved before approval_request event hit the
+    // persisted messages array (eager-save scenario). Restore should still
+    // produce an approvalRequest with the token from metadata.
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_approval',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan', agent: 'marketing-plan-agent' } },
+        ],
+        metadata: {
+          pending_approval_token: 'eager-save-token',
+        },
+      },
+      'conv-eager-save',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('approval')
+    expect(state.approvalRequest).not.toBeNull()
+    expect(state.approvalRequest?.approval_token).toBe('eager-save-token')
+  })
+
   it('restores optional evidence, chart, trace, and debug data from image events', () => {
     const state = buildRestoredPipelineState(
       {

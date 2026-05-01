@@ -837,6 +837,51 @@ class TestDataSearchTools:
         )
         assert ds._is_low_confidence_data_agent_answer(soft_apology) is True
 
+    def test_low_confidence_detected_for_ga_particle_failure(self):
+        """Data Agent の「実データの取得**が**できませんでした」型のソフト謝罪を、
+        が-particle 抜きの「取得できません」パターンが拾えなかった live regression
+        (2026-05-01 14:19 UTC, conv 67b363bb) に対する固定。
+
+        ハワイ学生旅行プロンプトで再現:
+            "現在、ハワイ学生旅行（夏季）に関する実データの取得ができませんでした。
+             そのため、対象条件や値のマッピング、分析軸の文言などを見直して再度ご質問ください。"
+
+        この文面は SQL 経由で本物の販売データが取れているのに 85% 信頼で UI に
+        さらされていたため、SQL fallback に必ず置き換わるよう低信頼判定されること
+        を保証する。
+        """
+        import src.agents.data_search as ds
+
+        live_failure = (
+            "現在、ハワイ学生旅行（夏季）に関する実データの取得ができませんでした。"
+            "そのため、対象条件や値のマッピング、分析軸の文言などを見直して再度ご質問ください。"
+            "補足：「学生旅行」「夏」「ハワイ」に該当する正規化された条件"
+            "（例：destination_region='ハワイ'、season='summer'、customer_segment='学生'など）"
+            "や具体的な年次指定を追加いただくことで照合精度が上がる場合があります。"
+        )
+        assert ds._is_low_confidence_data_agent_answer(live_failure) is True
+
+    def test_concrete_answer_with_real_data_phrase_stays_high_confidence(self):
+        """「実データ」というフレーズを含む成功回答が、低信頼判定で誤って
+        SQL fallback に置き換えられないことを保証する (rubber-duck 監査)。
+
+        過広なパターン（例: 「実データの取得」だけ）を入れると、成功回答も
+        誤検出してしまう。が-particle ありの取得失敗パターンだけを追加した
+        ことで、成功回答は正しく素通りすることを確認する。
+        """
+        import src.agents.data_search as ds
+
+        success_with_real_data_phrase = (
+            "## 結論\n"
+            "ハワイ向け学生旅行の実データを取得した結果、夏季の予約は 1,243 件、\n"
+            "売上は ¥845,200,000 でした。\n"
+            "## 売上ランキング\n"
+            "| プラン | 売上 | 件数 |\n"
+            "| --- | --- | --- |\n"
+            "| ハワイ cruise | ¥350,406,823 | 482 件 |\n"
+        )
+        assert ds._is_low_confidence_data_agent_answer(success_with_real_data_phrase) is False
+
     @pytest.mark.asyncio
     async def test_query_data_agent_replaces_nl2ontology_error_with_sql_supplement(
         self, monkeypatch

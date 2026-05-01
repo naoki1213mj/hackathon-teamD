@@ -54,6 +54,15 @@ _LOW_CONFIDENCE_DATA_AGENT_PATTERNS = (
     "確認できませんでした",
     "取得できません",
     "取得できませんでした",
+    # Japanese particle 「が」 variants. Data Agent often emits
+    # 「実データの取得**が**できませんでした」(with が) which is NOT a
+    # substring of 「取得できません」. Add explicit variants so the
+    # low-confidence detector triggers SQL fallback for these polite
+    # 「we couldn't find data」 messages observed live (2026-05-01).
+    "取得ができません",
+    "取得ができませんでした",
+    "実データの取得ができません",
+    "実データの取得ができませんでした",
     "技術的な理由",
     "技術的なエラー",
     "技術的な都合",
@@ -129,6 +138,14 @@ _STRONG_DATA_AGENT_FAILURE_PATTERNS = (
     "詳細データ取得ができませんでした",
     "具体的な分析結果は取得できません",
     "具体的な分析結果は取得できませんでした",
+    # Japanese particle 「が」 variants observed live (2026-05-01) for
+    # 「現在、ハワイ学生旅行（夏季）に関する実データの取得**が**できませんでした」.
+    # 「取得できません」(no が) does NOT match this. Add explicit が forms so
+    # the SQL fallback triggers and the polite "no data" never reaches the UI.
+    "取得ができません",
+    "取得ができませんでした",
+    "実データの取得ができません",
+    "実データの取得ができませんでした",
     "詳細な数値やランキング",
     # 2026-05-01 condition matrix で観測された新しいソフト謝罪文言。
     # 例 (春のパリ): "システムで集計を試みましたが、…内部の仕組み上エラーが発生しました。"

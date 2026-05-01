@@ -190,3 +190,130 @@ def test_load_pending_real_user_does_not_need_token() -> None:
     assert ctx is not None, "実ユーザーは Entra Bearer 認証済なので token 不要"
     chat_module._pending_approvals.clear()
 
+
+def test_cosmos_restored_context_preserves_approval_token() -> None:
+    """Cosmos doc から context を再構築するとき approval_token が落ちないこと
+    (rubber-duck 監査 2026-05-01)。
+
+    旧実装は restored context dict に approval_token を入れ忘れていたため、
+    in-memory への re-cache 後の 2 回目 lookup で token-less context となり、
+    `_matches_approval_credentials` の「stored_token なし」分岐に流れて
+    cross-owner 防御が弱くなっていた。
+
+    実 Cosmos を立てずに、_get_conversation_metadata + 1 件の APPROVAL_REQUEST
+    + 1 件の TEXT (marketing-plan-agent) を持つ doc を `get_conversation` の
+    monkey-patch 経由で返して、復元 dict に token が含まれることを確認する。
+    """
+    import src.api.chat as chat_module
+    chat_module._pending_approvals.clear()
+
+    fake_conversation = {
+        "id": "conv-restore-token",
+        "input": "test prompt",
+        "status": "awaiting_approval",
+        "user_id": "anon-original",
+        "messages": [
+            {
+                "event": "approval_request",
+                "data": {
+                    "prompt": "approve?",
+                    "conversation_id": "conv-restore-token",
+                    "plan_markdown": "## Plan\nfrom event",
+                    "approval_scope": "user",
+                },
+            },
+            {
+                "event": "text",
+                "data": {
+                    "agent": "marketing-plan-agent",
+                    "content": "## Plan\nfinal text",
+                },
+            },
+        ],
+        "metadata": {
+            "pending_approval_token": "stored-bearer-token",
+        },
+    }
+
+    async def fake_get_conversation(conversation_id, owner_id=None, allow_cross_owner=False):
+        if conversation_id != "conv-restore-token":
+            return None
+        return fake_conversation
+
+    original = chat_module.get_conversation
+    chat_module.get_conversation = fake_get_conversation
+    try:
+        ctx = asyncio.run(
+            chat_module._load_pending_approval_context(
+                "conv-restore-token", "anon-different", "stored-bearer-token"
+            )
+        )
+        assert ctx is not None, "token 一致なら anon fingerprint shift でも復元できる"
+        assert ctx.get("approval_token") == "stored-bearer-token", (
+            "復元 context は approval_token を保持しなければならない (re-cache で落ちないため)"
+        )
+        # 2 回目の lookup は in-memory hit で同じ token を保持していることを確認
+        ctx2 = asyncio.run(
+            chat_module._load_pending_approval_context(
+                "conv-restore-token", "anon-different", "stored-bearer-token"
+            )
+        )
+        assert ctx2 is not None
+        assert ctx2.get("approval_token") == "stored-bearer-token"
+    finally:
+        chat_module.get_conversation = original
+        chat_module._pending_approvals.clear()
+
+
+def test_cosmos_real_user_to_real_user_cross_owner_blocked_even_with_token() -> None:
+    """実ユーザー → 別の実ユーザー の cross-owner restore は token 一致でも拒否
+    (rubber-duck 監査 2026-05-01)。
+
+    user-alice の漏洩した approval_token を user-mallory が使って alice の
+    pending plan を approve することを防ぐ。anon-* fingerprint shift だけは
+    token rescue を許可する (実 user は Entra Bearer 認証で安定なため、
+    cross-owner を許す必要がない)。
+    """
+    import src.api.chat as chat_module
+    chat_module._pending_approvals.clear()
+
+    fake_conversation = {
+        "id": "conv-alice-pending",
+        "input": "alice prompt",
+        "status": "awaiting_approval",
+        "user_id": "user-alice",
+        "messages": [
+            {
+                "event": "text",
+                "data": {"agent": "marketing-plan-agent", "content": "## Plan\nfor alice"},
+            },
+        ],
+        "metadata": {"pending_approval_token": "leaked-alice-token"},
+    }
+
+    async def fake_get_conversation(conversation_id, owner_id=None, allow_cross_owner=False):
+        if conversation_id != "conv-alice-pending":
+            return None
+        return fake_conversation
+
+    original = chat_module.get_conversation
+    chat_module.get_conversation = fake_get_conversation
+    try:
+        # mallory は alice の token を提示しても alice の plan には到達できない
+        ctx = asyncio.run(
+            chat_module._load_pending_approval_context(
+                "conv-alice-pending", "user-mallory", "leaked-alice-token"
+            )
+        )
+        assert ctx is None, "実ユーザー間の cross-owner は token 一致でも拒否"
+        # alice 本人なら通る
+        ctx_alice = asyncio.run(
+            chat_module._load_pending_approval_context(
+                "conv-alice-pending", "user-alice", "leaked-alice-token"
+            )
+        )
+        assert ctx_alice is not None
+    finally:
+        chat_module.get_conversation = original
+        chat_module._pending_approvals.clear()
+
