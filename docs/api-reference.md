@@ -214,14 +214,16 @@ curl -N -X POST http://localhost:8000/api/chat \
 ```json
 {
   "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "response": "承認"
+  "response": "承認",
+  "approval_token": "ee_6D5JuLZ_4JZG0-KPq..."
 }
 ```
 
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
-| `conversation_id` | `string` | 必須 | バリデーション用に受け取る互換フィールド。現状は処理で未使用 |
+| `conversation_id` | `string` | 必須 | バリデーション用に受け取る互換フィールド。実体は path の `{thread_id}` を使う |
 | `response` | `string` | 必須 | 承認キーワードまたは修正指示 |
+| `approval_token` | `string` | 匿名 lookup で必須 | `chat()` が `approval_request` SSE イベントで配布した per-conversation の bearer token (32 byte urlsafe)。`_refine_events()` で revision 毎に rotation する。Entra Bearer 認証済の実ユーザー (`user-*`) は owner_id 一致で代替可、匿名 (`anon-*`) は token 必須 |
 
 ### 承認判定キーワード
 
@@ -242,13 +244,21 @@ curl -N -X POST http://localhost:8000/api/chat \
 
 | 条件 | 挙動 |
 | --- | --- |
-| 承認 + Azure 接続あり | `regulation-check-agent` → `plan-revision-agent` を実行し、上司承認オフなら `brochure-gen-agent` → `video-gen-agent` を続行。上司承認オンなら manager approval の `approval_request` で待機し、通知 workflow があれば併せて呼び出す |
+| 承認 + 有効な `approval_token` (or 認証済ユーザーの owner 一致) | `regulation-check-agent` → `plan-revision-agent` を実行し、上司承認オフなら `brochure-gen-agent` → `video-gen-agent` を続行。上司承認オンなら manager approval の `approval_request` で待機し、通知 workflow があれば併せて呼び出す |
+| 承認 + 匿名 + token 不在 / 不一致 | `error` イベント `code: APPROVAL_CONTEXT_NOT_FOUND` を返却。pipeline 後段は実行されない |
 | 承認 + Azure 接続なし | モックの Agent3a → Agent3b → Agent4 → Agent5 イベントを返す |
-| 非承認 | 修正テキストとして扱い、再調整経路に入る |
+| 非承認 | 修正テキストとして扱い、`_refine_events()` で再調整。新しい `approval_token` が発行されるので client 側は次回 approve でその新 token を echo すること |
+
+### 主な error code
+
+- `APPROVAL_CONTEXT_NOT_FOUND`: 該当する pending approval が in-memory にも Cosmos にも見つからない、または匿名 lookup で `approval_token` が無い / 不一致 / Cosmos doc の `metadata.pending_approval_token` と不一致
+- `INPUT_GUARD_BLOCKED`: response 文字列が prompt shield 軽量ガードに弾かれた
 
 ## `GET /api/chat/{thread_id}/manager-approval-request`
 
-上司承認ページが企画書本文を取得するための JSON API です。`X-Manager-Approval-Token` ヘッダ、または `token` クエリで token を渡します。
+上司承認ページが企画書本文を取得するための JSON API です。`X-Manager-Approval-Token` ヘッダ、または body の `manager_approval_token` で token を渡します。
+
+> **Security note**: クエリ文字列 (`?token=...`) からの token 受け取りは Application Insights のリクエストログ・referer ヘッダー・ブラウザ履歴に平文 token が漏洩するリスクがあるため受け入れません (SEC-H4)。
 
 レスポンス例:
 
@@ -779,7 +789,7 @@ Work IQ の主な `status` 値:
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `url` | `string` | `data:image/png;base64,...` または `data:image/svg+xml,...` |
+| `url` | `string` | `data:image/png;base64,...` または `data:image/svg+xml,...`。GPT 系 / MAI 画像生成失敗時は **可視 SVG プレースホルダー**（透明 PNG ではない）を返す |
 | `alt` | `string` | 代替テキスト |
 | `agent` | `string` | 出力元エージェント |
 
@@ -789,11 +799,31 @@ Work IQ の主な `status` 値:
 {
   "prompt": "上記の企画書を確認してください。承認する場合は「承認」、修正したい場合は修正内容を入力してください。",
   "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "plan_markdown": "# 春の沖縄ファミリープラン 企画書\n\n..."
+  "plan_markdown": "# 春の沖縄ファミリープラン 企画書\n\n...",
+  "approval_token": "ee_6D5JuLZ_4JZG0-KPq...",
+  "approval_scope": "user",
+  "model_settings": {"text_model": "gpt-5-4-mini", "image_model": "gpt-image-2"},
+  "workflow_settings": {"manager_email": "manager@example.com", "manager_delivery_mode": "workflow"},
+  "manager_approval_url": "https://app.example.com/?manager_conversation_id=...#manager_approval_token=...",
+  "manager_delivery_mode": "workflow",
+  "manager_comment": "上司から差し戻しされました。内容を確認して修正してください。"
 }
 ```
 
-注: このイベントは Azure モードの主フローでも Agent2 完了後に送信されます。モック / デモ経路でも同様に使われます。
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `prompt` | `string` | 承認 UI の説明文 |
+| `conversation_id` | `string` | server-issued UUID4 |
+| `plan_markdown` | `string` | 表示する企画書本文 |
+| `approval_token` | `string` | server-issued bearer token (32 byte urlsafe)。次の `/api/chat/{id}/approve` POST で必ず echo する。`_refine_events()` で修正版を出すたびに rotation するので client は **常に最新の event の token を使う** |
+| `approval_scope` | `"user"` \| `"manager"` | `manager` の場合は上司承認待ち |
+| `model_settings` | `object` (optional) | client 側で記録しておく現 model 設定 |
+| `workflow_settings` | `object` (optional) | manager_email / manager_delivery_mode 等 |
+| `manager_approval_url` | `string` (optional) | scope=manager のときに上司に渡す URL。fragment 部に `manager_approval_token` を含む |
+| `manager_delivery_mode` | `"workflow"` \| `"manual"` (optional) | Logic Apps 自動配信 vs 手動共有 |
+| `manager_comment` | `string` (optional) | manager から差し戻しされた場合のコメント |
+
+注: このイベントは Azure モードの主フローでも Agent2 完了後に送信されます。モック / デモ経路でも同様に使われます。承認 token のセキュリティモデルは [`docs/approval-security.md`](approval-security.md) を参照。
 
 ### `error`
 
