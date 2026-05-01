@@ -73,7 +73,7 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
             data-tool-status={event.status}
             className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
               isFoundryWorkIq
-                ? 'border-violet-300/70 bg-violet-50/80 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/30 dark:text-violet-100'
+                ? 'border-violet-400 bg-violet-100 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/30 dark:text-violet-100'
                 : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)]'
             }`}
           >
@@ -82,7 +82,7 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
             {isFoundryWorkIq ? (
               <span
                 data-tool-kind="foundry-workiq"
-                className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200"
+                className="rounded-full border border-violet-400 bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100"
               >
                 {t('tool.source.foundry')} {t('tool.source.workiq')}
               </span>
@@ -94,12 +94,12 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
                   </span>
                 )}
                 {provider === 'workiq' && (
-                  <span className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200">
+                  <span className="rounded-full border border-violet-400 bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100">
                     {t('tool.source.workiq')}
                   </span>
                 )}
                 {provider === 'foundry' && (
-                  <span className="rounded-full border border-sky-300/70 bg-sky-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200">
+                  <span className="rounded-full border border-sky-400 bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-900 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-100">
                     {t('tool.source.foundry')}
                   </span>
                 )}

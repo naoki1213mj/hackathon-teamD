@@ -21,8 +21,10 @@ export interface IQBrandMeta {
   brand: IQBrand
   /** UI で表示するブランド名 (i18n 経由で上書き可) */
   defaultLabel: string
-  /** Tailwind class — 背景色 / 文字色 / ボーダー */
+  /** Tailwind class — 小さい inline chip 用 (EvidencePanel カードなど) */
   chipClass: string
+  /** Tailwind class — IQStatusStrip の大きいタイル用 (より強いコントラスト) */
+  tileClass: string
   /** 凡例で使う 1 行の説明 (i18n key, fallback あり) */
   descriptionKey: string
   /** lucide-react のアイコン名 (component import 側で resolve) */
@@ -35,6 +37,8 @@ export const IQ_BRANDS: Record<IQBrand, IQBrandMeta> = {
     defaultLabel: 'Work IQ',
     chipClass:
       'border-violet-300/70 bg-violet-100/80 text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200',
+    tileClass:
+      'border-violet-400 bg-violet-100 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100',
     descriptionKey: 'iq.work_iq.description',
     iconName: 'Sparkles',
   },
@@ -43,6 +47,8 @@ export const IQ_BRANDS: Record<IQBrand, IQBrandMeta> = {
     defaultLabel: 'Fabric IQ',
     chipClass:
       'border-emerald-300/70 bg-emerald-100/80 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200',
+    tileClass:
+      'border-emerald-400 bg-emerald-100 text-emerald-900 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-100',
     descriptionKey: 'iq.fabric_iq.description',
     iconName: 'Database',
   },
@@ -51,6 +57,8 @@ export const IQ_BRANDS: Record<IQBrand, IQBrandMeta> = {
     defaultLabel: 'Foundry IQ',
     chipClass:
       'border-sky-300/70 bg-sky-100/80 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200',
+    tileClass:
+      'border-sky-400 bg-sky-100 text-sky-900 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-100',
     descriptionKey: 'iq.foundry_iq.description',
     iconName: 'BookOpen',
   },

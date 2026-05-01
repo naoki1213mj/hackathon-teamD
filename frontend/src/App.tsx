@@ -150,17 +150,30 @@ function App() {
               : previewTextContents
           })()
         : previewTextContents
+  // stepperVideoContents は **現在のラウンド** に属する text 出力だけを対象にすることで、
+  // refine round (status='approval' or 'running' なのに pendingVersion=null) で
+  // 過去 round の動画 URL を参照して PipelineStepper が「動画生成 ✓ 完了」を
+  // 誤表示するバグを防ぐ (rubber-duck 監査 2026-05-02)。
+  //
+  // ルール:
+  //   1. pendingVersion がある → そのオフセット以降の textContents
+  //   2. pipeline が approval/running 状態 (= 新ラウンド中で artifact 未生成) → 空
+  //   3. それ以外 (= 完了済 or 単一ラウンド進行中) →
+  //        versions[最終].textContents を使う (確定版動画を表示)
+  //        ただし versions が空なら state.textContents
   const stepperVideoContents = state.pendingVersion
     ? state.textContents.slice(state.pendingVersion.textOffset)
-    : state.versions.length > 0
-      ? (() => {
-          const latestVersion = state.versions.length
-          const previousTextOffset = latestVersion > 1
-            ? state.versions[latestVersion - 2]?.textContents.length ?? 0
-            : 0
-          return state.versions[latestVersion - 1].textContents.slice(previousTextOffset)
-        })()
-      : state.textContents
+    : (state.status === 'approval' || state.status === 'running') && state.versions.length > 0
+      ? []
+      : state.versions.length > 0
+        ? (() => {
+            const latestVersion = state.versions.length
+            const previousTextOffset = latestVersion > 1
+              ? state.versions[latestVersion - 2]?.textContents.length ?? 0
+              : 0
+            return state.versions[latestVersion - 1].textContents.slice(previousTextOffset)
+          })()
+        : state.textContents
   const workflowTextContents = previewSnapshot
     ? previewSnapshot.textContents
     : state.textContents

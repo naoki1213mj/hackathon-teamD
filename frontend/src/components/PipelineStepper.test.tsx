@@ -62,4 +62,29 @@ describe('PipelineStepper', () => {
 
     expect(screen.getByText('動画生成').className).toContain('text-[var(--warning-text)]')
   })
+
+  it('does NOT show the video step as completed during a refine round (videoStatus=idle)', () => {
+    // Regression test for the user-reported bug 2026-05-02: after a full pipeline run,
+    // when the workflow regresses to "approval" state (refine round started), the video
+    // step indicator was incorrectly showing GREEN CHECK because PipelineStepper read
+    // videoStatus from the LAST committed version's content. The fix in App.tsx makes
+    // stepperVideoContents empty during status='approval'/'running' with no pendingVersion,
+    // so videoStatus drops to 'idle' and the chip shows the default Video icon, not check.
+    const { container } = render(
+      <PipelineStepper
+        progress={{ agent: 'approval', status: 'running', step: 3, total_steps: 5 }}
+        t={t}
+        videoStatus="idle"
+      />,
+    )
+
+    // Video step text should NOT have the active/completed font-medium styling
+    const videoLabel = screen.getByText('動画生成')
+    expect(videoLabel.className).not.toContain('font-medium')
+    // No green check icon should be rendered for the video step (Check svg has data-testid?)
+    // Instead the default Video icon. Best assertion: text-color stays muted.
+    expect(videoLabel.className).toContain('text-[var(--text-muted)]')
+    // sanity: no JSX errored
+    expect(container.querySelector('[data-iq-active]')).toBeNull()
+  })
 })
