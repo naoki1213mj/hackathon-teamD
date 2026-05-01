@@ -155,6 +155,25 @@ Operational gotchas (verified during the 2026-04-30 cutover):
    az containerapp delete -n ca-<token> -g <rg> --yes
    az containerapp env delete -n cae-<token> -g <rg> --yes
    ```
+6. **Fabric workspace permission for the new MI** (verified during the 2026-05-01 cutover): Container App permissions on the Fabric workspace are managed via the **Fabric API**, not Azure RBAC. The blue-green migration creates a brand-new System-Assigned Managed Identity (different `principalId`), so the Fabric workspace will reject the new MI with `401 Unauthorized` from Data Agent and `28000 / 18456 SQL login failed` from the SQL endpoint until you grant it explicitly:
+
+   ```bash
+   NEW_MI=$(az containerapp show -n ca-<token>-pn -g <rg> --query identity.principalId -o tsv)
+   FABRIC_TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)
+   WS_ID=<fabric-workspace-guid>
+
+   # Add new MI as Member
+   curl -X POST "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/roleAssignments" \
+     -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d "{\"principal\":{\"id\":\"${NEW_MI}\",\"type\":\"ServicePrincipal\"},\"role\":\"Member\"}"
+
+   # Then verify
+   curl "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/roleAssignments" \
+     -H "Authorization: Bearer ${FABRIC_TOKEN}" | jq '.value[] | select(.principal.type=="ServicePrincipal")'
+   ```
+
+   Also delete the orphan role assignment for the old (deleted) Container App's MI to keep the workspace clean. Tracked as `next-fabric-mi-grant-automation` for future automation in `scripts/postprovision.py`.
 
 ### Improvement MCP の追加デプロイ
 
