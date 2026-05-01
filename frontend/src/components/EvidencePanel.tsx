@@ -1,6 +1,8 @@
 import type { ChartSpec, EvidenceItem, JsonScalar } from '../lib/event-schemas'
+import { classifyEvidence } from '../lib/iq-brand'
 import { sanitizeHttpUrl } from '../lib/safe-url'
 import type { ToolEvent } from '../lib/tool-events'
+import { IQBadge } from './IQBadge'
 
 interface EvidencePanelProps {
   events: ToolEvent[]
@@ -104,12 +106,17 @@ export function EvidencePanel({ events, t }: EvidencePanelProps) {
 
       {evidence.length > 0 && (
         <div className="grid gap-2 md:grid-cols-2">
-          {evidence.map((item, index) => (
+          {evidence.map((item, index) => {
+            const iqBrand = classifyEvidence(item)
+            return (
             <article key={item.id || `${item.source}-${index}`} className="rounded-xl border border-[var(--panel-border)] bg-[var(--surface)] p-3">
               <div className="mb-2 flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--text-primary)]">{item.title || t('evidence.untitled')}</p>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">{resolveSourceLabel(item.source, t)}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    {iqBrand && <IQBadge brand={iqBrand} t={t} size="sm" />}
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">{resolveSourceLabel(item.source, t)}</p>
+                  </div>
                 </div>
                 {typeof item.relevance === 'number' && (
                   <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--accent-strong)]">
@@ -124,7 +131,8 @@ export function EvidencePanel({ events, t }: EvidencePanelProps) {
                 </a>
               )}
             </article>
-          ))}
+            )
+          })}
         </div>
       )}
 

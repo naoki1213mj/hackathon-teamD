@@ -8,6 +8,7 @@ import { AnalysisView } from './AnalysisView'
 import { DebugConsole } from './DebugConsole'
 import { EvidenceChartPanel } from './EvidenceChartPanel'
 import { ErrorRetry } from './ErrorRetry'
+import { IQStatusStrip } from './IQBadge'
 import { MarkdownView } from './MarkdownView'
 import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
@@ -471,6 +472,8 @@ export function WorkflowAccordion({
 
   return (
     <div className="space-y-2">
+      {toolEvents.length > 0 && <IQStatusStrip toolEvents={toolEvents} t={t} />}
+
       {/* 単一ラウンドの場合 — ラウンド表示なし */}
       {!isMultiRound && (
         <div className="space-y-2">
