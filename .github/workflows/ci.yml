@@ -35,13 +35,16 @@ jobs:
         run: uv run python -m pytest tests/ -v --ignore=tests/test_fabric_data_agent_integration.py
 
       - name: pytest (Fabric integration, opt-in)
-        # Runs only when secrets are configured. Falls back to skip otherwise.
+        # Runs only when the GH variable AND secret are both present.
+        # NOTE: GitHub Actions does not allow `secrets.*` references inside
+        # an `if:` expression directly. We surface presence via env first.
         env:
           FABRIC_DATA_AGENT_URL_V2: ${{ vars.FABRIC_DATA_AGENT_URL_V2 }}
           AZURE_CLIENT_ID: ${{ secrets.FABRIC_TEST_AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.FABRIC_TEST_AZURE_CLIENT_SECRET }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-        if: ${{ vars.FABRIC_DATA_AGENT_URL_V2 != '' && secrets.FABRIC_TEST_AZURE_CLIENT_SECRET != '' }}
+          HAS_FABRIC_SECRET: ${{ secrets.FABRIC_TEST_AZURE_CLIENT_SECRET != '' }}
+        if: env.FABRIC_DATA_AGENT_URL_V2 != '' && env.HAS_FABRIC_SECRET == 'true'
         run: uv run python -m pytest tests/test_fabric_data_agent_integration.py -v
         continue-on-error: true
 
