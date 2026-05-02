@@ -1144,6 +1144,194 @@ class TestDataSearchTools:
         assert not any("NL2Ontology" in quote for quote in evidence_quotes)
         assert not any("Failed to generate" in quote for quote in evidence_quotes)
 
+    def test_has_yen_amount_helper(self):
+        """¥ / ￥ / 円 各形式と桁不足ケースの判定を確認する。"""
+        import src.agents.data_search as ds
+
+        assert ds._has_yen_amount("¥38,926,615") is True
+        assert ds._has_yen_amount("￥1,022,000") is True
+        assert ds._has_yen_amount("38,926,615 円") is True
+        assert ds._has_yen_amount("1234円") is True
+        assert ds._has_yen_amount("売上は ¥850,000 でした") is True
+        # 桁不足 / 0 / 接頭・接尾なしは除外
+        assert ds._has_yen_amount("¥0") is False
+        assert ds._has_yen_amount("¥123") is False
+        assert ds._has_yen_amount("100円") is False
+        assert ds._has_yen_amount("id 12345 was used") is False
+        assert ds._has_yen_amount("予約は 39 件でした") is False
+
+    def test_has_count_metric_helper(self):
+        """件 / 名 / 人 を伴う数値表現を判定する。
+
+        `泊` (例: 2泊3日) は期間表現で集計件数ではないため grounded override の count metric
+        としては扱わない (rubber-duck `grounded-metrics-impl-review` 2026-05-02 BLOCKING fix)。
+        """
+        import src.agents.data_search as ds
+
+        assert ds._has_count_metric("131名") is True
+        assert ds._has_count_metric("39件") is True
+        assert ds._has_count_metric("8 件") is True
+        assert ds._has_count_metric("1,234人") is True
+        # 期間 / その他は count として扱わない
+        assert ds._has_count_metric("2泊3日") is False
+        assert ds._has_count_metric("ボトル 1 本") is False
+        assert ds._has_count_metric("¥38,926,615") is False
+        assert ds._has_count_metric("名前は田中") is False
+
+    def test_has_grounded_metrics_requires_both_yen_and_count(self):
+        """grounded 判定は ¥ 金額と件/名/人 の **両方** が必要 (rubber-duck 監査)。"""
+        import src.agents.data_search as ds
+
+        assert ds._has_grounded_metrics("¥38,926,615 / 39件 / 131名") is True
+        assert ds._has_grounded_metrics("売上 1,022,000 円、予約 8 件") is True
+        # 片方だけだと grounded ではない
+        assert ds._has_grounded_metrics("131名のみ") is False
+        assert ds._has_grounded_metrics("¥38,926,615 のみ") is False
+        # 桁不足 ¥ + 件 は grounded ではない (¥0 / ¥123 のような trivial case)
+        assert ds._has_grounded_metrics("¥0、0件") is False
+
+    def test_grounded_data_agent_answer_with_soft_disclaimers_stays_high_confidence(self):
+        """Live agent_style probe (2026-05-02) で観測された 5000+ 字の grounded narrative が、
+        埋め込まれた soft disclaimer (取得ができません / 抽出できません / ご希望があれば /
+        集計できません) によって誤って低信頼判定されないことを保証する (rubber-duck
+        `grounded-metrics-fix-review` 反映)。
+
+        以前は `_LOW_CONFIDENCE_DATA_AGENT_PATTERNS` / `_STRONG_DATA_AGENT_FAILURE_PATTERNS`
+        が grounded narrative 内の partial-data caveat を拾って 5/5 trial 全て低信頼判定
+        していた。¥ + 件/名 の両方が揃っている grounded 回答は、disclaimer phrase が
+        混在していても high-conf として扱う。
+        """
+        import src.agents.data_search as ds
+
+        grounded_with_disclaimers = (
+            "## 結論\n"
+            "夏のハワイ学生旅行は、平均単価 ¥302,233／名で、131名が利用し、"
+            "総売上は約 ¥38,926,615 です。\n\n"
+            "## 売上明細\n"
+            "| 売上 | 予約数 | 旅行者数 | 平均単価 |\n"
+            "| --- | --- | --- | --- |\n"
+            "| ¥38,926,615 | 39件 | 131名 | ¥302,233 |\n\n"
+            "## 注意事項\n"
+            "- 学生属性は直接判別不可なため参考値です\n"
+            "- プランごとの詳細集計できませんでした\n"
+            "- 一部 (売上トレンド・人気プラン・単価・リピート率) は該当データ抽出できません\n"
+            "- 実データの取得ができませんでした (年次別の細目)\n"
+            "- ご希望があれば追加分析を行います\n"
+        )
+        assert ds._is_low_confidence_data_agent_answer(grounded_with_disclaimers) is False
+
+    def test_low_confidence_when_hard_infra_error_with_grounded_metrics(self):
+        """grounded metric が含まれていても、HARD インフラエラー
+        (技術的なエラー / システムエラー / 障害) は最優先で低信頼扱い。
+        rubber-duck blocking #1 の対応: grounded override の前に HARD failures を
+        チェックして、本物の error を grounded metric で誤って high-conf 化しない。"""
+        import src.agents.data_search as ds
+
+        infra_error_with_metrics = (
+            "技術的なエラーが発生しましたが、参考までに過去の集計値を表示します。\n"
+            "売上 ¥38,926,615、予約 39 件、131名"
+        )
+        assert ds._is_low_confidence_data_agent_answer(infra_error_with_metrics) is True
+
+    def test_low_confidence_when_filters_ignored_with_grounded_metrics(self):
+        """grounded metric が含まれていても、ユーザのフィルタを無視した広域回答は低信頼扱い。
+        ユーザの聞きたかった分析ではないため SQL fallback に置き換わるべき。"""
+        import src.agents.data_search as ds
+
+        ignored_filter_with_metrics = (
+            "使用条件\n"
+            "- 旅行先・カテゴリ・年齢層の指定なし／全エリア・全年齢層・全カテゴリ対象\n\n"
+            "売上 17,000,000 円、予約 40 件です。"
+        )
+        assert ds._is_low_confidence_data_agent_answer(ignored_filter_with_metrics) is True
+
+    def test_low_confidence_when_yen_with_only_nights_and_disclaimer(self):
+        """rubber-duck `grounded-metrics-impl-review` BLOCKING regression:
+        `2泊3日` を count metric として grounded override に通してしまうと、
+        `¥ + 2泊3日 + 集計できません` 型の弱い回答が誤って high-conf 化する。
+
+        例: `おすすめは沖縄2泊3日、価格は¥50,000です。プランごとの詳細集計できませんでした。`
+        は SQL fallback で補強されるべき (low_conf=True を期待)。
+        """
+        import src.agents.data_search as ds
+
+        nights_only_with_disclaimer = (
+            "おすすめは沖縄2泊3日、価格は¥50,000です。"
+            "プランごとの詳細集計できませんでした。"
+        )
+        # 期間表現 (2泊3日) は count metric ではないので grounded override されない →
+        # SOFT disclaimer "集計できません" が _STRONG_DATA_AGENT_FAILURE_PATTERNS で拾われ低信頼。
+        assert ds._has_grounded_metrics(nights_only_with_disclaimer) is False
+        assert ds._is_low_confidence_data_agent_answer(nights_only_with_disclaimer) is True
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_keeps_grounded_answer_with_disclaimers(self, monkeypatch):
+        """grounded narrative + soft disclaimers の DA 回答が SQL fallback に置き換わらず、
+        Fabric Data Agent 回答 (relevance=0.85) として UI に出ることを保証する。
+
+        rubber-duck blocking #3 (integration test) に対応: helper-level test だけでなく
+        `query_data_agent` の orchestration まで通して確認することで、low-conf misclassification
+        が demo path に再発しないことを protect する。
+        """
+        import src.agents.data_search as ds
+
+        grounded_with_disclaimers = (
+            "## 結論\n"
+            "夏のハワイ学生旅行は、平均単価 ¥302,233／名で、131名が利用し、"
+            "総売上は約 ¥38,926,615 です。\n\n"
+            "| 売上 | 予約数 | 旅行者数 |\n"
+            "| --- | --- | --- |\n"
+            "| ¥38,926,615 | 39件 | 131名 |\n\n"
+            "## 注意事項\n"
+            "- 学生属性は直接判別不可なため参考値です\n"
+            "- プランごとの詳細集計できませんでした\n"
+            "- ご希望があれば追加分析を行います\n"
+        )
+
+        async def fake_data_agent(question: str) -> str:
+            call_log.append(question)
+            return grounded_with_disclaimers
+
+        call_log: list[str] = []
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
+        # v2 retry-gate: grounded answer は structured retry に進まないこと (rubber-duck)
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+
+        # SQL fallback は呼ばれてはいけないので、呼ばれた場合は直ちに test を fail させる。
+        def sql_should_not_be_called(**_kwargs):
+            raise AssertionError(
+                "Fabric SQL fallback should not be invoked when DA returns grounded answer with disclaimers"
+            )
+
+        monkeypatch.setattr(ds, "_get_sales_data_from_fabric", sql_should_not_be_called)
+        monkeypatch.setattr(ds, "_get_reviews_from_fabric", sql_should_not_be_called)
+
+        events: list = []
+        with tool_event_context(events.append, agent_name="data-search-agent", step=1):
+            result = await ds.query_data_agent(
+                "夏のハワイ学生旅行向けプランを企画して"
+            )
+
+        parsed = json.loads(result)
+        assert parsed["source"] == "Fabric Data Agent"
+        assert "¥38,926,615" in parsed["answer"]
+        assert parsed["attempt"] == "first"
+        # v2 retry-gate: grounded with disclaimers は 1 回で確定し、structured retry を起動しないこと。
+        assert len(call_log) == 1, f"Expected exactly 1 DA call, got {len(call_log)}: {call_log}"
+
+        evidence_titles: list[str] = []
+        evidence_relevances: list[float] = []
+        for event in events:
+            for ev in event.get("evidence", []) or []:
+                evidence_titles.append(ev.get("title", ""))
+                relevance = ev.get("relevance")
+                if isinstance(relevance, (int, float)):
+                    evidence_relevances.append(float(relevance))
+        assert "Fabric Data Agent 回答" in evidence_titles
+        assert "Fabric Lakehouse 集計" not in evidence_titles
+        assert 0.85 in evidence_relevances
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""

@@ -183,6 +183,40 @@ _MISSING_SALES_DATA_AGENT_PATTERNS = (
     "予約件数",
     "合計人数",
 )
+# 真のインフラ層エラー (クエリパス自体が壊れた): grounded metric が混在していても低信頼扱い。
+# `_STRONG_DATA_AGENT_FAILURE_PATTERNS` の subset として、明示的に「エラー」「障害」と
+# 宣言している HARD failures のみ列挙する。partial-data caveat (実データの取得ができません等) は
+# SOFT として、grounded override より後でチェックする。
+_HARD_INFRA_FAILURE_PATTERNS_JP = (
+    "技術的なエラー",
+    "システム的なエラー",
+    "システム的エラー",
+    "システムエラー",
+    "サーバーエラー",
+    "サービス障害",
+    "障害が発生",
+    "エラーが発生し",
+    "エラーが発生したため",
+    "データ取得プロセスでエラー",
+    "内部の仕組み上エラー",
+    "内部の仕組みでエラー",
+)
+# フィルタ無視: ユーザ指定条件を勝手に外して回答した場合は、grounded metric があっても
+# 低信頼扱い (rubber-duck `grounded-metrics-fix-review` 2026-05-02)。
+_HARD_IGNORED_FILTER_PATTERNS = (
+    "全エリア・全年齢層",
+    "旅行先・カテゴリ・年齢層の指定なし",
+)
+# Yen 金額判定: ¥/￥ 接頭または 円 接尾の 4 桁以上の金額 (¥0 / ¥123 等の trivial を除外)。
+# 「¥38,926,615」「1,022,000 円」「¥38000000」等を grounded amount として認識する。
+_YEN_AMOUNT_RE = re.compile(
+    r"(?:[¥￥]\s*(?:\d{1,3}(?:,\d{3})+|\d{4,})|(?:\d{1,3}(?:,\d{3})+|\d{4,})\s*円)"
+)
+# 件数 metric: 件/名/人 を伴う数値表現。`泊` (期間表現) や `本` は集計指標とは限らないので
+# grounded override を判定する目的では使わない (rubber-duck `grounded-metrics-impl-review`
+# 2026-05-02 BLOCKING fix)。
+_COUNT_METRIC_RE = re.compile(r"\d[\d,]*\s*(?:件|名|人)")
+
 _DATA_AGENT_RESULT_TOOL_NAMES = {
     "trace.analyze_ontology",
     "analyze.database.execute",
@@ -209,27 +243,62 @@ _KNOWN_DESTINATIONS = (
 )
 
 
+def _has_yen_amount(answer: str) -> bool:
+    """¥/￥ 接頭または 円 接尾の 4 桁以上の金額が含まれるか。"""
+    return bool(_YEN_AMOUNT_RE.search(answer))
+
+
+def _has_count_metric(answer: str) -> bool:
+    """件/名/人/本/泊 を伴う数値 metric が含まれるか。"""
+    return bool(_COUNT_METRIC_RE.search(answer))
+
+
+def _has_grounded_metrics(answer: str) -> bool:
+    """Data Agent が ¥ 金額と件/名/人 系 metric を **共に** 含む実データ回答を返したか。
+
+    Soft な「ご希望があれば」「集計できません」「実データの取得ができません」型 disclaimer が
+    grounded narrative 内に混在していても、両 metric が揃っていれば partial answer の honest
+    caveat として扱い、failure ではないとみなす (rubber-duck `grounded-metrics-fix-review`
+    2026-05-02 採用)。¥0 / ¥123 のような桁不足金額は `_YEN_AMOUNT_RE` で除外済。
+    `泊` (例: 2泊3日) は期間表現なので grounded override の count metric としては使わない
+    (rubber-duck `grounded-metrics-impl-review` 2026-05-02 BLOCKING fix)。
+    """
+    return _has_yen_amount(answer) and _has_count_metric(answer)
+
+
 def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     """Data Agent が接続成功でも実質的に分析できていない回答を検出する。"""
     normalized = answer.lower()
     if not normalized.strip():
         return True
+    # GraphQL / SQL 生クエリ leak は失敗扱い。
     if re.search(r"```(?:json|gql|graphql)\b|^\s*[{[]\s*\"|query\s*[{(]", answer, re.IGNORECASE | re.MULTILINE):
         return True
     if any(pattern in normalized for pattern in _PLACEHOLDER_DATA_AGENT_PATTERNS):
         return True
-    # 失敗を明示する強いフレーズが含まれている場合は、ターゲット説明用の数値（例: 「20代」「2人以上」）に
-    # 引きずられて成功扱いにならないよう、この時点で低信頼と判定する。
-    if any(pattern in answer for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS):
-        return True
-    # Fabric Data Agent NL2Ontology / NL2SQL / 内部エラーは英語で返ってくるため、
-    # 正規化済み (lower-case) 文字列に対して別途照合する。
+    # 1) 英語のインフラ層エラー (NL2Ontology / NL2SQL / InternalError):
+    #    クエリパス自体が失敗しているので "subCode:0" などの数字を含んでも低信頼。
     if any(pattern in normalized for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS_EN):
         return True
+    # 2) 日本語のインフラ層エラー (技術的なエラー / システムエラー / 障害):
+    #    grounded metric があっても明示的な error 宣言は最優先で低信頼扱い。
+    if any(pattern in answer for pattern in _HARD_INFRA_FAILURE_PATTERNS_JP):
+        return True
+    # 3) フィルタ無視: ユーザ指定条件を勝手に外した広域回答は、売上数値があっても
+    #    「ユーザの聞きたかった分析」ではないので低信頼扱い。
+    if any(pattern in answer for pattern in _HARD_IGNORED_FILTER_PATTERNS):
+        return True
+    # 4) Grounded metric override: ¥ 金額 + 件/名/人 metric の両方を含む DA narrative には
+    #    "ご希望があれば" "抽出できません" "実データの取得ができません" 等の soft disclaimer が
+    #    頻繁に混在する。これらは partial answer の honest caveat であって failure ではないので、
+    #    両 metric が揃っているとき soft 判定 (5/6/7) を bypass して高信頼扱いする。
+    if _has_grounded_metrics(answer):
+        return False
+    # 5) Soft な失敗表明 (実データの取得ができません / データ抽出ができません / 詳細データ取得不可 等)
+    if any(pattern in answer for pattern in _STRONG_DATA_AGENT_FAILURE_PATTERNS):
+        return True
     has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|人|★|/5)", answer))
-    has_sales_metric = bool(re.search(r"\d[\d,]*(?:\s*)円", answer)) and bool(
-        re.search(r"\d[\d,]*(?:\s*)(?:件|名|人)", answer)
-    )
+    # 6) 売上系の missing-data 説明: grounded metric があれば救う、無ければ低信頼。
     if any(pattern in answer for pattern in _MISSING_SALES_DATA_AGENT_PATTERNS) and (
         "データなし" in answer
         or "データ不足" in answer
@@ -243,9 +312,8 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
         or "集計できません" in answer
         or "集計不可" in answer
     ):
-        return not has_sales_metric
-    if "全エリア・全年齢層" in answer or "旅行先・カテゴリ・年齢層の指定なし" in answer:
-        return True
+        return not _has_grounded_metrics(answer)
+    # 7) 弱表現フォールバック: 数字を全く含まない polite "no data" 回答を低信頼にする。
     has_weak_phrase = any(pattern.lower() in normalized for pattern in _LOW_CONFIDENCE_DATA_AGENT_PATTERNS)
     return has_weak_phrase and not has_specific_metric
 
