@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agent_framework import tool
+from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
@@ -282,12 +283,26 @@ async def search_knowledge_base(query: str) -> str:
 
             body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
             headers: dict[str, str] = {"Content-Type": "application/json"}
-            if api_key:
-                headers["api-key"] = api_key
-            else:
+            # Prefer Managed Identity (Bearer token) over API key for next-search-managed-identity.
+            # Phase 1 rollout: try MI first, fall back to API key only if MI auth fails / unavailable.
+            # Telemetry log indicates which auth path was used so ops can verify migration.
+            mi_used = False
+            try:
                 credential = DefaultAzureCredential()
                 token = credential.get_token("https://search.azure.com/.default")
                 headers["Authorization"] = f"Bearer {token.token}"
+                mi_used = True
+            except (ClientAuthenticationError, OSError, ValueError) as exc:
+                if api_key:
+                    headers["api-key"] = api_key
+                    logger.info("Foundry IQ Search auth: api_key fallback (MI failed: %s)", str(exc)[:80])
+                else:
+                    raise
+            if not mi_used and api_key:
+                # Already set via fallback path
+                pass
+            elif mi_used:
+                logger.info("Foundry IQ Search auth: managed_identity")
 
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
             response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=30)
@@ -371,11 +386,24 @@ async def search_knowledge_base(query: str) -> str:
 
 
 async def _fallback_index_search(query: str, search_endpoint: str, api_key: str) -> str:
-    """KB が未作成の場合に直接 Index を検索するフォールバック。"""
+    """KB が未作成の場合に直接 Index を検索するフォールバック。
+
+    next-search-managed-identity Phase 1: MI auth を優先 (api_key fallback)。
+    """
     try:
         url = f"{search_endpoint}/indexes/regulations-index/docs/search?api-version=2024-07-01"
         body = json.dumps({"search": query, "top": _iq_top_k, "queryType": "simple"}).encode()
-        headers: dict[str, str] = {"Content-Type": "application/json", "api-key": api_key}
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        try:
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://search.azure.com/.default")
+            headers["Authorization"] = f"Bearer {token.token}"
+        except (ClientAuthenticationError, OSError, ValueError) as exc:
+            if api_key:
+                headers["api-key"] = api_key
+                logger.info("Foundry IQ Search index fallback auth: api_key (MI failed: %s)", str(exc)[:80])
+            else:
+                raise
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)
         data = json.loads(response.read().decode())

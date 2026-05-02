@@ -76,6 +76,35 @@ Travel Marketing AI (Team D) のセキュリティポリシー。
 - Python 依存は `uv` で lock file 管理 (`uv.lock`)
 - 既知の脆弱な依存は dependabot で自動 PR (近々有効化予定)
 
+### 6.1 Search MI Migration (Phase 1 — In Progress)
+
+`src/agents/regulation_check.py` は Foundry IQ Knowledge Base / Azure AI Search を呼び出す際、**Managed Identity (MI) を優先** し、失敗時のみ `SEARCH_API_KEY` にフォールバックします (next-search-managed-identity Phase 1)。
+
+完全 MI 移行 (Phase 2 = `SEARCH_API_KEY` 削除) のために必要な手動手順:
+
+1. Search service の RBAC モードを有効化:
+   ```bash
+   az search service update -n <search-name> -g <rg> --auth-options aadOrApiKey \
+     --aad-auth-failure-mode http403
+   ```
+2. Container App の system-assigned MI に role 付与:
+   ```bash
+   PRINCIPAL_ID=$(az containerapp show -n ca-wmbvhdhcsuyb2-pn -g rg-workiq-dev \
+     --query identity.principalId -o tsv)
+   SEARCH_ID=$(az search service show -n <search-name> -g <rg> --query id -o tsv)
+   az role assignment create --assignee $PRINCIPAL_ID --role "Search Index Data Reader" \
+     --scope $SEARCH_ID
+   az role assignment create --assignee $PRINCIPAL_ID --role "Search Service Contributor" \
+     --scope $SEARCH_ID  # KB retrieve API に必要
+   ```
+3. Live で動作確認:
+   ```bash
+   curl https://ca-wmbvhdhcsuyb2-pn.../api/ready/deep
+   # foundry_iq_search.ok=true を確認
+   ```
+4. App Insights traces で `Foundry IQ Search auth: managed_identity` ログを確認 (api_key fallback ログが出ないこと)
+5. 確認できたら `SEARCH_API_KEY` を Bicep / Key Vault から削除 (Phase 2 完了)
+
 ### 7. Audit Log
 
 - approval flow の全ての /approve POST は INFO log に diagnostic 出力 (`caller_owner_kind`, `save_owner_kind`, `context_owner_kind`, `has_token`, `token_len`, `context_resolved`, `is_approved`)。token VALUE は記録しない

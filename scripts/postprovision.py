@@ -662,6 +662,177 @@ def ensure_improvement_mcp_function_app(
     return False
 
 
+def _get_container_app_principal_id(container_app_name: str, resource_group: str) -> str | None:
+    """Container App の system-assigned MI principalId を取得する。"""
+    if not container_app_name or not resource_group:
+        return None
+    result = _run_cli(
+        [
+            "az", "containerapp", "show",
+            "--name", container_app_name,
+            "--resource-group", resource_group,
+            "--query", "identity.principalId",
+            "-o", "tsv",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Container App principalId 取得失敗: %s", result.stderr.strip())
+        return None
+    principal_id = result.stdout.strip()
+    return principal_id if principal_id and principal_id != "None" else None
+
+
+def _get_fabric_token() -> str | None:
+    """Fabric REST API 用 token を取得する (audience: api.fabric.microsoft.com)。"""
+    result = _run_cli(
+        [
+            "az", "account", "get-access-token",
+            "--resource", "https://api.fabric.microsoft.com",
+            "--query", "accessToken",
+            "-o", "tsv",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Fabric token 取得失敗: %s", result.stderr.strip())
+        return None
+    token = result.stdout.strip()
+    return token if token else None
+
+
+def _fabric_request(method: str, url: str, token: str, body: dict | None = None) -> tuple[int, dict | None]:
+    """Fabric REST API を呼び出して (status_code, json_body) を返す。"""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = resp.read()
+            try:
+                return resp.status, json.loads(payload) if payload else None
+            except json.JSONDecodeError:
+                return resp.status, None
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = exc.read()
+            return exc.code, json.loads(payload) if payload else None
+        except (json.JSONDecodeError, OSError):
+            return exc.code, None
+    except urllib.error.URLError as exc:
+        logger.warning("Fabric REST 呼出エラー: %s", exc)
+        return -1, None
+
+
+def ensure_fabric_workspace_mi_member(
+    container_app_name: str,
+    resource_group: str,
+    workspace_id: str,
+) -> bool:
+    """Container App MI を Fabric workspace に Member ロールで登録する。
+
+    冪等: 既存の Member 割り当てがあれば skip。Entra propagation race のため
+    最大 6 回 (合計 ~3 分) リトライする。
+
+    rubber-duck 監査 2026-05-02 (next-fabric-mi-grant-automation):
+    - blue-green CAE 移行で新 Container App MI が作られるたびに Fabric workspace
+      への Member 登録を手動でやる必要があったため、自動化する
+    - 失敗しても provision を中断しない (warning log + return False)
+    """
+    if not workspace_id:
+        logger.info("FABRIC_WORKSPACE_ID 未設定のため Fabric MI 登録スキップ")
+        return False
+
+    principal_id = _get_container_app_principal_id(container_app_name, resource_group)
+    if not principal_id:
+        logger.warning("Container App MI principalId が取得できないため Fabric MI 登録スキップ")
+        return False
+
+    logger.info(
+        "Fabric workspace %s に Container App MI %s を Member 登録します",
+        workspace_id, principal_id,
+    )
+
+    # Entra propagation を待つため最大 6 回リトライ (15s, 30s, 45s, 60s, 60s, 60s)
+    backoffs = [15, 30, 45, 60, 60, 60]
+    for attempt, wait_seconds in enumerate(backoffs, start=1):
+        token = _get_fabric_token()
+        if not token:
+            logger.warning("attempt=%d Fabric token 取得失敗", attempt)
+            time.sleep(wait_seconds)
+            continue
+
+        # GET 既存 role assignments を確認 (idempotency)
+        list_url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/roleAssignments"
+        status, payload = _fabric_request("GET", list_url, token)
+        if status == 200 and isinstance(payload, dict):
+            assignments = payload.get("value") or []
+            for ass in assignments:
+                principal = ass.get("principal") or {}
+                if str(principal.get("id", "")) == principal_id and ass.get("role") == "Member":
+                    logger.info(
+                        "Fabric workspace MI Member 登録は既存 (principal=%s)", principal_id,
+                    )
+                    return True
+        elif status == 403:
+            logger.warning(
+                "attempt=%d Fabric workspace MI 一覧取得 403 — 現在の azd 実行者が "
+                "workspace admin 権限を持っていない可能性があります。"
+                "Fabric Portal で MI %s に Member ロールを手動付与してください。",
+                attempt, principal_id,
+            )
+            return False
+        elif status == 404:
+            logger.warning(
+                "attempt=%d Fabric workspace %s が見つかりません (404)。"
+                "FABRIC_WORKSPACE_ID を確認してください。",
+                attempt, workspace_id,
+            )
+            return False
+
+        # POST 新規 Member 登録
+        post_body = {
+            "principal": {"id": principal_id, "type": "ServicePrincipal"},
+            "role": "Member",
+        }
+        post_status, post_payload = _fabric_request("POST", list_url, token, body=post_body)
+        if post_status in (200, 201):
+            logger.info(
+                "Fabric workspace MI Member 登録完了: workspace=%s principal=%s",
+                workspace_id, principal_id,
+            )
+            return True
+        if post_status == 409:
+            logger.info(
+                "Fabric workspace MI Member 登録は既存 (409 Conflict): principal=%s", principal_id,
+            )
+            return True
+        if post_status == 400 and isinstance(post_payload, dict):
+            error_msg = str(post_payload.get("message") or post_payload)
+            if "principal not found" in error_msg.lower() or "directory" in error_msg.lower():
+                logger.info(
+                    "attempt=%d Entra propagation 待ち (400 principal not found)、%d秒後リトライ",
+                    attempt, wait_seconds,
+                )
+                time.sleep(wait_seconds)
+                continue
+        logger.warning(
+            "attempt=%d Fabric workspace MI 登録失敗 (status=%d body=%s)。%d秒後リトライ",
+            attempt, post_status, str(post_payload)[:200], wait_seconds,
+        )
+        time.sleep(wait_seconds)
+
+    logger.warning(
+        "Fabric workspace MI 登録に %d 回失敗。Fabric Portal で手動付与してください: workspace=%s principal=%s",
+        len(backoffs), workspace_id, principal_id,
+    )
+    return False
+
+
 def _ensure_function_app_identity(function_app_name: str, resource_group: str) -> str | None:
     """Function App に system assigned managed identity を付与する。"""
     result = _run_cli(
@@ -1745,6 +1916,21 @@ def main() -> None:
             bool(project_endpoint),
         )
         return
+
+    # Step 0: Fabric workspace MI grant (APIM ゲートの前に独立して実行)
+    # blue-green CAE 移行で新 Container App MI が作られるたびに Fabric workspace
+    # への Member 登録を手動でやる必要があったため、自動化する。
+    # 失敗しても provision を中断しない (warning log のみ)。
+    fabric_workspace_id = (
+        azd_env.get("FABRIC_WORKSPACE_ID", "") or env.get("FABRIC_WORKSPACE_ID", "")
+    )
+    if fabric_workspace_id and container_app_name:
+        ensure_fabric_workspace_mi_member(container_app_name, rg, fabric_workspace_id)
+    elif not fabric_workspace_id:
+        logger.info(
+            "FABRIC_WORKSPACE_ID 未設定のため Fabric MI 自動登録スキップ "
+            "(手動で Fabric Portal から MI を Member 登録する必要があります)"
+        )
 
     if not apim_name:
         logger.warning("AZURE_APIM_NAME が未設定のため AI Gateway セットアップをスキップします")

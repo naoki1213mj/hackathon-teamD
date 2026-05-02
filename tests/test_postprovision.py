@@ -1150,3 +1150,138 @@ def test_create_entra_app_creates_app_when_missing(monkeypatch) -> None:
         "scope-7=Scope",
         "scope-8=Scope",
     ]
+
+# ============================================================
+# next-fabric-mi-grant-automation: Fabric workspace MI grant
+# ============================================================
+
+def test_fabric_mi_grant_idempotent_skips_when_already_member(monkeypatch) -> None:
+    """既存 Member 割り当てがあれば POST せず即 return True"""
+    container_app_name = "ca-test"
+    rg = "rg-test"
+    workspace_id = "ws-id-uuid"
+    principal_id = "mi-principal-uuid"
+
+    monkeypatch.setattr(
+        postprovision_module, "_get_container_app_principal_id",
+        lambda *_a, **_kw: principal_id,
+    )
+    monkeypatch.setattr(
+        postprovision_module, "_get_fabric_token",
+        lambda: "fake-token",
+    )
+
+    calls = []
+
+    def fake_request(method, url, token, body=None):
+        calls.append((method, url, body))
+        if method == "GET":
+            return 200, {
+                "value": [
+                    {"principal": {"id": principal_id, "type": "ServicePrincipal"}, "role": "Member"},
+                ]
+            }
+        # POST should never be reached when already Member
+        raise AssertionError(f"unexpected POST: {method} {url}")
+
+    monkeypatch.setattr(postprovision_module, "_fabric_request", fake_request)
+
+    result = postprovision_module.ensure_fabric_workspace_mi_member(
+        container_app_name, rg, workspace_id,
+    )
+
+    assert result is True
+    assert len(calls) == 1
+    assert calls[0][0] == "GET"
+
+
+def test_fabric_mi_grant_posts_when_not_member(monkeypatch) -> None:
+    """既存に該当 MI が居ないとき POST で Member 登録する"""
+    monkeypatch.setattr(
+        postprovision_module, "_get_container_app_principal_id",
+        lambda *_a, **_kw: "mi-uuid",
+    )
+    monkeypatch.setattr(postprovision_module, "_get_fabric_token", lambda: "fake-token")
+    monkeypatch.setattr(postprovision_module.time, "sleep", lambda _s: None)
+
+    calls = []
+
+    def fake_request(method, url, token, body=None):
+        calls.append((method, url, body))
+        if method == "GET":
+            return 200, {"value": [
+                {"principal": {"id": "different-mi", "type": "ServicePrincipal"}, "role": "Admin"}
+            ]}
+        if method == "POST":
+            return 201, {"id": "new-assignment"}
+        raise AssertionError(f"unexpected: {method}")
+
+    monkeypatch.setattr(postprovision_module, "_fabric_request", fake_request)
+
+    result = postprovision_module.ensure_fabric_workspace_mi_member(
+        "ca-test", "rg", "ws-uuid",
+    )
+
+    assert result is True
+    assert len(calls) == 2
+    assert calls[1][0] == "POST"
+    assert calls[1][2]["principal"]["id"] == "mi-uuid"
+    assert calls[1][2]["role"] == "Member"
+
+
+def test_fabric_mi_grant_returns_false_on_403_workspace_admin_missing(monkeypatch) -> None:
+    """azd 実行者が workspace admin でないと 403 → 即 return False (リトライしない)"""
+    monkeypatch.setattr(
+        postprovision_module, "_get_container_app_principal_id",
+        lambda *_a, **_kw: "mi-uuid",
+    )
+    monkeypatch.setattr(postprovision_module, "_get_fabric_token", lambda: "fake-token")
+    monkeypatch.setattr(postprovision_module.time, "sleep", lambda _s: None)
+
+    monkeypatch.setattr(
+        postprovision_module, "_fabric_request",
+        lambda method, url, token, body=None: (403, {"message": "forbidden"}),
+    )
+
+    result = postprovision_module.ensure_fabric_workspace_mi_member(
+        "ca-test", "rg", "ws-uuid",
+    )
+
+    assert result is False
+
+
+def test_fabric_mi_grant_skips_when_workspace_id_empty(monkeypatch) -> None:
+    """FABRIC_WORKSPACE_ID 未設定時は skip + return False"""
+    called = {"v": False}
+    monkeypatch.setattr(
+        postprovision_module, "_get_container_app_principal_id",
+        lambda *_a, **_kw: (called.__setitem__("v", True), "mi-uuid")[1],
+    )
+
+    result = postprovision_module.ensure_fabric_workspace_mi_member(
+        "ca-test", "rg", "",  # empty workspace_id
+    )
+
+    assert result is False
+    assert called["v"] is False, "workspace_id 空ならそもそも principalId 取得しない"
+
+
+def test_fabric_mi_grant_skips_when_principal_id_unavailable(monkeypatch) -> None:
+    """Container App の MI 取得失敗時は skip"""
+    monkeypatch.setattr(
+        postprovision_module, "_get_container_app_principal_id",
+        lambda *_a, **_kw: None,
+    )
+
+    fabric_called = {"v": False}
+    monkeypatch.setattr(
+        postprovision_module, "_get_fabric_token",
+        lambda: (fabric_called.__setitem__("v", True), "tok")[1],
+    )
+
+    result = postprovision_module.ensure_fabric_workspace_mi_member(
+        "ca-test", "rg", "ws-uuid",
+    )
+
+    assert result is False
+    assert fabric_called["v"] is False, "principal_id 無ければ token も取らない"
