@@ -1885,6 +1885,34 @@ def sync_marketing_plan_agent(project_endpoint: str) -> bool:
         return False
 
 
+def sync_data_search_agent(project_endpoint: str) -> bool:
+    """data-search 用の事前作成済み Foundry Prompt Agent を同期する (PR 3)。
+
+    marketing-plan と同様に requested model + base models を全て同期し、
+    runtime で deployment alias 解決が落ちた場合に fallback できるようにする。
+    """
+    from src.foundry_prompt_agents import sync_data_search_agent as sync_agent
+
+    requested_model = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
+    model_names: list[str] = []
+    for model_name in (requested_model, *_MARKETING_PLAN_BASE_MODELS):
+        normalized = model_name.strip()
+        if normalized and normalized not in model_names:
+            model_names.append(normalized)
+    try:
+        results = [sync_agent(project_endpoint, model_name) for model_name in model_names]
+        return all(results)
+    except ClientAuthenticationError as exc:
+        logger.warning("data-search Prompt Agent の認証に失敗しました: %s", exc)
+        return False
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("data-search Prompt Agent の同期に失敗しました: %s", exc)
+        return False
+    except Exception as exc:
+        logger.warning("data-search Prompt Agent の同期中に予期しないエラーが発生しました: %s", exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -1964,6 +1992,9 @@ def main() -> None:
 
     # Step 4.5: marketing-plan Agent 同期
     sync_marketing_plan_agent(project_endpoint)
+
+    # Step 4.6: data-search Agent 同期 (PR 3 — Foundry Prompt Agent + Fabric DA built-in tool)
+    sync_data_search_agent(project_endpoint)
 
     # Step 5: Entra App 登録（Voice Live SPA 認証用）
     tenant_result = _run_cli(

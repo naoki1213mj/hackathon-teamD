@@ -204,10 +204,12 @@ class WorkflowSettings(TypedDict):
     manager_email: str
     marketing_plan_runtime: NotRequired[str]
     work_iq_runtime: NotRequired[str]
+    data_search_runtime: NotRequired[str]
 
 
 MarketingPlanRuntime = Literal["legacy", "foundry_preprovisioned"]
 WorkIQRuntime = Literal["graph_prefetch", "foundry_tool"]
+DataSearchRuntime = Literal["legacy", "foundry_preprovisioned"]
 
 
 class PendingApprovalContext(TypedDict):
@@ -1034,6 +1036,7 @@ def _build_evaluation_refine_workflow_settings(workflow_settings: WorkflowSettin
         "manager_email": _sanitize_optional_text(source.get("manager_email")),
         "marketing_plan_runtime": "legacy",
         "work_iq_runtime": "graph_prefetch",
+        "data_search_runtime": "legacy",
     }
 
 
@@ -1408,6 +1411,20 @@ def _sanitize_work_iq_runtime(value: object) -> WorkIQRuntime | None:
     return None
 
 
+def _sanitize_data_search_runtime(value: object) -> DataSearchRuntime | None:
+    """data-search-agent の runtime selector を正規化する。"""
+    if not isinstance(value, str):
+        return None
+    normalized = _sanitize_optional_text(value).lower().replace("-", "_")
+    if normalized == "foundry_prompt":
+        normalized = "foundry_preprovisioned"
+    if normalized in {"legacy", "foundry_preprovisioned"}:
+        return normalized
+    if normalized:
+        raise ValueError("data_search_runtime は legacy または foundry_preprovisioned を指定してください")
+    return None
+
+
 def _resolve_work_iq_timeout_seconds() -> float:
     """Foundry connector 側で使う Work IQ タイムアウトを返す。
 
@@ -1444,6 +1461,16 @@ def _resolve_work_iq_runtime(workflow_settings: WorkflowSettings | None) -> Work
     return _sanitize_work_iq_runtime(get_settings()["work_iq_runtime"]) or "graph_prefetch"
 
 
+def _resolve_data_search_runtime(workflow_settings: WorkflowSettings | None) -> DataSearchRuntime:
+    """request override と環境変数から data-search-agent runtime を解決する。"""
+    if workflow_settings:
+        runtime_override = _sanitize_data_search_runtime(workflow_settings.get("data_search_runtime"))
+        if runtime_override is not None:
+            return runtime_override
+    settings_value = get_settings().get("data_search_runtime")
+    return _sanitize_data_search_runtime(settings_value) or "foundry_preprovisioned"
+
+
 def _build_effective_workflow_settings(
     workflow_settings: WorkflowSettings | None,
     *,
@@ -1453,6 +1480,7 @@ def _build_effective_workflow_settings(
     source = workflow_settings or {}
     marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings)
     work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
+    data_search_runtime = _resolve_data_search_runtime(workflow_settings)
     if not work_iq_enabled and work_iq_runtime == "foundry_tool":
         work_iq_runtime = "graph_prefetch"
     if marketing_plan_runtime != "foundry_preprovisioned" and work_iq_runtime == "foundry_tool":
@@ -1464,6 +1492,7 @@ def _build_effective_workflow_settings(
         "manager_email": _sanitize_optional_text(source.get("manager_email")),
         "marketing_plan_runtime": marketing_plan_runtime,
         "work_iq_runtime": work_iq_runtime,
+        "data_search_runtime": data_search_runtime,
     }
 
 
@@ -1481,6 +1510,9 @@ def _parse_saved_workflow_settings(raw_settings: dict | None) -> WorkflowSetting
     work_iq_runtime = _sanitize_optional_text(raw_settings.get("work_iq_runtime"))
     if work_iq_runtime:
         parsed["work_iq_runtime"] = work_iq_runtime
+    data_search_runtime = _sanitize_optional_text(raw_settings.get("data_search_runtime"))
+    if data_search_runtime:
+        parsed["data_search_runtime"] = data_search_runtime
     return parsed
 
 
@@ -1530,13 +1562,17 @@ def _normalize_workflow_settings(
             source.get("marketing_plan_runtime") or source.get("marketingPlanRuntime")
         )
         work_iq_runtime = _sanitize_work_iq_runtime(source.get("work_iq_runtime") or source.get("workIqRuntime"))
+        data_search_runtime = _sanitize_data_search_runtime(
+            source.get("data_search_runtime") or source.get("dataSearchRuntime")
+        )
     else:
         runtime = None
         work_iq_runtime = None
+        data_search_runtime = None
 
     if enabled and not email:
         raise ValueError("上司承認を有効化する場合は上司メールアドレスが必要です")
-    if not enabled and not email and runtime is None and work_iq_runtime is None:
+    if not enabled and not email and runtime is None and work_iq_runtime is None and data_search_runtime is None:
         return None
 
     workflow_settings: WorkflowSettings = {
@@ -1547,6 +1583,8 @@ def _normalize_workflow_settings(
         workflow_settings["marketing_plan_runtime"] = runtime
     if work_iq_runtime is not None:
         workflow_settings["work_iq_runtime"] = work_iq_runtime
+    if data_search_runtime is not None:
+        workflow_settings["data_search_runtime"] = data_search_runtime
     return workflow_settings
 
 
@@ -2887,6 +2925,31 @@ def _is_foundry_prompt_agent_unavailable(exc: Exception) -> bool:
     return "AZURE_AI_PROJECT_ENDPOINT" in message or "Foundry Agent が未作成" in message
 
 
+def _is_foundry_data_search_recoverable_error(exc: Exception) -> bool:
+    """data-search-agent Foundry path で legacy fallback を許可するエラーかを判定する。
+
+    - 401/403 (Fabric DA RBAC 不足)
+    - OBO token failure (tool_user_error)
+    - connection misconfig (project connection が未登録)
+    - Foundry Agent 自体が未設定 (`_is_foundry_prompt_agent_unavailable` 相当)
+    その他の 5xx / generic exception は fail loud で legacy retry しない。
+    """
+    if _is_foundry_prompt_agent_unavailable(exc):
+        return True
+    message = str(exc).lower()
+    if "tool_user_error" in message and (
+        "ara obo token request failed" in message or "failed to fetch access token" in message
+    ):
+        return True
+    if any(token in message for token in (" 401 ", "401:", "401 ", "unauthorized", "forbidden", " 403 ", "403:")):
+        return True
+    if "project connection" in message and ("not found" in message or "missing" in message):
+        return True
+    if "foundry_fabric_connection_id" in message:
+        return True
+    return False
+
+
 def _is_model_deployment_unavailable_error(exc: Exception) -> bool:
     """Foundry/OpenAI の deployment 未配置エラーを判定する。"""
     if isinstance(exc, ModelDeploymentUnavailableError):
@@ -2942,6 +3005,7 @@ async def _execute_agent(
     work_iq_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
+    caller_auth_mode: str = "anonymous",
 ) -> AgentExecutionOutcome:
     """単一エージェントを実行し、SSE イベント列と結果テキストを返す。"""
     from src.agents import (
@@ -3042,6 +3106,35 @@ async def _execute_agent(
         and not (isinstance(work_iq_session, dict) and work_iq_session.get("enabled"))
     ):
         marketing_plan_runtime = "legacy"
+
+    # data-search-agent runtime 解決と gating
+    data_search_runtime: DataSearchRuntime = "legacy"
+    fabric_connection_id_for_data_search = ""
+    code_interpreter_for_data_search = False
+    if agent_name == "data-search-agent":
+        data_search_runtime = _resolve_data_search_runtime(workflow_settings)
+        if data_search_runtime == "foundry_preprovisioned":
+            settings_obj = get_settings()
+            fabric_connection_id_for_data_search = _sanitize_optional_text(
+                settings_obj.get("foundry_fabric_connection_id")
+            )
+            code_interpreter_for_data_search = _to_bool(settings_obj.get("enable_code_interpreter"))
+            delegated_token_present = bool(_sanitize_optional_text(work_iq_access_token))
+            # Gate: caller delegated AND token present AND connection_id 設定済
+            gate_reasons: list[str] = []
+            if caller_auth_mode != "delegated":
+                gate_reasons.append("anonymous")
+            if not delegated_token_present:
+                gate_reasons.append("no_token")
+            if not fabric_connection_id_for_data_search:
+                gate_reasons.append("no_connection_id")
+            if gate_reasons:
+                logger.info(
+                    "data-search-agent foundry_preprovisioned ゲートを満たさないため legacy に切替: %s",
+                    ",".join(gate_reasons),
+                )
+                data_search_runtime = "legacy"
+
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
@@ -3075,6 +3168,24 @@ async def _execute_agent(
                         result = await _await_blocking_call_with_timeout(run_prompt_agent, timeout_seconds)
                     else:
                         result = await run_prompt_agent
+                    used_foundry_prompt_agent = True
+            elif agent_name == "data-search-agent" and data_search_runtime == "foundry_preprovisioned":
+                from src.foundry_prompt_agents import run_data_search_prompt_agent
+
+                with tool_event_context(
+                    attempt_tool_events.append,
+                    agent_name=agent_name,
+                    step=step,
+                    step_key=resolve_step_key(agent_name),
+                    provider="foundry",
+                ):
+                    result = await run_data_search_prompt_agent(
+                        user_input,
+                        model_settings,
+                        delegated_user_access_token=work_iq_access_token,
+                        fabric_connection_id=fabric_connection_id_for_data_search,
+                        code_interpreter_enabled=code_interpreter_for_data_search,
+                    )
                     used_foundry_prompt_agent = True
             else:
                 agent = create_fn(model_settings)
@@ -3229,6 +3340,34 @@ async def _execute_agent(
                     )
                     marketing_plan_runtime = "legacy"
                     continue
+            # data-search-agent: Foundry path 失敗時は recoverable のときだけ legacy fallback
+            if (
+                agent_name == "data-search-agent"
+                and data_search_runtime == "foundry_preprovisioned"
+                and attempt == 1
+                and _is_foundry_data_search_recoverable_error(exc)
+            ):
+                logger.warning(
+                    "Foundry data-search-agent が recoverable error のため Agent Framework にフォールバックします: %s",
+                    exc,
+                )
+                attempt_tool_events.append(
+                    _build_agent_tool_event(
+                        "foundry_data_search_prompt_agent",
+                        "failed",
+                        agent_name=agent_name,
+                        step=step,
+                        source="foundry",
+                        provider="foundry",
+                        error_code="DATA_SEARCH_FOUNDRY_FALLBACK",
+                        error_message=str(exc),
+                    )
+                )
+                # 集めた tool events を保持して legacy retry に進む
+                events.extend(_format_tool_event_sse(p) for p in _dedupe_tool_event_payloads(attempt_tool_events))
+                data_search_runtime = "legacy"
+                used_foundry_prompt_agent = False
+                continue
             # Code Interpreter 404: 無効化してリトライ（リトライ回数を消費しない）
             if agent_name == "data-search-agent" and _is_code_interpreter_404(exc):
                 from src.agents.data_search import _should_enable_code_interpreter, set_code_interpreter_available
@@ -3634,6 +3773,7 @@ async def _execute_agent_with_runtime(
     work_iq_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
+    caller_auth_mode: str = "anonymous",
 ) -> AgentExecutionOutcome:
     """workflow_settings 非対応の monkeypatch とも両立させる。"""
     kwargs = {
@@ -3647,6 +3787,7 @@ async def _execute_agent_with_runtime(
         "work_iq_access_token": work_iq_access_token,
         "total_steps": total_steps,
         "include_done": include_done,
+        "caller_auth_mode": caller_auth_mode,
     }
     if "workflow_settings" not in inspect.signature(_execute_agent).parameters:
         kwargs.pop("workflow_settings")
@@ -3654,6 +3795,8 @@ async def _execute_agent_with_runtime(
         kwargs.pop("work_iq_session")
     if "work_iq_access_token" not in inspect.signature(_execute_agent).parameters:
         kwargs.pop("work_iq_access_token")
+    if "caller_auth_mode" not in inspect.signature(_execute_agent).parameters:
+        kwargs.pop("caller_auth_mode")
     return await _execute_agent(**kwargs)
 
 
@@ -5355,6 +5498,7 @@ async def workflow_event_generator(
     work_iq_access_token: str = "",
     work_iq_graph_access_token: str = "",
     user_time_zone: str = "UTC",
+    caller_auth_mode: str = "anonymous",
 ):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
     work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
@@ -5365,6 +5509,8 @@ async def workflow_event_generator(
         conversation_id=conversation_id,
         model_settings=model_settings,
         workflow_settings=workflow_settings,
+        work_iq_access_token=work_iq_access_token,
+        caller_auth_mode=caller_auth_mode,
     )
     for event in analysis_outcome["events"]:
         yield event
@@ -5685,6 +5831,7 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
                         work_iq_access_token=work_iq_access_token,
                         work_iq_graph_access_token=work_iq_graph_access_token,
                         user_time_zone=user_time_zone,
+                        caller_auth_mode=caller_identity.get("auth_mode", "anonymous"),
                     )
                 ):
                     yield event

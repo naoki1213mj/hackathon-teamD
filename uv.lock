@@ -1703,7 +1703,7 @@ requires-dist = [
     { name = "agent-framework-foundry", specifier = "==1.0.0" },
     { name = "agent-framework-github-copilot", specifier = "==1.0.0b260402" },
     { name = "azure-ai-evaluation", specifier = ">=1.16.2" },
-    { name = "azure-ai-projects", specifier = ">=2.0.1" },
+    { name = "azure-ai-projects", specifier = ">=2.0.1,<2.1.0" },
     { name = "azure-cosmos", specifier = ">=4.9.0" },
     { name = "azure-identity", specifier = ">=1.26.0b2" },
     { name = "azure-monitor-opentelemetry", specifier = ">=1.6.0" },

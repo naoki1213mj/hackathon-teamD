@@ -46,6 +46,9 @@ class AppSettings(TypedDict):
     gpt_image_2_deployment_name: str
     marketing_plan_runtime: str
     marketing_plan_prompt_agent_name: str
+    data_search_runtime: str
+    data_search_prompt_agent_name: str
+    foundry_fabric_connection_id: str
     work_iq_runtime: str
     enable_github_copilot_review_agent: str
     enable_model_router: str
@@ -115,6 +118,9 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "gpt_image_2_deployment_name": ("GPT_IMAGE_2_DEPLOYMENT_NAME",),
     "marketing_plan_runtime": ("MARKETING_PLAN_RUNTIME",),
     "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
+    "data_search_runtime": ("DATA_SEARCH_RUNTIME",),
+    "data_search_prompt_agent_name": ("DATA_SEARCH_PROMPT_AGENT_NAME",),
+    "foundry_fabric_connection_id": ("FOUNDRY_FABRIC_CONNECTION_ID",),
     "work_iq_runtime": ("WORKIQ_RUNTIME",),
     "enable_github_copilot_review_agent": ("ENABLE_GITHUB_COPILOT_REVIEW_AGENT",),
     "enable_model_router": ("ENABLE_MODEL_ROUTER", "MODEL_ROUTER_ENABLED"),
@@ -171,6 +177,8 @@ _DEFAULTS: dict[str, str] = {
     "gpt_image_2_deployment_name": "gpt-image-2",
     "marketing_plan_runtime": "foundry_preprovisioned",
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+    "data_search_runtime": "foundry_preprovisioned",
+    "data_search_prompt_agent_name": "travel-data-search",
     "work_iq_runtime": "foundry_tool",
     "enable_github_copilot_review_agent": "false",
     "enable_model_router": "false",

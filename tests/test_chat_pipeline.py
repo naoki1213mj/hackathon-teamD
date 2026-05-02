@@ -483,6 +483,7 @@ class TestMarketingPlanRuntimeSettings:
             "manager_email": "manager@example.com",
             "marketing_plan_runtime": "foundry_preprovisioned",
             "work_iq_runtime": "foundry_tool",
+            "data_search_runtime": "foundry_preprovisioned",
         }
 
     def test_parse_saved_workflow_settings_keeps_backward_compatibility(self) -> None:
@@ -592,6 +593,7 @@ class TestMarketingPlanRuntimeSettings:
             "manager_email": "",
             "marketing_plan_runtime": "legacy",
             "work_iq_runtime": "graph_prefetch",
+            "data_search_runtime": "foundry_preprovisioned",
         }
 
 
@@ -1995,8 +1997,9 @@ async def test_workflow_event_generator_returns_error_when_analysis_is_insuffici
         work_iq_session: dict | None = None,
         work_iq_access_token: str = "",
         total_steps: int = 5,
+        caller_auth_mode: str = "anonymous",
     ):
-        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_session, work_iq_access_token, total_steps, caller_auth_mode
         calls.append(agent_name)
         if agent_name != "data-search-agent":
             raise AssertionError("marketing-plan-agent should not run with insufficient analysis")
@@ -2871,6 +2874,7 @@ async def test_refine_events_completed_conversation_ignores_foundry_tool_when_wo
         "manager_email": "",
         "marketing_plan_runtime": "legacy",
         "work_iq_runtime": "graph_prefetch",
+        "data_search_runtime": "foundry_preprovisioned",
     }
     assert captured["work_iq_access_token"] == "delegated-token"
 
@@ -3465,6 +3469,7 @@ async def test_refine_events_evaluation_uses_legacy_runtime_without_work_iq_tool
         "manager_email": "",
         "marketing_plan_runtime": "legacy",
         "work_iq_runtime": "graph_prefetch",
+        "data_search_runtime": "legacy",
     }
 
 
@@ -3553,6 +3558,7 @@ async def test_refine_events_evaluation_does_not_require_work_iq_token(monkeypat
         "manager_email": "",
         "marketing_plan_runtime": "legacy",
         "work_iq_runtime": "graph_prefetch",
+        "data_search_runtime": "legacy",
     }
     assert "Work IQ tool を再実行せず" in str(captured["user_input"])
     assert not any(event_name == chat_module.SSEEventType.ERROR for event_name, _ in parsed)

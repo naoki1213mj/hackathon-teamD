@@ -28,6 +28,11 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --frozen
 
+      - name: Foundry preview SDK smoke import (PR 3)
+        # MicrosoftFabricPreviewTool / FabricDataAgentToolParameters は preview class なので、
+        # SDK のメジャーアップデートで location が drift していないかを CI で早期検知する。
+        run: uv run python -c "from azure.ai.projects.models import MicrosoftFabricPreviewTool, FabricDataAgentToolParameters, ToolProjectConnection, ToolChoiceAllowed; print('preview SDK ok')"
+
       - name: Ruff lint
         run: uv run ruff check .
 

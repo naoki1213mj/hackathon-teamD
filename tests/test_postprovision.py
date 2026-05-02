@@ -946,6 +946,63 @@ def test_sync_marketing_plan_agent_includes_model_router_only_when_enabled(monke
     ]
 
 
+def test_sync_data_search_agent_uses_foundry_helper(monkeypatch) -> None:
+    """data-search Agent 同期は共通 helper に委譲する (PR 3)。"""
+
+    captured: list[tuple[str, str]] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        captured.append((project_endpoint, model_name))
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+    monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_data_search_agent", fake_sync)
+
+    result = postprovision_module.sync_data_search_agent("https://example.test")
+
+    assert result is True
+    assert captured == [
+        ("https://example.test", "gpt-5-4-mini"),
+        ("https://example.test", "gpt-5.4"),
+        ("https://example.test", "gpt-4-1-mini"),
+        ("https://example.test", "gpt-4.1"),
+    ]
+
+
+def test_sync_data_search_agent_returns_false_when_helper_fails(monkeypatch) -> None:
+    """data-search Agent 同期で helper が False を返したら全体 False。"""
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        del project_endpoint
+        return model_name == "gpt-5-4-mini"
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_data_search_agent", fake_sync)
+
+    result = postprovision_module.sync_data_search_agent("https://example.test")
+
+    assert result is False
+
+
+def test_sync_data_search_agent_handles_runtime_error(monkeypatch) -> None:
+    """data-search Agent 同期で RuntimeError が出ても warning にして False を返す。"""
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        del project_endpoint, model_name
+        raise RuntimeError("Foundry agent create_version failed")
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_data_search_agent", fake_sync)
+
+    result = postprovision_module.sync_data_search_agent("https://example.test")
+
+    assert result is False
+
+
 def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:
     """既存 Voice Agent があれば新規作成しない"""
 

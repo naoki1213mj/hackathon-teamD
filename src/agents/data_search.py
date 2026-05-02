@@ -1,5 +1,6 @@
 """Agent1: データ検索エージェント。Fabric Lakehouse から販売・顧客データを検索・分析する。"""
 
+import asyncio
 import contextvars
 import csv
 import json
@@ -7,11 +8,13 @@ import logging
 import os
 import re
 import struct
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from agent_framework import tool
 from azure.core.exceptions import ClientAuthenticationError
@@ -27,6 +30,71 @@ try:
     _HAS_PYODBC = True
 except ImportError:
     _HAS_PYODBC = False
+
+
+# --- SQL fallback の bounded executor + circuit-open state ---
+# rubber-duck v2 GO 条件 #2: asyncio.to_thread の default executor は無制限
+# (`min(32, os.cpu_count()+4)`) で、Foundry path の function tool 連発時に thread が
+# 枯渇するため、専用の bounded ThreadPoolExecutor + Semaphore で並行度を抑える。
+# circuit-open guard: 連続 timeout 時に SQL fallback を一時的に skip して CSV/local
+# fallback に降格させ、外部依存の劣化を伝播させない。
+_FALLBACK_EXECUTOR_MAX_WORKERS = 2
+_FALLBACK_EXECUTOR: ThreadPoolExecutor | None = None
+_FALLBACK_EXECUTOR_LOCK = asyncio.Lock()  # lazy create
+_FALLBACK_SEMAPHORE: asyncio.Semaphore | None = None
+
+_CIRCUIT_OPEN_THRESHOLD = 3  # 連続 timeout 件数
+_CIRCUIT_OPEN_WINDOW_SECONDS = 300.0  # 5 分
+_CIRCUIT_OPEN_DURATION_SECONDS = 60.0  # 60 秒間 SQL skip
+_circuit_recent_timeouts: list[float] = []  # monotonic timestamps
+_circuit_open_until: float = 0.0
+
+
+def _get_fallback_executor() -> ThreadPoolExecutor:
+    """bounded ThreadPoolExecutor を lazy 作成して返す。"""
+    global _FALLBACK_EXECUTOR
+    if _FALLBACK_EXECUTOR is None:
+        _FALLBACK_EXECUTOR = ThreadPoolExecutor(
+            max_workers=_FALLBACK_EXECUTOR_MAX_WORKERS,
+            thread_name_prefix="data-search-fallback",
+        )
+    return _FALLBACK_EXECUTOR
+
+
+def _get_fallback_semaphore() -> asyncio.Semaphore:
+    """bounded asyncio.Semaphore を lazy 作成して返す（イベントループ毎）。"""
+    global _FALLBACK_SEMAPHORE
+    if _FALLBACK_SEMAPHORE is None:
+        _FALLBACK_SEMAPHORE = asyncio.Semaphore(_FALLBACK_EXECUTOR_MAX_WORKERS)
+    return _FALLBACK_SEMAPHORE
+
+
+def _is_circuit_open() -> bool:
+    """SQL fallback の circuit-open 状態を判定する。"""
+    return time.monotonic() < _circuit_open_until
+
+
+def _record_fallback_timeout() -> None:
+    """timeout を記録し、閾値を超えたら circuit を open する。"""
+    global _circuit_open_until
+    now = time.monotonic()
+    cutoff = now - _CIRCUIT_OPEN_WINDOW_SECONDS
+    _circuit_recent_timeouts[:] = [ts for ts in _circuit_recent_timeouts if ts > cutoff]
+    _circuit_recent_timeouts.append(now)
+    if len(_circuit_recent_timeouts) >= _CIRCUIT_OPEN_THRESHOLD:
+        _circuit_open_until = now + _CIRCUIT_OPEN_DURATION_SECONDS
+        logger.warning(
+            "data-search SQL fallback circuit OPEN (連続 %d timeout) — %.0f 秒間 CSV にフォールバック",
+            len(_circuit_recent_timeouts),
+            _CIRCUIT_OPEN_DURATION_SECONDS,
+        )
+
+
+def _reset_circuit_state_for_testing() -> None:
+    """テスト用: circuit-open state を初期化する。"""
+    global _circuit_open_until
+    _circuit_recent_timeouts.clear()
+    _circuit_open_until = 0.0
 
 logger = logging.getLogger(__name__)
 _SQL_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
@@ -972,6 +1040,8 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
     """Fabric Lakehouse SQL エンドポイントにクエリを実行し、結果を辞書リストで返す。
 
     接続に失敗した場合や pyodbc 未インストール時は空リストを返す。
+    rubber-duck v2 GO 条件 #2: ODBC 側 timeout (`connect(timeout=10)` + `cursor.timeout=25`)
+    を必須挿入し、Python 側 wait_for と二重で hang 防止する。
     """
     if not _HAS_PYODBC:
         logger.debug("pyodbc が未インストールのため Fabric SQL 接続をスキップ")
@@ -997,7 +1067,9 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
             f"Encrypt=yes;"
             f"TrustServerCertificate=no",
             attrs_before={1256: token_struct},
+            timeout=10,  # ODBC connect timeout (seconds)
         )
+        conn.timeout = 25  # ODBC query timeout (seconds) — pyodbc Connection 属性
 
         cursor = conn.cursor()
         if params:
@@ -1657,6 +1729,137 @@ async def search_customer_reviews(
             charts=_review_charts(results, source="local"),
         )
         return json.dumps(results, ensure_ascii=False)
+
+
+# --- Sync helpers for Foundry Prompt Agent path (PR 3) ---
+# rubber-duck v2 落とし穴 #1: 関数境界を sync として独立提供することで、
+# Foundry path の async wrapper が `loop.run_in_executor(_FALLBACK_EXECUTOR, ...)`
+# 経由で呼べるようにする。`asyncio.to_thread` は default unbounded executor を使うので
+# 不採用。circuit-open guard で連続 timeout 時は SQL を skip して CSV/local fallback。
+#
+# rubber-duck `pr3-blocker-fix-final` Blocking #1 反映: 戻り値を「source 付き dict」に
+# 変更し、dispatch 側で source="fabric" のときに `_emit_evidence_event` を出して
+# frontend の `iq-brand.ts` が canonical `search_*` event を `fabric_iq` ブランドに
+# 分類できるようにする (evidence 経由でしか fabric_iq を判定できない仕様)。
+
+
+class _SyncSearchResult(TypedDict):
+    source: str  # "fabric" | "local"
+    results: list[dict[str, Any]]
+    payload: str  # JSON string returned to Foundry
+
+
+def search_sales_history_sync(
+    query: str,
+    season: str | None = None,
+    region: str | None = None,
+) -> _SyncSearchResult:
+    """search_sales_history の sync 実装（Foundry path 用）。
+
+    blocking pyodbc 呼び出しを含むため、必ず `loop.run_in_executor(_FALLBACK_EXECUTOR, ...)`
+    経由で呼ぶこと。circuit-open 時は Fabric SQL を skip し CSV にフォールバック。
+    """
+    if _is_circuit_open():
+        logger.info("circuit-open: search_sales_history は CSV にフォールバック")
+        results = _get_sales_data()
+        if season:
+            results = [r for r in results if r.get("season") == season]
+        if region:
+            results = [r for r in results if region in str(r.get("destination", ""))]
+        return {
+            "source": "local",
+            "results": results,
+            "payload": json.dumps(results, ensure_ascii=False, default=str),
+        }
+
+    results = _get_sales_data_from_fabric(season=season, region=region)
+    if results:
+        logger.info("Fabric SQL から販売データ %d 件取得 (sync)", len(results))
+        return {
+            "source": "fabric",
+            "results": results,
+            "payload": json.dumps(results, ensure_ascii=False, default=str),
+        }
+
+    logger.info("CSV フォールバックで販売データを取得 (sync)")
+    results = _get_sales_data()
+    if season:
+        results = [r for r in results if r.get("season") == season]
+    if region:
+        results = [r for r in results if region in str(r.get("destination", ""))]
+    return {
+        "source": "local",
+        "results": results,
+        "payload": json.dumps(results, ensure_ascii=False),
+    }
+
+
+def search_customer_reviews_sync(
+    plan_name: str | None = None,
+    min_rating: int | None = None,
+) -> _SyncSearchResult:
+    """search_customer_reviews の sync 実装（Foundry path 用）。"""
+    if _is_circuit_open():
+        logger.info("circuit-open: search_customer_reviews は CSV にフォールバック")
+        results = _get_reviews()
+        if plan_name:
+            results = [r for r in results if plan_name in str(r.get("plan_name", ""))]
+        if min_rating is not None:
+            results = [r for r in results if int(r.get("rating", 0)) >= min_rating]
+        return {
+            "source": "local",
+            "results": results,
+            "payload": json.dumps(results, ensure_ascii=False, default=str),
+        }
+
+    results = _get_reviews_from_fabric(plan_name=plan_name, min_rating=min_rating)
+    if results:
+        logger.info("Fabric SQL からレビュー %d 件取得 (sync)", len(results))
+        return {
+            "source": "fabric",
+            "results": results,
+            "payload": json.dumps(results, ensure_ascii=False, default=str),
+        }
+
+    logger.info("CSV フォールバックでレビューデータを取得 (sync)")
+    results = _get_reviews()
+    if plan_name:
+        results = [r for r in results if plan_name in str(r.get("plan_name", ""))]
+    if min_rating is not None:
+        results = [r for r in results if int(r.get("rating", 0)) >= min_rating]
+    return {
+        "source": "local",
+        "results": results,
+        "payload": json.dumps(results, ensure_ascii=False),
+    }
+
+
+def emit_sales_evidence_for_sync(
+    result: _SyncSearchResult,
+    *,
+    season: str | None,
+    region: str | None,
+) -> None:
+    """sync helper の結果から evidence event を発行する (Foundry dispatch から呼ぶ)。"""
+    _emit_evidence_event(
+        "search_sales_history",
+        evidence=_sales_evidence(result["results"], source=result["source"], season=season, region=region),
+        charts=_sales_charts(result["results"], source=result["source"]),
+    )
+
+
+def emit_review_evidence_for_sync(
+    result: _SyncSearchResult,
+    *,
+    plan_name: str | None,
+    min_rating: int | None,
+) -> None:
+    """sync helper の結果から evidence event を発行する (Foundry dispatch から呼ぶ)。"""
+    _emit_evidence_event(
+        "search_customer_reviews",
+        evidence=_review_evidence(result["results"], source=result["source"], plan_name=plan_name, min_rating=min_rating),
+        charts=_review_charts(result["results"], source=result["source"]),
+    )
 
 
 # --- エージェント作成 ---

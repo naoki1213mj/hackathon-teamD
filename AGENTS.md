@@ -70,18 +70,32 @@
 
 ### Agent1: data-search-agent（データ検索）
 
-**ファイル**: `src/agents/data_search.py`
-**役割**: Fabric Lakehouse SQL endpoint から売上データ・顧客レビューをリアルタイム検索し、ターゲット・季節・地域・予算情報を抽出する。Code Interpreter による高度なデータ分析にも対応。
+**ファイル**: `src/agents/data_search.py` + `src/foundry_prompt_agents.py:run_data_search_prompt_agent` (Foundry path)
+**役割**: Fabric Lakehouse SQL endpoint から売上データ・顧客レビューをリアルタイム検索し、ターゲット・季節・地域・予算情報を抽出する。Code Interpreter による高度なデータ分析にも対応。既定では `data_search_runtime=foundry_preprovisioned` で動作し、事前作成済み Foundry Prompt Agent + `MicrosoftFabricPreviewTool` を `agent_reference` で実行する。delegated user token を OBO で Foundry → Fabric Data Agent に forward することで Fabric workspace audit log に実 user の UPN を記録する。
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|
-| `search_sales_history(query, season, region)` | 売上履歴テーブルを検索。季節・地域でフィルタリング | ✅ Fabric Lakehouse (pyodbc + Azure AD トークン認証 `SQL_COPT_SS_ACCESS_TOKEN`) | CSV (`data/sales_history.csv`) → ハードコードデータ |
-| `search_customer_reviews(plan_name, min_rating)` | 顧客レビューを検索。プラン名・最低評価でフィルタリング | ✅ Fabric Lakehouse (pyodbc + Azure AD トークン認証) | CSV (`data/customer_reviews.csv`) → ハードコードデータ |
-| Code Interpreter | データ分析・可視化（自動検出、`ENABLE_CODE_INTERPRETER=false` で無効化可） | ✅ Foundry Agent Service | グレースフルフォールバック（ツールなしで続行） |
+| `MicrosoftFabricPreviewTool` (Foundry built-in) | Fabric Data Agent (`Travel_Ontology_DA_v2`) を OBO で呼ぶ。Pass 1 で `tool_choice=ToolChoiceAllowed(mode="required", tools=[fabric_dataagent_preview])` で強制呼び出し | ✅ Foundry Agent Service + Fabric DA OBO (delegated `https://ai.azure.com/user_impersonation`) | Pass 1 で zero-fabric / 401 / 403 / connection misconfig 時は Pass 2 (function tool) に降格 |
+| `search_sales_history(query, season, region)` | Pass 2 fallback: 売上履歴テーブル直接検索 | ✅ Fabric Lakehouse (pyodbc + Azure AD トークン認証 `SQL_COPT_SS_ACCESS_TOKEN`) | CSV (`data/sales_history.csv`) → ハードコードデータ |
+| `search_customer_reviews(plan_name, min_rating)` | Pass 2 fallback: 顧客レビュー直接検索 | ✅ Fabric Lakehouse (pyodbc + Azure AD トークン認証) | CSV (`data/customer_reviews.csv`) → ハードコードデータ |
+| Code Interpreter | データ分析・可視化（`ENABLE_CODE_INTERPRETER=true` で有効化） | ✅ Foundry Agent Service | グレースフルフォールバック（ツールなしで続行） |
 
 **出力形式**: Markdown（ターゲット分析 / 売上トレンド / 顧客評価 / 推奨事項の 4 セクション）
 
-**データソース優先順位**: Fabric SQL endpoint → CSV ファイル → ハードコードデータ
+**データソース優先順位 (Foundry path)**: Fabric Data Agent (Pass 1) → SQL endpoint via function tool (Pass 2) → CSV → ハードコードデータ
+
+**Foundry path 前提条件**:
+
+- `caller_identity["auth_mode"] == "delegated"` AND `delegated_user_access_token` 非空 AND `FOUNDRY_FABRIC_CONNECTION_ID` 非空 の AND 条件で発動
+- 上記いずれかが満たされない場合は warn log + telemetry reason を残して legacy 直行
+- 401/403/OBO/connection misconfig 限定で Pass 2 → still fail なら legacy retry。500 / その他は fail loud
+- end user に必要な RBAC: `Azure AI User` (Foundry) + Fabric workspace `Read` + Fabric Data Agent `Read` + 下位 data source `Build`/`Read`
+
+**Rollback 手順**:
+
+1. **即時** (revision rollback): `az containerapp revision list -g <rg> -n <ca>` → 旧 image SHA の revision に `az containerapp ingress traffic set --revision-weight <old>=100`
+2. **中期** (env override): `DATA_SEARCH_RUNTIME=legacy` を Container App env に設定 (新 revision 作成・即時切替ではない)
+3. **最終** (commit revert): PR 3 commit を revert + push
 
 ---
 

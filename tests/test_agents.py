@@ -120,9 +120,10 @@ class TestDataSearchTools:
             def close(self):
                 captured["connection_closed"] = "true"
 
-        def fake_connect(connection_string, attrs_before):
+        def fake_connect(connection_string, attrs_before, timeout=None):
             captured["connection_string"] = connection_string
             captured["attrs_before"] = str(bool(attrs_before))
+            captured["connect_timeout"] = str(timeout)
             return DummyConnection()
 
         monkeypatch.setattr(ds, "_HAS_PYODBC", True)
