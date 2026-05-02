@@ -2929,6 +2929,7 @@ async def _execute_agent(
         create_regulation_check_agent,
         create_video_gen_agent,
     )
+    from src.agents.data_search import original_user_prompt_context
 
     work_iq_enabled_for_span = bool(isinstance(work_iq_session, dict) and work_iq_session.get("enabled"))
     work_iq_status_for_span = (
@@ -3059,6 +3060,8 @@ async def _execute_agent(
                     agent_name=agent_name,
                     step=step,
                     step_key=resolve_step_key(agent_name),
+                ), original_user_prompt_context(
+                    user_input if agent_name == "data-search-agent" else ""
                 ):
                     run_agent = agent.run(user_input)
                     if agent_name == "brochure-gen-agent":

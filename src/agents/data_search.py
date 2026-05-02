@@ -1,5 +1,6 @@
 """Agent1: データ検索エージェント。Fabric Lakehouse から販売・顧客データを検索・分析する。"""
 
+import contextvars
 import csv
 import json
 import logging
@@ -7,6 +8,7 @@ import os
 import re
 import struct
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,36 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 _SQL_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
+
+# Original user prompt context (rubber-duck `agent1-da-prompt-preserve` 2026-05-02 BLOCKING #2):
+# Agent1 (data-search-agent) の LLM が tool 引数として `query_data_agent(question)` に渡す文字列を
+# 抽象化・前置き付加してしまい、ユーザの explicit filters (夏 / ハワイ / 学生 等) が drop される
+# 問題に対する code-level safeguard。`workflow_event_generator` の `agent.run(user_input)` 直前で
+# 元のユーザプロンプトを ContextVar に set し、`query_data_agent` の structured retry 時に
+# 元プロンプトから filters を抽出する。LLM 任せの抽象化ではなく、必ず元プロンプトの言葉から
+# canonical filters を導出することで「家族構成 → family」のような誤抽出を防ぐ。
+_original_user_prompt: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "data_search.original_user_prompt", default=""
+)
+
+
+@contextmanager
+def original_user_prompt_context(prompt: str):
+    """`agent.run(user_input)` の前後で元ユーザプロンプトを ContextVar に保持する。
+
+    `query_data_agent` の structured retry が、LLM が rewrite した tool 引数ではなく
+    元のユーザプロンプトから filters を抽出するために使う。
+    """
+    token = _original_user_prompt.set(prompt or "")
+    try:
+        yield
+    finally:
+        _original_user_prompt.reset(token)
+
+
+def _get_original_user_prompt() -> str:
+    """Return the original user prompt set via `original_user_prompt_context`, or empty."""
+    return _original_user_prompt.get() or ""
 
 
 def _utc_now_iso() -> str:
@@ -1329,13 +1361,65 @@ async def query_data_agent(question: str) -> str:
     Fabric Data Agent が Lakehouse のデータを自動で SQL に変換して実行し、
     分析結果を返す。複雑なデータ分析やクロス集計に適している。
 
+    **MUST: ユーザが指定した季節 / 旅行先 / 顧客セグメント / 年代 / 予算等の固有表現は、
+    ユーザの言葉のまま `question` に保持してください。**
+    DO NOT 「ユーザー指示は不明瞭ですが」「基礎分析として」のような前置きを付けない。
+    DO NOT 季節 / 旅行先 / 顧客セグメントを「年代・家族構成・旅行動機」のような
+    総称に置き換えない (Data Agent が grounded data を返せなくなり、結果として
+    SQL fallback に逃げて UI のデモ品質が低下します)。
+
+    例:
+    - DO: 「夏のハワイ学生旅行向けの売上・予約数・旅行者数・平均評価を教えてください」
+      (ユーザが「夏のハワイ学生旅行向けプランを企画して」と言った場合)
+    - DON'T: 「ユーザー指示は不明瞭ですが、旅行プラン企画のための基礎分析として、
+      売上履歴と顧客レビューから主要なターゲット、季節別・地域別の売上トレンド…」
+
     Args:
-        question: データに関する質問（例: 「沖縄プランの季節別売上推移は？」）
+        question: データに関する質問。ユーザの固有表現 (季節 / 旅行先 / 顧客セグメント等)
+            を保持した具体的な聞き方で渡してください。
     """
     async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
         runtime = _resolve_fabric_data_agent_runtime()
-        result = await _query_data_agent(question) if runtime == "rest" else None
-        attempt_label = "first"
+
+        # rubber-duck `prompt-preserve-impl-review` 2026-05-02 BLOCKING #1:
+        # 1 回目の DA 呼び出し前に、LLM が rewrite した `question` から
+        # ユーザの explicit filters (夏 / ハワイ / 学生 等) が drop されているかを
+        # 検査し、drop されていれば元プロンプト由来の filter を復元する。
+        # これをやらないと、DA が「rewrite された vague prompt」に対して
+        # broad grounded answer (低信頼判定にならない) を返してしまったときに
+        # 誤ったコホートのデータが UI に表示されるリスクがある。
+        #
+        # 復元は **追加のみ** (additive): 元プロンプトを prefix として prepend し、
+        # rewritten question はそのまま保持する。これにより LLM が "売上・予約数・
+        # 旅行者数を教えて" のような elaboration を加えていても、その情報を失わない。
+        original_prompt = _get_original_user_prompt()
+        first_call_question = question
+        first_call_reconciled = False
+        if original_prompt and runtime == "rest" and _resolve_data_agent_version() == "v2":
+            original_filters = _extract_normalized_filters(original_prompt) or {}
+            rewritten_filters = _extract_normalized_filters(question) or {}
+            missing_filters = {
+                key: value for key, value in original_filters.items() if key not in rewritten_filters
+            }
+            if missing_filters:
+                # 元プロンプトの言葉を verbatim で先頭に置き、rewritten question を後段に残す。
+                # DA は「ユーザの実際の言葉」と「LLM の elaboration」を両方読める。
+                first_call_question = (
+                    f"ユーザの実際の質問: 「{original_prompt}」\n\n"
+                    f"このユーザ質問に対して Lakehouse データから具体的な数値で回答してください。"
+                    f"\n\n参考: {question}"
+                )
+                first_call_reconciled = True
+                logger.info(
+                    "Fabric Data Agent: 1回目 prompt 復元 missing_filters=%s "
+                    "original_filters=%s rewritten_filters=%s",
+                    list(missing_filters.keys()),
+                    list(original_filters.keys()),
+                    list(rewritten_filters.keys()),
+                )
+
+        result = await _query_data_agent(first_call_question) if runtime == "rest" else None
+        attempt_label = "first_reconciled" if first_call_reconciled else "first"
         retry_attempted = False
         # 1 回目が低信頼 (Fabric Data Agent が NL2Ontology で 3 条件以上 conjoined
         # filter を取りこぼした「実データの取得ができませんでした」型の応答) のとき、
@@ -1353,13 +1437,20 @@ async def query_data_agent(question: str) -> str:
             and _is_low_confidence_data_agent_answer(result)
             and _resolve_data_agent_version() == "v2"
         ):
-            normalized_filters = _extract_normalized_filters(question)
+            # rubber-duck `agent1-da-prompt-preserve` 2026-05-02 BLOCKING #2:
+            # LLM が rewrite した `question` には「家族構成」のような誤マッピング
+            # 候補が含まれることがあるため、ユーザの **元プロンプト** から filters を
+            # 抽出する。元プロンプトが利用可能な場合のみ使い、ない場合 (test 等) は
+            # 既存挙動どおり tool 引数 `question` をそのまま使う。
+            filter_source = _get_original_user_prompt() or question
+            normalized_filters = _extract_normalized_filters(filter_source)
             if normalized_filters:
                 retry_attempted = True
-                retry_prompt = _build_structured_retry_question(question, normalized_filters)
+                retry_prompt = _build_structured_retry_question(filter_source, normalized_filters)
                 logger.info(
-                    "Fabric Data Agent: 1回目低信頼 → structured retry filters=%s",
+                    "Fabric Data Agent: 1回目低信頼 → structured retry filters=%s source=%s",
                     normalized_filters,
+                    "original_user_prompt" if _get_original_user_prompt() else "tool_argument",
                 )
                 retry_result = await _query_data_agent(retry_prompt)
                 if retry_result and not _is_low_confidence_data_agent_answer(retry_result):
@@ -1562,6 +1653,28 @@ INSTRUCTIONS = """\
 - `query_data_agent` が利用できない場合、または追加データが必要な場合は `search_sales_history` と `search_customer_reviews` を使ってください
 - データが見つからない場合でも、利用可能なデータから最善の分析を行ってください
 - 分析結果は具体的な数値を含めてください（売上額、件数、評価スコア等）
+
+## query_data_agent への質問の作り方（**最重要**）
+`query_data_agent` の `question` 引数は **ユーザの言葉をそのまま保持**してください。
+LLM が独自に言い換えると Fabric Data Agent が grounded data を返せなくなります。
+
+### MUST
+- ユーザが書いた季節（春/夏/秋/冬）、旅行先（ハワイ/沖縄/京都 等）、顧客セグメント（学生/ファミリー/シニア/カップル 等）、年代、予算は **必ず原文のまま** `question` に含める
+- 「売上・予約数・旅行者数・平均評価を教えてください」のように、欲しい指標を具体的に並べる
+
+### DO NOT
+- 「ユーザー指示は不明瞭ですが」「基礎分析として」のような前置きを付けない
+- 「学生」を「年代・家族構成・旅行動機」のような抽象的な総称に置き換えない
+- 「ハワイ」を「リゾート系」「海外旅行先」に一般化しない
+- 「夏」を「季節別」に置き換えない
+
+### 例
+- ユーザ入力: 「夏のハワイ学生旅行向けプランを企画して」
+  - DO: `query_data_agent("夏のハワイ学生旅行向けの売上・予約数・旅行者数・平均評価を教えてください")`
+  - DON'T: `query_data_agent("ユーザー指示は不明瞭ですが、旅行プラン企画のための基礎分析として、売上履歴と顧客レビューから主要なターゲット（年代・家族構成・旅行動機）、季節別・地域別の売上トレンドを…")`
+- ユーザ入力: 「春の沖縄ファミリープランを考えたい」
+  - DO: `query_data_agent("春の沖縄ファミリー向けプランの売上・予約数・平均単価・顧客評価を教えてください")`
+  - DON'T: 「沖縄プランの傾向を教えて」(ファミリー条件が消えている)
 
 ## 出力の注意事項
 - 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**

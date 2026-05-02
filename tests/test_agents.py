@@ -1077,6 +1077,278 @@ class TestDataSearchTools:
         assert payload["source"] == "Fabric Data Agent"
 
     @pytest.mark.asyncio
+    async def test_structured_retry_uses_original_user_prompt_when_set(self, monkeypatch):
+        """rubber-duck `agent1-da-prompt-preserve` BLOCKING #2:
+        Agent1 LLM が tool 引数の `question` でユーザの explicit filters
+        (夏 / ハワイ / 学生) を drop しても、`original_user_prompt_context` で
+        元プロンプトが set されていれば、structured retry は元プロンプトから
+        filters を抽出して正しい canonical 値 (customer_segment=student,
+        season=summer) で retry することを確認する。"""
+        import src.agents.data_search as ds
+
+        first_failure = (
+            "ご質問の内容では具体的なデータ抽出ができませんでした。"
+            "条件を絞ってください。"
+        )
+        retry_success = (
+            "## 結論\n"
+            "夏季ハワイの学生 207 件、売上 ¥45,820,000\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| 予約件数 | 207 件 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            if "正規化済みフィルタ条件" in question:
+                return retry_success
+            return first_failure
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        # ContextVar に元のユーザプロンプトを set した状態で、tool 引数には
+        # LLM が rewrite した「家族構成」を含む曖昧な prompt を渡す
+        rewritten_arg = (
+            "ユーザー指示は不明瞭ですが、旅行プラン企画のための基礎分析として、"
+            "売上履歴と顧客レビューから主要なターゲット (年代・家族構成・旅行動機)、"
+            "季節別・地域別の売上トレンドを教えてください"
+        )
+        with ds.original_user_prompt_context("夏のハワイ学生旅行向けプランを企画して"):
+            await ds.query_data_agent(rewritten_arg)
+
+        assert len(call_history) == 2, (
+            "ContextVar に元プロンプトがあれば、低信頼検出後に structured retry が走る"
+        )
+        retry_prompt = call_history[1]
+        # 元プロンプトから抽出された canonical 値が retry に含まれる
+        assert "customer_segment: student" in retry_prompt, (
+            "元プロンプト (学生) から student が抽出されているはず "
+            f"(rewritten arg の家族構成が混入していたら family になる); got: {retry_prompt[:300]}"
+        )
+        assert "season: summer" in retry_prompt
+        # 「家族構成 → family」が誤抽出されていないこと
+        assert "customer_segment: family" not in retry_prompt, (
+            "rewritten arg の「家族構成」を拾って family を誤抽出していないか確認"
+        )
+
+    @pytest.mark.asyncio
+    async def test_structured_retry_falls_back_to_question_when_no_context(self, monkeypatch):
+        """ContextVar が set されていない場合 (CLI smoke / standalone test) は
+        後方互換で tool 引数 `question` をそのまま structured retry の filter source
+        として使うことを確認する。"""
+        import src.agents.data_search as ds
+
+        first_failure = "実データの取得ができませんでした。"
+        retry_success = (
+            "## 結論\n"
+            "夏季ハワイ学生 207 件 / 売上 ¥45,820,000\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            if "正規化済みフィルタ条件" in question:
+                return retry_success
+            return first_failure
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        # ContextVar 未 set。tool 引数自体に filters が含まれているケース
+        await ds.query_data_agent("夏のハワイ学生旅行向けプランを教えて")
+
+        assert len(call_history) == 2
+        assert "customer_segment: student" in call_history[1]
+        assert "season: summer" in call_history[1]
+
+    def test_get_original_user_prompt_default_empty(self):
+        """ContextVar 未 set のときは空文字列を返す (test isolation 担保)。"""
+        import src.agents.data_search as ds
+
+        assert ds._get_original_user_prompt() == ""
+
+    def test_original_user_prompt_context_resets_after_with_block(self):
+        """`original_user_prompt_context` が with block を抜けたら ContextVar が
+        前の値 (空) に戻ることを確認する (test pollution / cross-conversation leak 防止)。"""
+        import src.agents.data_search as ds
+
+        assert ds._get_original_user_prompt() == ""
+        with ds.original_user_prompt_context("夏のハワイ学生旅行"):
+            assert ds._get_original_user_prompt() == "夏のハワイ学生旅行"
+        # with 抜けた後は元に戻る
+        assert ds._get_original_user_prompt() == ""
+
+    @pytest.mark.asyncio
+    async def test_first_call_reconciliation_when_rewritten_drops_user_filters(self, monkeypatch):
+        """rubber-duck `prompt-preserve-impl-review` BLOCKING #1:
+        ContextVar に元プロンプトが set されていて、tool 引数 `question` が
+        ユーザの explicit filters を drop している場合、**1 回目の DA 呼び出し前に**
+        元プロンプトを prepend して filter を復元する (low-confidence 待ちでは遅い)。
+        DA が broad grounded answer を返すと低信頼判定にならず誤コホートが UI に
+        出るリスクがあるため。"""
+        import json as _json
+
+        import src.agents.data_search as ds
+
+        # DA が broad grounded answer (= 低信頼検出されない) を返すパス
+        broad_grounded = (
+            "## 結論\n"
+            "全体の年代・家族構成別の傾向を分析しました。\n"
+            "売上は ¥120,000,000、予約 850 件、平均評価 4.0 / 5 です。\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| 予約件数 | 850 件 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return broad_grounded
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        rewritten_arg = (
+            "ユーザー指示は不明瞭ですが、年代・家族構成・旅行動機の基礎分析として、"
+            "売上履歴と顧客レビューから主要なターゲット情報を教えてください"
+        )
+        with ds.original_user_prompt_context("夏のハワイ学生旅行向けプランを企画して"):
+            result = await ds.query_data_agent(rewritten_arg)
+
+        # 1 回目の prompt は reconciled 版でなければならない
+        assert len(call_history) == 1, "DA が高信頼回答を返したので retry は走らない"
+        first_prompt = call_history[0]
+        assert "夏のハワイ学生旅行向けプランを企画して" in first_prompt, (
+            "1 回目 DA call には元ユーザプロンプトが verbatim で含まれているべき "
+            f"(BLOCKING #1 fix); got: {first_prompt[:300]}"
+        )
+        # rewritten arg も参考として含めておく (LLM の elaboration を捨てない)
+        assert rewritten_arg in first_prompt or "参考:" in first_prompt
+        # attempt label が反映される
+        payload = _json.loads(result)
+        assert payload.get("attempt") == "first_reconciled"
+
+    @pytest.mark.asyncio
+    async def test_first_call_no_reconciliation_when_no_filters_dropped(self, monkeypatch):
+        """元プロンプトと rewritten の両方とも filter が抽出できないとき (汎用クエリ)、
+        reconciliation は skip して既存挙動を維持する (回帰防止)。"""
+        import json as _json
+
+        import src.agents.data_search as ds
+
+        broad_grounded = (
+            "## 結論\n"
+            "ハワイの売上は ¥80,000,000、予約 500 件です。\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| 予約件数 | 500 件 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return broad_grounded
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        # 元 = "ハワイの売上を教えて" は filter 抽出 None (segment / season なし)
+        # rewritten = 同上
+        with ds.original_user_prompt_context("ハワイの売上を教えて"):
+            result = await ds.query_data_agent("ハワイの売上について教えてください")
+
+        assert len(call_history) == 1
+        # reconciliation は走らない
+        first_prompt = call_history[0]
+        assert "ユーザの実際の質問" not in first_prompt, (
+            "filter 抽出できないクエリでは reconciliation を skip する"
+        )
+        payload = _json.loads(result)
+        assert payload.get("attempt") == "first", (
+            "filter 抽出されないので reconciliation 不要、attempt='first' のまま"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_call_no_reconciliation_when_rewritten_added_filters(self, monkeypatch):
+        """rewritten が元プロンプトより MORE filters を持つ (LLM が情報を追加した) とき、
+        元プロンプト側に missing filter はないので reconciliation は skip する
+        (rewritten の elaboration を上書きしない)。"""
+        import json as _json
+
+        import src.agents.data_search as ds
+
+        broad_grounded = (
+            "## 結論\n"
+            "夏のハワイ学生旅行は予約 207 件、売上 ¥45,820,000 です。\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| 予約件数 | 207 件 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return broad_grounded
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        # 元 = "ハワイ" だけ (no filters), rewritten = LLM が "夏" "学生" を補完済み
+        with ds.original_user_prompt_context("ハワイの分析"):
+            result = await ds.query_data_agent("夏のハワイ学生旅行向けの売上を教えてください")
+
+        assert len(call_history) == 1
+        first_prompt = call_history[0]
+        # 元プロンプトに filter がないので missing_filters は空 → reconciliation skip
+        assert "ユーザの実際の質問" not in first_prompt
+        payload = _json.loads(result)
+        assert payload.get("attempt") == "first"
+
+    @pytest.mark.asyncio
+    async def test_context_var_propagates_across_asyncio_create_task(self):
+        """rubber-duck `prompt-preserve-impl-review` BLOCKING #2:
+        Agent Framework が `agent.run()` 内部で `asyncio.create_task` 経由で
+        tool を呼ぶ場合でも、ContextVar が parent → child へ伝播することを確認する
+        (asyncio の child task は default で parent context をコピーするはず)。"""
+        import asyncio
+
+        import src.agents.data_search as ds
+
+        captured: list[str] = []
+
+        async def child_task() -> None:
+            captured.append(ds._get_original_user_prompt())
+
+        with ds.original_user_prompt_context("夏のハワイ学生旅行"):
+            # asyncio.create_task でも contextvar が伝播することを確認
+            task = asyncio.create_task(child_task())
+            await task
+            # to_thread でも伝播する (Python 3.9+ の asyncio.to_thread は contextvar 維持)
+
+            def sync_in_thread() -> str:
+                return ds._get_original_user_prompt()
+
+            thread_value = await asyncio.to_thread(sync_in_thread)
+            captured.append(thread_value)
+
+        assert captured == ["夏のハワイ学生旅行", "夏のハワイ学生旅行"], (
+            "ContextVar は asyncio.create_task / asyncio.to_thread 経由でも "
+            f"parent context をコピーするはず; captured={captured}"
+        )
+
+    @pytest.mark.asyncio
     async def test_query_data_agent_replaces_nl2ontology_error_with_sql_supplement(
         self, monkeypatch
     ):
