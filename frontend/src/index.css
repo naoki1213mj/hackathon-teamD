@@ -1,6 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/*
+ * Tailwind v4 の `dark:` variant を OS 設定 (prefers-color-scheme) ではなく
+ * `:root.dark` クラスに連動させる。useTheme は `<html class="dark">` を
+ * トグルするため、OS ダーク + アプリライトの組合せでも IQ タイルや評価
+ * パネルが OS preference を勝手に拾わなくなる。
+ *
+ * Bug fix 2026-05-02: ライトモードで IQ タイル文字色が白く見える問題は、
+ * OS が dark mode かつアプリが light のとき `dark:bg-violet-950 dark:text-violet-100`
+ * が誤発火していたのが原因。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   color-scheme: light;
   --app-bg: #e8eef5;

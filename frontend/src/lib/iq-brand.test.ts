@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EvidenceItem } from './event-schemas'
 import type { ToolEvent } from './tool-events'
-import { classifyEvidence, classifyToolEvent, collectActiveIQBrands } from './iq-brand'
+import { classifyEvidence, classifyToolEvent, collectActiveIQBrands, hasIQAttempted } from './iq-brand'
 
 function ev(overrides: Partial<EvidenceItem> = {}): EvidenceItem {
   return {
@@ -108,5 +108,48 @@ describe('collectActiveIQBrands', () => {
     ]
     const brands = collectActiveIQBrands(events)
     expect(brands.size).toBe(0)
+  })
+})
+
+describe('hasIQAttempted (rubber-duck pr1-impl-critique non-blocking #3)', () => {
+  it('returns true for fabric_iq when query_data_agent fired (even on failure)', () => {
+    const events: ToolEvent[] = [
+      te({ tool: 'query_data_agent', status: 'failed' } as Partial<ToolEvent>),
+    ]
+    expect(hasIQAttempted(events, 'fabric_iq')).toBe(true)
+  })
+
+  it('returns true for fabric_iq when search_sales_history fired (even with no Fabric evidence)', () => {
+    const events: ToolEvent[] = [
+      te({ tool: 'search_sales_history', status: 'completed', evidence: [] } as Partial<ToolEvent>),
+    ]
+    expect(hasIQAttempted(events, 'fabric_iq')).toBe(true)
+  })
+
+  it('returns true for foundry_iq when search_knowledge_base fired (even on fallback)', () => {
+    const events: ToolEvent[] = [
+      te({ tool: 'search_knowledge_base', fallback: 'static', agent: 'regulation-check-agent' } as Partial<ToolEvent>),
+    ]
+    expect(hasIQAttempted(events, 'foundry_iq')).toBe(true)
+  })
+
+  it('returns true for work_iq when workiq_foundry_tool fired', () => {
+    const events: ToolEvent[] = [
+      te({ tool: 'workiq_foundry_tool', status: 'completed', agent: 'marketing-plan-agent' } as Partial<ToolEvent>),
+    ]
+    expect(hasIQAttempted(events, 'work_iq')).toBe(true)
+  })
+
+  it('returns false when no tool from the IQ family was ever attempted', () => {
+    const events: ToolEvent[] = [
+      te({ tool: 'search_market_trends', status: 'completed' } as Partial<ToolEvent>),
+    ]
+    expect(hasIQAttempted(events, 'fabric_iq')).toBe(false)
+    expect(hasIQAttempted(events, 'foundry_iq')).toBe(false)
+    expect(hasIQAttempted(events, 'work_iq')).toBe(false)
+  })
+
+  it('returns false for empty event list', () => {
+    expect(hasIQAttempted([], 'fabric_iq')).toBe(false)
   })
 })

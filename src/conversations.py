@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -213,6 +214,180 @@ async def append_conversation_events(
         return doc
 
 
+# Cosmos doc 2MB hard limit 対策。GPT-Image-2 / MAI-Image-2 は base64 PNG
+# (data:image/png;base64,...) を返し 1 枚 ~500KB-1.5MB ある。brochure-gen で
+# hero+banner=2 枚以上保存すると merged_messages が 2MB を超えて Cosmos が
+# `RequestEntityTooLarge` (413) を返し、_persist_conversation_doc は
+# in-memory にフォールバック → Cosmos には古い `awaiting_approval` が
+# 残り、polling restoreConversation や page reload で UI が承認画面に
+# 戻るバグが再現する (Bug 4 root cause、App Insights traces 2026-05-02
+# 10:35:00 / 10:35:45 で confirmed)。
+#
+# SSE ストリームと in-memory state は full image を保持し、Cosmos に
+# 書く瞬間だけ data URL を小さな SVG プレースホルダで置換する。
+# `data:image/svg+xml;...` は数百バイトに収まり、frontend は同じ
+# `<img src={url}>` で何も変えずにレンダリングできる。
+#
+# 注: brochure HTML は `text` event に `content_type=html` で書かれ、
+# その中に `<img src="data:image/png;base64,...">` が inline で含まれる
+# ため、`image` event だけでなく HTML inline data URL も同じ閾値で
+# 置換する必要がある (rubber-duck `pr1-impl-critique` blocking #1)。
+_MAX_PERSISTED_IMAGE_DATA_URL_BYTES = 64 * 1024  # 64KB
+_TRUNCATED_IMAGE_PLACEHOLDER_TEMPLATE = (
+    "data:image/svg+xml;charset=utf-8,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E"
+    "%3Crect width='800' height='400' fill='%23e2e8f0'/%3E"
+    "%3Ctext x='400' y='180' text-anchor='middle' font-size='18' "
+    "font-family='sans-serif' fill='%23475569'%3E"
+    "%E5%AE%B9%E9%87%8F%E5%88%B6%E9%99%90%E3%81%AB%E3%82%88%E3%82%8A%E7%94%BB%E5%83%8F%E3%82%92%E7%9C%81%E7%95%A5"
+    "%3C/text%3E"
+    "%3Ctext x='400' y='220' text-anchor='middle' font-size='14' "
+    "font-family='sans-serif' fill='%2364748b'%3E"
+    "original_size={size}B"
+    "%3C/text%3E"
+    "%3C/svg%3E"
+)
+
+
+# `<img src="data:image/...;base64,...">` 形式の inline 画像を検出する。
+# 以下を全て許容:
+#   - ダブルクォート src="data:..." / シングルクォート src='data:...'
+#   - 等号前後の whitespace: src = "data:..."
+#   - クォートなし src=data:image/png;base64,xxx
+# `<img\b` を要求して img タグ起点に限定する (CSS background-image や
+# template literal の data: URL を誤って書き換えない)。
+# 注意: 完璧な HTML パーサではないが、brochure-gen が出力する典型的な
+# img 形態は全てカバーする。malformed HTML / `srcset` は今回対象外
+# (rubber-duck pr1-final-review #1)。
+_HTML_INLINE_IMG_DATA_URL_QUOTED_RE = re.compile(
+    r"""(<img\b[^>]*?\bsrc\s*=\s*)(["'])(data:[^"']+)(\2)""",
+    re.IGNORECASE,
+)
+
+# クォートなし src=data:... 形式. 属性値は whitespace / `>` で終端。
+# data: URL 内に whitespace は含まれない (base64 / URL-encode 済み) ので
+# `[^\s>]+` で安全に切れる。
+_HTML_INLINE_IMG_DATA_URL_UNQUOTED_RE = re.compile(
+    r"""(<img\b[^>]*?\bsrc\s*=\s*)(data:[^\s>"']+)""",
+    re.IGNORECASE,
+)
+
+
+def _truncate_inline_data_urls_in_html(html: str) -> tuple[str, int]:
+    """HTML の `<img src="data:...">` 形式の大きな inline 画像を
+    プレースホルダ URL で置換する。
+
+    Returns (truncated_html, replaced_count)。`_MAX_PERSISTED_IMAGE_DATA_URL_BYTES`
+    を超える data URL のみ置換し、小さい SVG / fallback 画像はそのまま保持する。
+
+    クォート付き / なし、等号前後の whitespace 全形式に対応する。
+    (rubber-duck pr1-final-review blocking #1)
+    """
+    if not isinstance(html, str) or "data:" not in html:
+        return html, 0
+
+    replaced = 0
+
+    def _sub_quoted(match: re.Match[str]) -> str:
+        nonlocal replaced
+        prefix, quote, url, _close_quote = match.group(1), match.group(2), match.group(3), match.group(4)
+        url_bytes = len(url.encode("utf-8"))
+        if url_bytes <= _MAX_PERSISTED_IMAGE_DATA_URL_BYTES:
+            return match.group(0)
+        replaced += 1
+        placeholder = _TRUNCATED_IMAGE_PLACEHOLDER_TEMPLATE.replace("{size}", str(url_bytes))
+        return f"{prefix}{quote}{placeholder}{quote}"
+
+    def _sub_unquoted(match: re.Match[str]) -> str:
+        nonlocal replaced
+        prefix, url = match.group(1), match.group(2)
+        url_bytes = len(url.encode("utf-8"))
+        if url_bytes <= _MAX_PERSISTED_IMAGE_DATA_URL_BYTES:
+            return match.group(0)
+        replaced += 1
+        placeholder = _TRUNCATED_IMAGE_PLACEHOLDER_TEMPLATE.replace("{size}", str(url_bytes))
+        # 戻すときは安全のためクォートで囲む (元が unquoted でも valid HTML)
+        return f'{prefix}"{placeholder}"'
+
+    # quoted を先に処理 (unquoted regex がクォート部分にも match しないよう
+    # quoted のあとは data: URL がプレースホルダ化されているので unquoted
+    # regex は何もしない、という順序で安全)
+    truncated = _HTML_INLINE_IMG_DATA_URL_QUOTED_RE.sub(_sub_quoted, html)
+    truncated = _HTML_INLINE_IMG_DATA_URL_UNQUOTED_RE.sub(_sub_unquoted, truncated)
+    return truncated, replaced
+
+
+def _truncate_large_images_for_persistence(events: object) -> list[dict]:
+    """Cosmos 2MB 制限を超えないよう、image / brochure HTML 内の大きな
+    data URL を小さな SVG プレースホルダで置換する。
+
+    対象:
+      - `event == 'image'` で `data.url` が `data:` 始まり閾値超え
+      - `event == 'text'` で `data.content_type == 'html'` (brochure-gen) かつ
+        HTML 内 `<img src="data:...">` が閾値超え
+
+    SVG / 小さいプレースホルダ / http(s) URL はそのまま保持する。元 event dict は
+    破壊せず、置換時のみ shallow-copy で新しい dict を返す。
+
+    Note: `_merge_event_histories` の dedupe より **先** に呼び出すこと
+    (rubber-duck `pr1-impl-critique` blocking #2)。プレースホルダは
+    deterministic (timestamp なし) なので、既保存の truncated event と
+    今回 incoming の full-image event が "同じ画像" であれば、両方を
+    truncate した後に JSON-identity で dedupe される。
+    """
+    if not isinstance(events, list):
+        return []
+    sanitized: list[dict] = []
+    for event in events:
+        if not isinstance(event, dict):
+            sanitized.append(event)
+            continue
+        event_type = event.get("event")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            sanitized.append(event)
+            continue
+
+        if event_type == "image":
+            url = data.get("url")
+            if not isinstance(url, str) or not url.startswith("data:"):
+                sanitized.append(event)
+                continue
+            url_bytes = len(url.encode("utf-8"))
+            if url_bytes <= _MAX_PERSISTED_IMAGE_DATA_URL_BYTES:
+                sanitized.append(event)
+                continue
+            placeholder = _TRUNCATED_IMAGE_PLACEHOLDER_TEMPLATE.replace("{size}", str(url_bytes))
+            new_data = {
+                **data,
+                "url": placeholder,
+                "truncated": True,
+                "original_size_bytes": url_bytes,
+            }
+            sanitized.append({**event, "data": new_data})
+            continue
+
+        if event_type == "text" and data.get("content_type") == "html":
+            html = data.get("content")
+            if not isinstance(html, str):
+                sanitized.append(event)
+                continue
+            truncated_html, replaced = _truncate_inline_data_urls_in_html(html)
+            if replaced == 0:
+                sanitized.append(event)
+                continue
+            new_data = {
+                **data,
+                "content": truncated_html,
+                "truncated_inline_images": replaced,
+            }
+            sanitized.append({**event, "data": new_data})
+            continue
+
+        sanitized.append(event)
+    return sanitized
+
+
 def _build_conversation_doc(
     conversation_id: str,
     existing: dict | None,
@@ -255,7 +430,15 @@ def _build_conversation_doc(
         "updated_at": now,
         "status": status,
         "input": user_input,
-        "messages": _merge_event_histories(existing.get("messages", []) if existing else [], events),
+        # Truncate inline data: URLs in BOTH existing-doc messages (already
+        # persisted, possibly already truncated) and incoming events BEFORE
+        # `_merge_event_histories` dedupe. Placeholder URL is deterministic
+        # so two identity-different copies of the "same image" collapse to
+        # one entry after JSON-identity dedup (rubber-duck blocking #2).
+        "messages": _merge_event_histories(
+            _truncate_large_images_for_persistence(existing.get("messages", []) if existing else []),
+            _truncate_large_images_for_persistence(events),
+        ),
         "artifacts": artifact_versions,
         "metadata": merged_metadata,
     }

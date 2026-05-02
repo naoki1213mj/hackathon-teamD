@@ -1132,7 +1132,12 @@ export function buildRestoredPipelineState(
     for (let i = lastApprovalRequestIdx + 1; i < messages.length; i += 1) {
       const ev = messages[i]
       if (!ev) continue
-      if (ev.event !== 'text' && ev.event !== 'image') continue
+      // text/image はエージェント出力、tool_event は ツール呼び出しの完了/失敗。
+      // 承認後に regulation-check / brochure-gen / video-gen のいずれかが
+      // text/image/tool_event を一つでも出していれば「ユーザは既に承認済」と
+      // みなして status を completed に上書きする。これにより Cosmos が
+      // `awaiting_approval` のまま残った場合でも UI が承認画面に戻らない。
+      if (ev.event !== 'text' && ev.event !== 'image' && ev.event !== 'tool_event') continue
       const data = ev.data as Record<string, unknown> | undefined
       const agent = typeof data?.agent === 'string' ? data.agent : ''
       if (POST_APPROVAL_AGENTS.has(agent)) {
@@ -1949,16 +1954,17 @@ export function useSSE() {
       // 'completed' back to 'approval'. This protects against transient
       // backend status drift (e.g. Cosmos save fallback to in-memory leaves
       // stale 'awaiting_approval' visible to the next polling read).
-      // Only block the regression if local state already reached completion
-      // AND the user has not explicitly started a refine round (which would
-      // come through the foreground SSE path, not this passive poll).
+      // Once local state reaches completed, no passive poll should ever
+      // revert it. Refine rounds explicitly flow through the foreground SSE
+      // path (POST /api/chat with previous_revision), not this passive poll,
+      // so blocking here is safe even when versions.length===0 (which can
+      // happen on cold page reload before snapshots are pushed).
       // (rubber-duck audit 2026-05-02 — bug class: 「販促物完了後に承認画面に
-      // 勝手に戻り approve すると APPROVAL_CONTEXT_NOT_FOUND」)
+      // 勝手に戻り approve すると APPROVAL_CONTEXT_NOT_FOUND / 動画だけ ✓」)
       if (
         passive
         && previousState.status === 'completed'
         && restoredState.status === 'approval'
-        && previousState.versions.length > 0
       ) {
         console.warn(
           '[restoreConversation] Refusing passive regression from completed to approval state',

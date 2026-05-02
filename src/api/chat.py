@@ -2268,6 +2268,15 @@ def _build_content_events(agent_name: str, result_text: str) -> list[str]:
     if not result_text:
         return []
 
+    if agent_name == "data-search-agent":
+        # Bug 2 part 2 / B2 sanitizer 2026-05-02: LLM が出した架空の
+        # ダウンロード CTA や sandbox: link を UI 表示前に除去する。
+        from src.agents.data_search import _sanitize_data_search_text
+
+        result_text = _sanitize_data_search_text(result_text)
+        if not result_text:
+            return []
+
     return [format_sse(SSEEventType.TEXT, {"content": result_text, "agent": agent_name})]
 
 

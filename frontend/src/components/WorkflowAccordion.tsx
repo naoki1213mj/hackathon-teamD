@@ -9,7 +9,7 @@ import { DebugConsole } from './DebugConsole'
 import { EvidenceChartPanel } from './EvidenceChartPanel'
 import { ErrorRetry } from './ErrorRetry'
 import { IQBadge, IQStatusStrip } from './IQBadge'
-import { collectActiveIQBrands } from '../lib/iq-brand'
+import { collectActiveIQBrands, hasIQAttempted, type IQBrand } from '../lib/iq-brand'
 import { MarkdownView } from './MarkdownView'
 import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
@@ -35,6 +35,24 @@ const ALL_STEPS = [
 
 /** Round 2+ 用（データ分析は Round 1 を継承） */
 const IMPROVEMENT_STEPS = ALL_STEPS.filter(s => s.key !== 'data-search-agent')
+
+/**
+ * 各ステップに紐付けられた「想定 IQ プロバイダ」マップ。
+ *
+ * 実行が成功 / 失敗 / fallback したかに関わらず、phase header に
+ * このフェーズが本来使う IQ をバッジ表示するためのもの。
+ * 実際に IQ が使われたかどうかは IQStatusStrip (上部) の
+ * 「Used / Not yet used」ラベルで明示される。
+ *
+ * Bug 3 fix 2026-05-02: フォールバック時にバッジが消えるとデモで
+ * "そもそもこのフェーズは Fabric IQ を使うつもりだった" という
+ * 設計意図が伝わらないため、想定プロバイダは常に表示する。
+ */
+const EXPECTED_IQ_BY_STEP: Record<string, IQBrand | undefined> = {
+  'data-search-agent': 'fabric_iq',
+  'marketing-plan-agent': 'work_iq',
+  'regulation-check-agent': 'foundry_iq',
+}
 
 interface Round {
   number: number
@@ -309,11 +327,19 @@ export function WorkflowAccordion({
     })
     const hasFoundryWorkIqTool = stepTools.some(isFoundryWorkIqToolEvent)
     const hasMcpTool = stepTools.some(isMcpToolEvent)
-    // Per-step IQ badges — derived from the SAME classifier that drives the top
-    // 3IQ status strip (no static agent-to-IQ map; only show brands actually
-    // proven by successful tool events). Avoids overstating provenance on
-    // failure/fallback paths (rubber-duck audit 4bug-plan #3).
+    // Per-step IQ badges. Honest semantics:
+    //   1) collectActiveIQBrands → IQ tools that fired AND succeeded
+    //   2) EXPECTED_IQ_BY_STEP supplements with the phase's primary IQ provider
+    //      ONLY when a tool from that IQ family was actually attempted on this
+    //      step (succeeded OR failed/fallback) — never as a static design label.
+    // This way the chip honestly reflects "this phase tried this IQ" while
+    // the IQStatusStrip at the top tracks "Used / Not yet used" outcome.
+    // Bug 3 fix 2026-05-02 (rubber-duck pr1-impl-critique non-blocking #3).
     const stepActiveIQBrands = collectActiveIQBrands(stepTools)
+    const expectedIQ = EXPECTED_IQ_BY_STEP[step.key]
+    if (expectedIQ && hasIQAttempted(stepTools, expectedIQ)) {
+      stepActiveIQBrands.add(expectedIQ)
+    }
     // Drop work_iq from per-step badges when the existing hasFoundryWorkIqTool
     // chip already covers it (avoid double display on the marketing-plan step)
     const stepIQBadges = Array.from(stepActiveIQBrands).filter(

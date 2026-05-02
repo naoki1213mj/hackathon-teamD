@@ -62,6 +62,41 @@ def _get_original_user_prompt() -> str:
     return _original_user_prompt.get() or ""
 
 
+# 偽の CTA / sandbox link 除去 (Bug 2 part 2 / B2 sanitizer 2026-05-02)。
+# データ検索 agent の LLM が `[グラフ](sandbox:/...)` 形式の存在しない
+# ファイル参照や、現状実装されていない「📊 売上分析グラフをダウンロード」
+# 「PowerPoint 出力」「[グラフを開く]」等の架空 CTA を出すことがあるため、
+# 表示前に除去する。アンカーテキストは保持しつつリンク化のみ落とす。
+_SANDBOX_LINK_RE = re.compile(r"\[([^\]]*)\]\(sandbox:[^)]*\)")
+_FILE_LINK_RE = re.compile(r"\[([^\]]*)\]\(file:[^)]*\)")
+_FAKE_CTA_LINE_RE = re.compile(
+    r"^\s*[-*•]?\s*"
+    r".*?(?:売上分析グラフをダウンロード|PowerPoint\s*で?\s*出力|"
+    r"PowerPoint\s*を?\s*出力|グラフを開く|チャートを開く|"
+    r"レポートをダウンロード|分析レポートをダウンロード|"
+    r"📊\s*[^\n]*ダウンロード)"
+    r".*$",
+    re.MULTILINE,
+)
+
+
+def _sanitize_data_search_text(text: str) -> str:
+    """Strip fictional download CTAs and sandbox/file: links from data-search output.
+
+    Preserves anchor text (e.g. `[グラフ](sandbox:/x.png)` → `グラフ`) while
+    removing the link target the UI can't fulfill. Removes entire lines that
+    are pure download/export CTAs the app does not actually implement.
+    """
+    if not text:
+        return text
+    cleaned = _SANDBOX_LINK_RE.sub(r"\1", text)
+    cleaned = _FILE_LINK_RE.sub(r"\1", cleaned)
+    cleaned = _FAKE_CTA_LINE_RE.sub("", cleaned)
+    # 連続する空行を 2 連続までに圧縮（Markdown レンダリングの間延び抑制）
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip("\n") or text
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

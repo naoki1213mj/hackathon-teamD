@@ -1671,6 +1671,65 @@ class TestDataSearchTools:
         assert 0.85 in evidence_relevances
 
 
+class TestSanitizeDataSearchText:
+    """B2 sanitizer: data-search-agent の架空 CTA / sandbox link 除去テスト"""
+
+    def test_strips_sandbox_link_keeping_anchor(self):
+        from src.agents.data_search import _sanitize_data_search_text
+
+        result = _sanitize_data_search_text(
+            "売上は ¥38M でした。詳細は [グラフを見る](sandbox:/charts/sales.png) を参照。"
+        )
+        assert "sandbox:" not in result
+        assert "グラフを見る" in result
+        assert "¥38M" in result
+
+    def test_strips_file_link_keeping_anchor(self):
+        from src.agents.data_search import _sanitize_data_search_text
+
+        result = _sanitize_data_search_text("[レポート](file:///tmp/report.pdf)")
+        assert "file:" not in result
+        assert "レポート" in result
+
+    def test_drops_fake_download_cta_lines(self):
+        from src.agents.data_search import _sanitize_data_search_text
+
+        text = (
+            "## サマリ\n\n"
+            "売上は前年比 +12% で推移。\n\n"
+            "- 📊 売上分析グラフをダウンロード\n"
+            "- PowerPoint で出力\n"
+            "- [グラフを開く](sandbox:/x.png)\n"
+            "\n"
+            "ファミリー層が 45%。"
+        )
+        result = _sanitize_data_search_text(text)
+        assert "売上分析グラフをダウンロード" not in result
+        assert "PowerPoint で出力" not in result
+        assert "サマリ" in result
+        assert "ファミリー層が 45%" in result
+
+    def test_preserves_legitimate_content(self):
+        from src.agents.data_search import _sanitize_data_search_text
+
+        text = (
+            "## データ分析サマリ\n\n"
+            "- 売上 ¥38,926,615 / 39 件 / 131 名\n"
+            "- 平均評価 4.0\n"
+            "- [Microsoft Fabric](https://www.microsoft.com/fabric) を使用\n"
+        )
+        result = _sanitize_data_search_text(text)
+        assert "¥38,926,615" in result
+        assert "https://www.microsoft.com/fabric" in result
+        assert "[Microsoft Fabric]" in result
+
+    def test_empty_input_returns_empty(self):
+        from src.agents.data_search import _sanitize_data_search_text
+
+        assert _sanitize_data_search_text("") == ""
+        assert _sanitize_data_search_text(None) is None  # type: ignore[arg-type]
+
+
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""
 

@@ -158,3 +158,29 @@ export function collectActiveIQBrands(events: ToolEvent[]): Set<IQBrand> {
   }
   return brands
 }
+
+/**
+ * 指定 IQ ブランドの tool が attempted されたか (成功・失敗・fallback 問わず) を返す。
+ *
+ * Bug 3 (per-step IQ phase header chip) で使う。`collectActiveIQBrands` は
+ * fallback / failed のときに null を返してチップを消すが、それだと
+ * "Fabric DA を呼んだが SQL に fallback した" 状況で Fabric IQ chip が
+ * 一切出ないため、デモで provider 設計意図が伝わらない。
+ *
+ * このヘルパーは tool 名が IQ family に属するかだけを見るので、
+ * 「呼ぼうとしたが失敗した」のも attempted として扱う。
+ */
+export function hasIQAttempted(events: ToolEvent[], brand: IQBrand): boolean {
+  for (const event of events) {
+    const tool = (event.tool || '').trim().toLowerCase()
+    if (brand === 'fabric_iq') {
+      if (FABRIC_IQ_TOOLS.has(tool)) return true
+      if (tool === 'search_sales_history' || tool === 'search_customer_reviews') return true
+    } else if (brand === 'foundry_iq') {
+      if (FOUNDRY_IQ_TOOLS.has(tool)) return true
+    } else if (brand === 'work_iq') {
+      if (WORK_IQ_TOOLS.has(tool)) return true
+    }
+  }
+  return false
+}

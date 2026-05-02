@@ -170,6 +170,248 @@ async def test_get_replay_data_fallback_to_json():
     assert len(result) > 0
 
 
+# --- 大きな画像の永続化向け切り詰め (Bug 4 root-cause fix) ---
+
+
+class TestImageTruncationForPersistence:
+    """`_truncate_large_images_for_persistence` のテスト。
+
+    Cosmos 2MB 制限を超えないよう、image event の大きな data URL を
+    SVG プレースホルダで置換するヘルパの不変条件を検証する。
+    Bug 4 root cause: brochure-gen の base64 PNG (1 枚 ~1MB) が複数
+    保存されると Cosmos が 413 で拒否し in-memory フォールバック
+    → polling restoreConversation が古い `awaiting_approval` を読んで
+    UI が承認画面に戻る。
+    """
+
+    def test_truncates_large_base64_image_url(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_payload = "A" * 200_000  # 200KB > 64KB threshold
+        events = [
+            {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero", "agent": "brochure-gen-agent"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert len(result) == 1
+        assert result[0]["event"] == "image"
+        assert result[0]["data"]["url"].startswith("data:image/svg+xml")
+        assert result[0]["data"]["truncated"] is True
+        assert result[0]["data"]["original_size_bytes"] >= 200_000
+        assert result[0]["data"]["alt"] == "hero"
+        assert result[0]["data"]["agent"] == "brochure-gen-agent"
+        # original event は破壊されない (引数 list の元 dict は不変)
+        assert events[0]["data"]["url"].startswith("data:image/png;base64,")
+
+    def test_keeps_small_data_url_untouched(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        small_svg = "data:image/svg+xml;charset=utf-8,%3Csvg/%3E"
+        events = [
+            {"event": "image", "data": {"url": small_svg, "alt": "fallback"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["url"] == small_svg
+        assert "truncated" not in result[0]["data"]
+
+    def test_keeps_http_url_untouched(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        events = [
+            {"event": "image", "data": {"url": "https://example.com/img.png", "alt": "remote"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["url"] == "https://example.com/img.png"
+        assert "truncated" not in result[0]["data"]
+
+    def test_keeps_text_and_tool_events_untouched(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_text = "B" * 200_000
+        events = [
+            {"event": "text", "data": {"content": large_text, "agent": "brochure-gen-agent"}},
+            {"event": "tool_event", "data": {"tools": ["search"], "agent": "data-search-agent"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["content"] == large_text
+        assert result[1]["data"]["tools"] == ["search"]
+
+    def test_truncates_multiple_images_independently(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_payload = "A" * 200_000
+        events = [
+            {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero"}},
+            {"event": "text", "data": {"content": "ok"}},
+            {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "banner"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["truncated"] is True
+        assert result[0]["data"]["alt"] == "hero"
+        assert result[1]["data"]["content"] == "ok"
+        assert result[2]["data"]["truncated"] is True
+        assert result[2]["data"]["alt"] == "banner"
+
+    def test_handles_non_list_input(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        assert _truncate_large_images_for_persistence(None) == []
+        assert _truncate_large_images_for_persistence("not a list") == []
+        assert _truncate_large_images_for_persistence({}) == []
+
+    def test_handles_malformed_event_entries(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        events = [
+            "not a dict",
+            {"event": "image", "data": "not a dict"},
+            {"event": "image", "data": {"url": 12345}},
+            {"event": "image"},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result == events
+
+    async def test_save_conversation_truncates_large_images_in_cosmos_doc(self):
+        """save_conversation 経由で Cosmos doc 上の大きな画像が切り詰められる (E2E)."""
+        large_payload = "A" * 200_000
+        await save_conversation(
+            conversation_id="test-truncation-e2e",
+            user_input="ハワイプラン",
+            events=[
+                {"event": "text", "data": {"content": "# プラン", "agent": "marketing-plan-agent"}},
+                {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero", "agent": "brochure-gen-agent"}},
+            ],
+            status="completed",
+        )
+
+        doc = _memory_store[_build_memory_key("anonymous", "test-truncation-e2e")]
+        assert doc["messages"][0]["data"]["content"] == "# プラン"
+        assert doc["messages"][1]["data"]["url"].startswith("data:image/svg+xml")
+        assert doc["messages"][1]["data"]["truncated"] is True
+        assert doc["messages"][1]["data"]["alt"] == "hero"
+
+    def test_truncates_inline_data_url_in_brochure_html_text_event(self):
+        """rubber-duck blocking #1: brochure HTML の inline `<img src="data:...">` も切り詰める。"""
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_payload = "A" * 200_000
+        html = (
+            "<section class='brochure'>"
+            f'<img src="data:image/png;base64,{large_payload}" alt="hero" />'
+            f"<img src='data:image/png;base64,{large_payload}' alt='banner' />"
+            '<img src="https://example.com/small.png" alt="ok" />'
+            "</section>"
+        )
+        events = [
+            {"event": "text", "data": {"content": html, "content_type": "html", "agent": "brochure-gen-agent"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        new_html = result[0]["data"]["content"]
+        assert f"base64,{large_payload}" not in new_html
+        assert "data:image/svg+xml" in new_html
+        assert "https://example.com/small.png" in new_html
+        assert result[0]["data"]["truncated_inline_images"] == 2
+        assert result[0]["data"]["agent"] == "brochure-gen-agent"
+
+    def test_keeps_small_inline_data_url_in_html_untouched(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        small_svg = "data:image/svg+xml;charset=utf-8,%3Csvg/%3E"
+        html = f'<div><img src="{small_svg}" alt="ok"/></div>'
+        events = [
+            {"event": "text", "data": {"content": html, "content_type": "html"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["content"] == html
+        assert "truncated_inline_images" not in result[0]["data"]
+
+    def test_html_truncation_skipped_when_content_type_not_html(self):
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_payload = "A" * 200_000
+        text_with_data_uri = f'see <img src="data:image/png;base64,{large_payload}">'
+        events = [
+            # content_type missing or != 'html' → text event must NOT be HTML-scanned
+            {"event": "text", "data": {"content": text_with_data_uri, "agent": "marketing-plan-agent"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        # plain markdown / LLM text 内に偶然 data: URI があっても触らない。
+        assert result[0]["data"]["content"] == text_with_data_uri
+
+    def test_truncates_html_img_with_whitespace_around_equals(self):
+        """rubber-duck pr1-final-review blocking #1: `src = "data:..."` も切り詰める。"""
+        from src.conversations import _truncate_inline_data_urls_in_html
+
+        large_payload = "A" * 200_000
+        html = f'<img src = "data:image/png;base64,{large_payload}" alt="hero">'
+
+        truncated, count = _truncate_inline_data_urls_in_html(html)
+
+        assert count == 1
+        assert f"base64,{large_payload}" not in truncated
+        assert "data:image/svg+xml" in truncated
+
+    def test_truncates_html_img_unquoted_data_url(self):
+        """rubber-duck pr1-final-review blocking #1: `src=data:...` (no quotes) も切り詰める。"""
+        from src.conversations import _truncate_inline_data_urls_in_html
+
+        large_payload = "A" * 200_000
+        # Note: large payload contains no whitespace / quotes so unquoted is parser-valid
+        html = f'<img src=data:image/png;base64,{large_payload} alt="hero">'
+
+        truncated, count = _truncate_inline_data_urls_in_html(html)
+
+        assert count == 1
+        assert f"base64,{large_payload}" not in truncated
+        assert "data:image/svg+xml" in truncated
+        # 安全のためクォートで囲み直す
+        assert '"data:image/svg+xml' in truncated
+
+    async def test_truncate_then_merge_dedupes_same_image_across_saves(self):
+        """rubber-duck blocking #2: 既存 doc の truncated event と incoming full-image
+        event は truncate 後に同じ placeholder JSON になるので dedupe で 1 個にまとまる。
+        """
+        large_payload = "A" * 200_000
+        full_image_event = {
+            "event": "image",
+            "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero", "agent": "brochure-gen-agent"},
+        }
+        # 1st save: 元の full-image event を渡す → Cosmos doc には truncated 版が永続化される
+        await save_conversation(
+            conversation_id="test-dedupe",
+            user_input="ハワイプラン",
+            events=[full_image_event],
+            status="awaiting_approval",
+        )
+        first_doc = _memory_store[_build_memory_key("anonymous", "test-dedupe")]
+        assert len(first_doc["messages"]) == 1
+        assert first_doc["messages"][0]["data"]["truncated"] is True
+
+        # 2nd save: 同じ full-image event を再度送る (e.g. 同じセッション中の 2 回目保存)
+        # truncate-before-merge により既存 truncated と incoming truncated が同一 JSON
+        # になり、_merge_event_histories の identity-dedupe で 1 個にまとまる。
+        await save_conversation(
+            conversation_id="test-dedupe",
+            user_input="ハワイプラン",
+            events=[full_image_event],
+            status="completed",
+        )
+        second_doc = _memory_store[_build_memory_key("anonymous", "test-dedupe")]
+
+        # 重複しないこと: image event は 1 つだけ残る
+        image_events = [m for m in second_doc["messages"] if m.get("event") == "image"]
+        assert len(image_events) == 1
+        assert image_events[0]["data"]["truncated"] is True
+
+
 # --- 新規テスト ---
 
 

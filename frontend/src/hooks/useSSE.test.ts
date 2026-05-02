@@ -210,6 +210,36 @@ describe('buildRestoredPipelineState', () => {
     expect(state.approvalRequest?.plan_markdown).toBe('# Plan v2')
   })
 
+  it('treats post-approval tool_event as completion progress even when no text/image follows', () => {
+    // Regression for Bug 4 (2026-05-02 PR1 follow-up): brochure-gen emits
+    // multiple tool_events (generate_hero_image, generate_banner_image) AS WELL
+    // AS the final HTML text. If Cosmos persists tool_events but the text
+    // event is lost (e.g. truncation, race), the override (text/image only)
+    // would not fire and Bug 4 reproduces. Extending to tool_event closes
+    // this gap.
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_approval',
+        input: '沖縄ファミリープラン',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: { prompt: 'approve?', conversation_id: 'conv-tool-only', plan_markdown: '# Plan v1', approval_scope: 'user' },
+          },
+          // Post-approval emitted only tool_events (text persistence lost):
+          { event: 'tool_event', data: { tools: ['search_knowledge_base'], agent: 'regulation-check-agent', status: 'success' } },
+          { event: 'tool_event', data: { tools: ['generate_hero_image'], agent: 'brochure-gen-agent', status: 'success' } },
+        ],
+      },
+      'conv-tool-only',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('completed')
+    expect(state.approvalRequest).toBeNull()
+  })
+
   it('restores optional evidence, chart, trace, and debug data from image events', () => {
     const state = buildRestoredPipelineState(
       {
@@ -1515,6 +1545,57 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.currentVersion).toBe(1)
     expect(result.current.state.textContents.at(-1)?.content).toBe('# Plan v1')
     expect(result.current.state.versions[1].textContents.at(-1)?.content).toBe('# Plan v2 updated')
+  })
+
+  it('refuses passive regression from completed back to approval even when versions array is empty (page-reload race)', async () => {
+    // Regression for Bug 4 (2026-05-02 PR1): the previous guard required
+    // `previousState.versions.length > 0` so that snapshot-less reloads
+    // (where buildRestoredPipelineState had been called once but no done
+    // event arrived to push a version) could still bounce back. After
+    // dropping that constraint, ANY transition from completed -> approval
+    // via passive poll is rejected.
+    // Construct a doc that produces status=completed but versions=[] (no
+    // text/image artifacts persisted, only tool_events from post-approval).
+    const completedDoc = {
+      status: 'completed',
+      input: '沖縄ファミリープラン',
+      messages: [
+        {
+          event: 'approval_request',
+          data: { prompt: 'approve?', conversation_id: 'conv-stale-zero-versions', plan_markdown: '', approval_scope: 'user' },
+        },
+        { event: 'tool_event', data: { tools: ['search_knowledge_base'], agent: 'regulation-check-agent', status: 'success' } },
+      ],
+    }
+    const staleApprovalDoc = {
+      status: 'awaiting_approval',
+      input: '沖縄ファミリープラン',
+      messages: [completedDoc.messages[0]],
+    }
+    globalThis.fetch = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify(completedDoc))))
+      .mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify(staleApprovalDoc))))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-stale-zero-versions')
+    })
+
+    // Sanity: page-reload simulation produces completed status with versions=0
+    // (status=completed comes from doc, override is not needed; tool_event-only
+    // post-approval payload produces no text/image so synthetic snapshot push
+    // at useSSE.ts:1191 is skipped — versions stays empty.)
+    expect(result.current.state.status).toBe('completed')
+    expect(result.current.state.versions.length).toBe(0)
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-stale-zero-versions', { passive: true })
+    })
+
+    // Guard must reject the regression even with versions=0:
+    expect(result.current.state.status).toBe('completed')
+    expect(result.current.state.approvalRequest).toBeNull()
   })
 
   it('starts a new conversation while preserving model settings', async () => {
