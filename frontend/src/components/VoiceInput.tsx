@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiUrl } from '../lib/api-base'
 import { getVoiceLiveToken } from '../lib/msal-auth'
 import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
 
@@ -148,7 +149,7 @@ export function VoiceInput({
       return
     }
 
-    fetch('/api/voice-config')
+    fetch(apiUrl('/api/voice-config'))
       .then(r => r.json())
       .then((data: { agent_name?: string; client_id?: string }) => {
         setUseVoiceLive(!!data.client_id)
@@ -212,7 +213,7 @@ export function VoiceInput({
     setState('connecting')
     try {
       // Voice Live 設定を取得（client_id, tenant_id, endpoint 等）
-      const configResp = await fetch('/api/voice-config')
+      const configResp = await fetch(apiUrl('/api/voice-config'))
       const configData = (await configResp.json()) as {
         client_id?: string; tenant_id?: string; endpoint?: string;
         agent_name?: string; project_name?: string; api_version?: string

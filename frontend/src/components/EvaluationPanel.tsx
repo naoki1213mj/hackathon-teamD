@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Shield
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import { getDelegatedApiAuth } from '../lib/api-auth'
+import { apiUrl } from '../lib/api-base'
 import type { ChartSpec, EvidenceItem } from '../lib/event-schemas'
 import { sanitizeHttpUrl } from '../lib/safe-url'
 import {
@@ -519,7 +520,7 @@ export function EvaluationPanel({
         }
         Object.assign(headers, delegatedAuth.headers)
       }
-      const res = await fetch('/api/evaluate', {
+      const res = await fetch(apiUrl('/api/evaluate'), {
         method: 'POST',
         headers,
         body: JSON.stringify({

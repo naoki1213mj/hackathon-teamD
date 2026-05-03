@@ -205,7 +205,63 @@ gh variable set DATA_SEARCH_RUNTIME --env production --body "legacy"
 - Fabric Data Agent `Travel_Ontology_DA_v2` への Read access
 - 下位データソース (lakehouse `lh_travel_marketing_v2`) の Read/Build
 
-### Container Apps VNet integration migration runbook (historical reference)
+### D2 APIM cutover runbook (browser → APIM `/app/*` → Container App)
+
+**目的**: 全 SPA トラフィックを APIM (`https://<apim-name>.azure-api.net/app/*`) 経由に切り替え、APIM が JWT (Bearer Foundry user_impersonation token) を validate-jwt で検証してから Container App backend に forward する。Container App 直 URL は anonymous な状態のまま。これで PR 3 の `_has_trusted_auth_boundary` が trusted upstream gateway 経由で True になり、認証付き UI smoke で **Foundry path (Fabric Data Agent OBO) が起動可能**になる。
+
+**前提**:
+- `frontendClientId` (App Registration `travel-voice-spa` の client ID) が把握済み
+- 既存の APIM service `apim-<resourceToken>` は維持される (新規 API `spa-app` を追加するだけで、Foundry AI Gateway / improvement-mcp API は touch しない)
+- 旧 CA 直 URL は残しつつ、ブラウザ流入を APIM URL に 302 redirect する側並走運用
+
+**手順**:
+
+1. **trust header secret 生成 + azd env 設定**:
+   ```bash
+   # 32-byte hex
+   $secret = python -c "import secrets;print(secrets.token_hex(32))"
+   azd env set TRUSTED_AUTH_HEADER_SECRET $secret  # @secure() Bicep param 経由で APIM Named Value + CA secret に同期
+   azd env set TRUSTED_AUTH_HEADER_NAME 'X-Apim-Trusted'
+   azd env set FRONTEND_CLIENT_ID ab550d85-08d2-44a8-ac3a-b10535574acd  # travel-voice-spa
+   azd env set EXPECTED_JWT_AUDIENCE 'https://ai.azure.com'
+   azd env set PUBLIC_APP_BASE_URL 'https://apim-wmbvhdhcsuyb2.azure-api.net/app'
+   ```
+
+   ⚠️ **`TRUST_AUTH_HEADER_CLAIMS=true` は設定しない**。`src/request_identity.py:121-122` でこのフラグが立つと **header / secret 検証なしに常に trust** されてしまうため、CA 直 URL に Bearer token を送れば誰でも boundary を pass できる footgun になる。D2 cutover 設計は「APIM 経由の secret-injected header を hmac.compare_digest で検証」のみで成立する。
+
+2. **App Registration `travel-voice-spa` に APIM redirect URI 追加** (Azure Portal):
+   - Authentication ペインで `https://apim-wmbvhdhcsuyb2.azure-api.net/app/auth-redirect.html` を SPA platform の Redirect URI に追加
+   - 旧 CA 直 URL の redirect URI は残す (rollback 時に MSAL がそちらでログイン継続できるよう)
+
+3. **Bicep deploy**:
+   ```bash
+   azd up    # APIM SPA API + named values + policy が反映される
+   ```
+   `infra/modules/api-management-spa.bicep` が APIM service に新規 API path=`app` (operations: GET/HEAD/POST/PUT/DELETE/OPTIONS catch-all) と inbound policy (validate-jwt + appid/azp choose + trust header inject) を追加する。
+
+4. **Frontend deploy** (deploy.yml が走った直後の image なら追加 build 不要):
+   - vite production build は `base: '/app/'` で出力されるため、SPA が `/app/assets/*.js` を参照する
+   - 全 fetch サイトは `apiUrl()` 経由で `/app/api/*` に到達する
+   - APIM が `/app` prefix を strip して Container App backend `/api/*` に forward
+
+5. **smoke test** (順番に確認):
+   - `curl https://apim-<token>.azure-api.net/app/api/health` → 401 (JWT 必須化済みの想定経路)
+   - ブラウザで `https://apim-<token>.azure-api.net/app/` → MSAL login → SPA 表示 → チャット送信 → SSE 200
+   - ブラウザで `https://ca-<token>-pn.<region>.azurecontainerapps.io/` → 302 redirect to APIM URL (loop 防止のため再帰なし)
+   - App Insights `traces` で `fabric_data_agent_invocation` SSE event が emit されること (PR 3 の Foundry path 起動の最終証跡)
+
+**rollback** (APIM 経由 trust が壊れた / production が落ちた場合):
+- **主**: `azd env set TRUSTED_AUTH_HEADER_NAME ''` で env から **NAME を消す** (空文字)。Container App revision で `TRUSTED_AUTH_HEADER_NAME` env が unset になり、`_has_trusted_auth_boundary()` が常に False に戻り、anonymous fallback (legacy path) が再開される
+- 続けて `azd env set PUBLIC_APP_BASE_URL ''` で CA 直 URL の `/` redirect も無効化
+- ⚠️ **`TRUSTED_AUTH_HEADER_VALUE` を空にする方法は使わない**: 旧実装では `expected_value` 空 + `actual_value` 非空で True を返す footgun が残っていたが、本 D2 cutover では `_has_trusted_auth_boundary()` を fail-closed に修正済 (commit 予定)。secret 値が無いと境界が成立しないため、誤って `VALUE` だけ消した場合は anonymous fallback に戻るが、運用としては `NAME` を消す方法を統一する
+- production CA env への即時反映: `az containerapp update -n ca-<token>-pn -g <rg> --remove-env-vars TRUSTED_AUTH_HEADER_NAME PUBLIC_APP_BASE_URL`
+
+**APIM cutover 完了後の影響**:
+- `_has_trusted_auth_boundary()` が `True` になり、PR 3 の `_resolve_data_search_runtime` が `foundry_preprovisioned` path を選択
+- 認証済み user の Bearer token を base64 decode した `auth_mode == "delegated"` で Foundry Fabric tool が OBO 起動
+- 匿名 (Bearer なし) リクエストは APIM の validate-jwt で 401 拒否されるため、anonymous demo は CA 直 URL を使う (CA 直 URL は anonymous proxy のまま、SPA も APIM URL に redirect しない静的 mode)
+
+
 
 The cutover from the legacy non-VNet-integrated CAE to the current `-pn` CAE is **complete** as of 2026-05-01. The runbook below is preserved for the next time this kind of side-by-side rebuild is required, since Azure does not allow `vnetConfiguration` to be added to an existing CAE and `managedEnvironmentId` is immutable on the Container App.
 

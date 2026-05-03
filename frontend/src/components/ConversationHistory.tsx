@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getDelegatedApiHeaders } from '../lib/api-auth'
+import { apiUrl } from '../lib/api-base'
 
 interface Conversation {
   id: string
@@ -34,7 +35,7 @@ export function ConversationHistory({ onSelect, t, locale }: ConversationHistory
       if (listEtagRef.current) {
         headers['If-None-Match'] = listEtagRef.current
       }
-      const resp = await fetch('/api/conversations', {
+      const resp = await fetch(apiUrl('/api/conversations'), {
         cache: 'no-store',
         headers,
       })

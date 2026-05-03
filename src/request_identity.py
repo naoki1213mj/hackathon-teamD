@@ -130,9 +130,12 @@ def _has_trusted_auth_boundary(request: Request, settings: AppSettings) -> bool:
         return False
 
     expected_value = _sanitize_text(_setting(settings, "trusted_auth_header_value"))
-    if expected_value:
-        return hmac.compare_digest(actual_value, expected_value)
-    return True
+    if not expected_value:
+        # fail-closed: header_name は設定されているのに secret 値が無いと、
+        # 任意の値を持つ偽 header で trust 境界を成立させてしまう (footgun)。
+        # secret 値が設定されているときだけ定数時間比較で trust する。
+        return False
+    return hmac.compare_digest(actual_value, expected_value)
 
 
 def _raise_owner_boundary_error(auth_error: IdentityErrorCode) -> None:

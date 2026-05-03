@@ -46,7 +46,11 @@ const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/ChannelMessage.Read.All',
   'https://graph.microsoft.com/ExternalItem.Read.All',
 ]
-const MSAL_REDIRECT_PATH = '/auth-redirect.html'
+// APIM cutover (D2 2026-05-03): SPA は base prefix `/app/` (production) または
+// `/` (dev) で配信されるため、相対パスで MSAL redirect URI を組み立てる。
+// `import.meta.env.BASE_URL` は Vite が build 時に注入する値で、dev は `/`、
+// prod は `/app/`。new URL の base は origin 基準にするので絶対化する。
+const MSAL_REDIRECT_PATH = `${import.meta.env.BASE_URL || '/'}auth-redirect.html`
 
 function normalizeScopes(scopes: string[]): string[] {
   return scopes

@@ -123,3 +123,33 @@ def test_trusted_upstream_header_accepts_bearer_claims(monkeypatch: pytest.Monke
 
     assert identity["auth_mode"] == "delegated"
     assert identity["auth_error"] is None
+
+
+def test_trusted_header_name_set_but_value_missing_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NAME だけ設定されて VALUE が空のときに任意の header 値で trust されない。
+
+    secret 値が無いと任意の値を持つ偽 header で trust 境界を成立させられる footgun
+    (`X-Auth-Validated: anything`) を防ぐ。production cutover で secret 注入が
+    抜け落ちた場合でも fail-closed になる。
+    """
+    _reset_identity_env(monkeypatch)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("TRUSTED_AUTH_HEADER_NAME", "X-Auth-Validated")
+    # TRUSTED_AUTH_HEADER_VALUE は意図的に未設定
+    token = _make_bearer_token({"oid": "oid-123", "tid": "tid-123"})
+
+    identity = extract_request_identity(
+        _make_request(
+            {
+                "Authorization": f"Bearer {token}",
+                "X-Auth-Validated": "any-attacker-controlled-value",
+            }
+        ),
+        enforce_owner_boundary=True,
+    )
+
+    # production で trust 境界が無いと untrusted_token として扱われる。
+    assert identity["auth_mode"] != "delegated"
+    assert identity["auth_error"] == "untrusted_token"

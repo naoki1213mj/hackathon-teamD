@@ -1,4 +1,5 @@
 import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
+import { apiUrl } from './api-base'
 import {
   normalizeMsalConfig,
   readCachedMsalConfig,
@@ -25,7 +26,7 @@ async function getMsalConfig(): Promise<MsalConfig | null> {
   if (!cachedMsalConfigPromise) {
     cachedMsalConfigPromise = (async () => {
       try {
-        const response = await fetch('/api/voice-config')
+        const response = await fetch(apiUrl('/api/voice-config'))
         if (!response.ok) return null
         const config = normalizeMsalConfig(await response.json())
         if (config) {

@@ -8,11 +8,16 @@ and reproduced multiple times as APPROVAL_CONTEXT_NOT_FOUND in production).
 Design (rubber-duck audit `harden-plan` 2026-05-02):
 - Cookie name: `tm_session_id`
 - Value: 32-byte urlsafe random token (256-bit entropy, server-issued)
-- Cookie attributes — HttpOnly, Secure on HTTPS, SameSite Lax, Path /api,
+- Cookie attributes — HttpOnly, Secure on HTTPS, SameSite Lax, Path /,
   Max-Age 86400 (24 h)
 - SameSite Lax (NOT Strict) so the Vite dev proxy on localhost works and
   legitimate cross-tab navigation keeps the cookie
-- Path /api scopes the cookie to API endpoints only (not /static)
+- Path / so the cookie reaches the backend regardless of frontend prefix.
+  APIM cutover (D2 design 2026-05-03) routes browser traffic through
+  /app/api/... rather than direct /api/..., and the backend itself only
+  attaches the cookie on /api/* responses via session_cookie_middleware
+  (see src/main.py). Cookie is HttpOnly + Secure on HTTPS so the wider
+  Path is acceptable.
 - Set by middleware ONCE per session; subsequent /api requests reuse it
 - Bearer-authenticated users IGNORE this cookie (oid+tid from JWT wins)
 
@@ -31,7 +36,12 @@ from fastapi import Request, Response
 
 SESSION_COOKIE_NAME = "tm_session_id"
 SESSION_COOKIE_MAX_AGE_SECONDS = 86_400  # 24 h
-SESSION_COOKIE_PATH = "/api"
+# APIM cutover (D2 2026-05-03): cookie path "/" lets the same cookie travel
+# under both the (deprecated) direct CA URL and the APIM `/app/...` route.
+# session_cookie_middleware only attaches Set-Cookie on /api/* responses,
+# so this does not leak the cookie onto static asset responses; only the
+# value's PATH attribute is broadened so browsers send it on /app/api/*.
+SESSION_COOKIE_PATH = "/"
 SESSION_COOKIE_SAMESITE = "lax"  # NOT 'strict' (Vite dev proxy + cross-tab nav)
 
 

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { apiUrl } from '../lib/api-base'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 
@@ -64,7 +65,7 @@ export function PdfUpload({ disabled, conversationId, onConversationId, t }: Pdf
     }
 
     try {
-      const res = await fetch('/api/sources/pdf', {
+      const res = await fetch(apiUrl('/api/sources/pdf'), {
         method: 'POST',
         body: formData,
       })

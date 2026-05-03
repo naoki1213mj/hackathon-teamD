@@ -253,6 +253,52 @@ async def auth_redirect_bridge() -> FileResponse:
         headers={"Cache-Control": "no-store"},
     )
 
+
+_PUBLIC_APP_BASE_URL = os.environ.get("PUBLIC_APP_BASE_URL", "").strip().rstrip("/")
+_TRUSTED_AUTH_HEADER_NAME = os.environ.get("TRUSTED_AUTH_HEADER_NAME", "").strip()
+
+
+@app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
+async def ca_root_redirect_to_apim(request: Request):
+    """APIM cutover (D2): CA 直 URL でブラウザがルートを叩いた場合は APIM URL へ 302 する。
+
+    以下すべて満たすときだけ redirect:
+    - PUBLIC_APP_BASE_URL が設定されている (cutover 完了済 / opt-in)
+    - Accept ヘッダに text/html を含む (API リクエストや health probe は除外)
+    - APIM 経由 (X-Apim-Trusted header あり) ではない (loop 回避)
+
+    PUBLIC_APP_BASE_URL 未設定なら静的 SPA をそのまま返す (StaticFiles マウント側に flow)。
+    rollback 時は azd env から PUBLIC_APP_BASE_URL を消すだけで、CA 直 URL が再び SPA を配信する。
+    """
+    from fastapi.responses import RedirectResponse
+
+    if not _PUBLIC_APP_BASE_URL:
+        # cutover 未完了 — StaticFiles に委譲 (FastAPI は同 path の route を mount より優先するため、
+        # ここで明示的に index.html を返す)
+        index_path = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path, media_type="text/html; charset=utf-8")
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    # APIM 経由はそのまま静的を返す (loop 回避)
+    if _TRUSTED_AUTH_HEADER_NAME and request.headers.get(_TRUSTED_AUTH_HEADER_NAME):
+        index_path = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path, media_type="text/html; charset=utf-8")
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    accept = request.headers.get("accept", "")
+    if "text/html" not in accept and "*/*" not in accept and accept != "":
+        # 非ブラウザのアクセスは redirect せずに静的を返す
+        index_path = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path, media_type="text/html; charset=utf-8")
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    return RedirectResponse(url=f"{_PUBLIC_APP_BASE_URL}/", status_code=302)
+
+
 # 静的ファイル配信（本番: Docker マルチステージビルドで frontend/dist を配信）
 if os.environ.get("SERVE_STATIC", "").lower() == "true":
     if os.path.isdir(_STATIC_DIR):

@@ -61,3 +61,61 @@ def test_auth_redirect_bridge_serves_no_store_html(monkeypatch, tmp_path: Path):
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert "redirect" in response.text
+
+
+def test_root_serves_index_when_public_app_base_url_unset(monkeypatch, tmp_path: Path):
+    """PUBLIC_APP_BASE_URL 未設定なら従来通り index.html を返す (rollback / cutover 前の動作)"""
+    index_file = tmp_path / "index.html"
+    index_file.write_text("<html>spa</html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_STATIC_DIR", str(tmp_path))
+    monkeypatch.setattr(main_module, "_PUBLIC_APP_BASE_URL", "")
+
+    response = client.get("/", headers={"accept": "text/html"})
+
+    assert response.status_code == 200
+    assert "spa" in response.text
+
+
+def test_root_redirects_to_apim_when_cutover_active(monkeypatch, tmp_path: Path):
+    """PUBLIC_APP_BASE_URL 設定済 + ブラウザ流入 + APIM 経由でない → 302 redirect"""
+    index_file = tmp_path / "index.html"
+    index_file.write_text("<html>spa</html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_STATIC_DIR", str(tmp_path))
+    monkeypatch.setattr(main_module, "_PUBLIC_APP_BASE_URL", "https://apim.example.net/app")
+    monkeypatch.setattr(main_module, "_TRUSTED_AUTH_HEADER_NAME", "X-Apim-Trusted")
+
+    response = client.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://apim.example.net/app/"
+
+
+def test_root_does_not_redirect_when_request_came_via_apim(monkeypatch, tmp_path: Path):
+    """APIM が trusted header を inject した場合は redirect せず SPA を返す (loop 回避)"""
+    index_file = tmp_path / "index.html"
+    index_file.write_text("<html>spa</html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_STATIC_DIR", str(tmp_path))
+    monkeypatch.setattr(main_module, "_PUBLIC_APP_BASE_URL", "https://apim.example.net/app")
+    monkeypatch.setattr(main_module, "_TRUSTED_AUTH_HEADER_NAME", "X-Apim-Trusted")
+
+    response = client.get(
+        "/",
+        headers={"accept": "text/html", "X-Apim-Trusted": "any-non-empty-value"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert "spa" in response.text
+
+
+def test_root_does_not_redirect_non_browser_clients(monkeypatch, tmp_path: Path):
+    """Accept ヘッダが text/html を含まない API クライアントは redirect しない"""
+    index_file = tmp_path / "index.html"
+    index_file.write_text("<html>spa</html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_STATIC_DIR", str(tmp_path))
+    monkeypatch.setattr(main_module, "_PUBLIC_APP_BASE_URL", "https://apim.example.net/app")
+
+    response = client.get("/", headers={"accept": "application/json"}, follow_redirects=False)
+
+    assert response.status_code == 200
+    assert "spa" in response.text

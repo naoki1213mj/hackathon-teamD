@@ -20,13 +20,22 @@
       } from '/src/lib/msal-config-cache.ts'
       import { writeRedirectBridgeResult } from '/src/lib/msal-redirect-bridge.ts'
 
+      // SPA base prefix を runtime で抽出する。Vite の `base` 設定で
+      // production build は /app/ で配信され、dev は / で配信される。
+      // 専用 redirect ページは static HTML として配信されるので、ここでは
+      // import.meta.env.BASE_URL に頼らず、自身の pathname から prefix を導く。
+      // 例: /app/auth-redirect.html -> /app/
+      //     /auth-redirect.html     -> /
+      const basePath = window.location.pathname.replace(/auth-redirect\.html.*$/, '') || '/'
+      const apiUrl = (path) => basePath + (path.startsWith('/') ? path.slice(1) : path)
+
       async function loadMsalConfig() {
         const cached = readCachedMsalConfig()
         if (cached) {
           return cached
         }
 
-        const response = await fetch('/api/voice-config')
+        const response = await fetch(apiUrl('api/voice-config'))
         if (!response.ok) throw new Error('failed to load auth config')
 
         const config = normalizeMsalConfig(await response.json())
@@ -43,7 +52,7 @@
             auth: {
               clientId,
               authority: `https://login.microsoftonline.com/${tenantId}`,
-              redirectUri: new URL('/auth-redirect.html', window.location.origin).toString(),
+              redirectUri: new URL(apiUrl('auth-redirect.html'), window.location.origin).toString(),
             },
             cache: { cacheLocation: 'sessionStorage' },
           })
@@ -67,12 +76,12 @@
         } catch (err) {
           console.warn('auth-redirect finalize error', err)
           recordMsalRedirectFailureSentinel('redirect_bridge', err)
-          window.location.replace('/')
+          window.location.replace(basePath)
           return
         }
 
         if (window.location.pathname.endsWith('/auth-redirect.html')) {
-          window.location.replace('/')
+          window.location.replace(basePath)
         }
       }
 

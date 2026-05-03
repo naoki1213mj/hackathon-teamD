@@ -90,6 +90,26 @@ param fabricDataAgentRuntimeVersion string = ''
 @description('Work IQ ツール呼び出しのタイムアウト秒数 (実効値はアプリ側で 90s に cap)')
 param workIqTimeoutSeconds string = ''
 
+// ----- APIM cutover (D2) 用 -----
+@description('APIM が backend に注入する trust header 名 (例: X-Apim-Trusted)。空なら APIM cutover 無効。')
+param trustedAuthHeaderName string = ''
+
+@secure()
+@description('APIM cutover 用の trust header secret (32-byte hex 推奨)。`secrets.token_hex(32)` 等で生成し azd env / GH Variables 経由で渡す。NAME とペアで設定すること (片方だけだと footgun)。')
+param trustedAuthHeaderSecret string = ''
+
+@description('TRUST_AUTH_HEADER_CLAIMS env の値。⚠️ D2 cutover ではこのフラグは設定しないこと (header/secret 検証なしに常に trust になる footgun)。CLI から偶発的に設定された場合のみここから空に戻す用途。')
+param trustAuthHeaderClaims string = ''
+
+@description('SPA を APIM 経由で配信する公開 URL (例: https://apim.azure-api.net/app)。設定時は CA 直 URL の `/` リクエストを 302 redirect する。')
+param publicAppBaseUrl string = ''
+
+@description('frontend MSAL client ID (APIM JWT validation で appid/azp 一致検査に使用)。空なら APIM 側 JWT validation はスキップ。')
+param frontendClientId string = ''
+
+@description('APIM が validate する JWT の audience (frontend MSAL が取得するスコープ毎の audience)。')
+param expectedJwtAudience string = 'https://ai.azure.com'
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -254,6 +274,10 @@ module containerApp 'modules/container-app.bicep' = {
     fabricDataAgentRuntime: fabricDataAgentRuntime
     fabricDataAgentRuntimeVersion: fabricDataAgentRuntimeVersion
     workIqTimeoutSeconds: workIqTimeoutSeconds
+    trustedAuthHeaderName: trustedAuthHeaderName
+    trustedAuthHeaderValue: trustedAuthHeaderSecret
+    trustAuthHeaderClaims: trustAuthHeaderClaims
+    publicAppBaseUrl: publicAppBaseUrl
   }
 }
 
@@ -287,6 +311,22 @@ module apim 'modules/api-management.bicep' = {
     tags: tags
     appInsightsId: appInsights.outputs.id
     appInsightsInstrumentationKey: appInsights.outputs.instrumentationKey
+  }
+}
+
+// APIM SPA reverse proxy (D2 cutover)
+// 認証経路を APIM JWT validation 経由に切り替えるための新規 API 定義。
+// frontendClientId / trustedAuthHeaderSecret が空 = JWT 検証バイパスで anonymous proxy として動作。
+module apimSpa 'modules/api-management-spa.bicep' = {
+  name: 'api-management-spa'
+  scope: rg
+  params: {
+    apimName: apim.outputs.name
+    containerAppFqdn: containerApp.outputs.fqdn
+    tenantId: tenant().tenantId
+    frontendClientId: frontendClientId
+    expectedJwtAudience: expectedJwtAudience
+    trustedAuthHeaderSecret: trustedAuthHeaderSecret
   }
 }
 

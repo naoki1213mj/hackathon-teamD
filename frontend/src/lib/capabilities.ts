@@ -11,6 +11,8 @@ export type CapabilityKey =
   | 'mai_transcribe_1'
   | 'work_iq'
 
+import { apiUrl } from './api-base'
+
 export interface CapabilityFeature {
   available: boolean
   configured: boolean
@@ -56,7 +58,7 @@ export function isCapabilityAvailable(
 
 export async function fetchCapabilities(): Promise<CapabilitySnapshot | null> {
   try {
-    const response = await fetch('/api/capabilities')
+    const response = await fetch(apiUrl('/api/capabilities'))
     if (!response.ok) return null
     return normalizeCapabilities(await response.json())
   } catch {

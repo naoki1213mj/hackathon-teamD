@@ -41,6 +41,20 @@ param fabricDataAgentRuntime string = ''
 param fabricDataAgentRuntimeVersion string = ''
 param workIqTimeoutSeconds string = ''
 
+// APIM cutover (D2) 用 env
+@description('APIM が "信頼済みリクエスト" を識別するために注入する HTTP ヘッダ名 (例: X-Apim-Trusted)。空なら trust boundary 無効。')
+param trustedAuthHeaderName string = ''
+
+@secure()
+@description('APIM が trust header に注入する secret 値。backend は hmac.compare_digest で照合する。空かつ name 設定済の場合は ANY non-empty value が trust 通過するため必ずペアで設定すること。')
+param trustedAuthHeaderValue string = ''
+
+@description('TRUST_AUTH_HEADER_CLAIMS env の値 ("true" で trusted header 経由の delegated 信頼を許可、空 / "false" で従来動作)。')
+param trustAuthHeaderClaims string = ''
+
+@description('SPA を APIM 経由で配信する公開 URL (例: https://apim.azure-api.net/app)。設定時は CA 直 URL の `/` リクエストを 302 redirect する。')
+param publicAppBaseUrl string = ''
+
 var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
   {
     name: 'logic-app-callback-url'
@@ -55,6 +69,11 @@ var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
   {
     name: 'search-api-key'
     value: searchApiKey
+  }
+] : [], !empty(trustedAuthHeaderValue) ? [
+  {
+    name: 'trusted-auth-header-value'
+    value: trustedAuthHeaderValue
   }
 ] : [])
 
@@ -187,6 +206,26 @@ var containerEnv = concat([
     name: 'WORK_IQ_TIMEOUT_SECONDS'
     value: workIqTimeoutSeconds
   }
+] : [], !empty(trustedAuthHeaderName) ? [
+  {
+    name: 'TRUSTED_AUTH_HEADER_NAME'
+    value: trustedAuthHeaderName
+  }
+] : [], !empty(trustedAuthHeaderValue) ? [
+  {
+    name: 'TRUSTED_AUTH_HEADER_VALUE'
+    secretRef: 'trusted-auth-header-value'
+  }
+] : [], !empty(trustAuthHeaderClaims) ? [
+  {
+    name: 'TRUST_AUTH_HEADER_CLAIMS'
+    value: trustAuthHeaderClaims
+  }
+] : [], !empty(publicAppBaseUrl) ? [
+  {
+    name: 'PUBLIC_APP_BASE_URL'
+    value: publicAppBaseUrl
+  }
 ] : [])
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
@@ -298,4 +337,5 @@ resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-
 output id string = containerApp.id
 output name string = containerApp.name
 output uri string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
+output fqdn string = containerApp.properties.configuration.ingress.fqdn
 output principalId string = containerApp.identity.principalId

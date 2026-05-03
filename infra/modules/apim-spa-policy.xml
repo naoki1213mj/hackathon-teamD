@@ -1,0 +1,55 @@
+<policies>
+    <inbound>
+        <base />
+        <rate-limit-by-key calls="600" renewal-period="60" counter-key="@((string)(context.Request.IpAddress ?? "anonymous"))" />
+        <!-- API base path 配下の /api/* だけ JWT 検証する。
+             context.Api.Path から動的に算出することで、Bicep 側で API path を変えても
+             policy が壊れないようにする。一致条件は base + "/api" 完全一致と
+             base + "/api/..." prefix の両方をカバーする。 -->
+        <set-variable name="apiBasePath" value="@("/" + context.Api.Path)" />
+        <set-variable name="reqPath" value="@(context.Request.Url.Path.ToLower())" />
+        <set-variable name="apiPrefix" value="@(((string)context.Variables["apiBasePath"]).ToLower() + "/api")" />
+        <choose>
+            <when condition="@(((string)context.Variables["reqPath"]).Equals((string)context.Variables["apiPrefix"]) || ((string)context.Variables["reqPath"]).StartsWith(((string)context.Variables["apiPrefix"]) + "/"))">
+                <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: invalid or missing token." require-expiration-time="true" require-scheme="Bearer" require-signed-tokens="true" output-token-variable-name="jwt">
+                    <openid-config url="https://login.microsoftonline.com/{{tenant-id}}/v2.0/.well-known/openid-configuration" />
+                    <audiences>
+                        <audience>{{expected-jwt-audience}}</audience>
+                    </audiences>
+                    <issuers>
+                        <issuer>https://login.microsoftonline.com/{{tenant-id}}/v2.0</issuer>
+                        <issuer>https://sts.windows.net/{{tenant-id}}/</issuer>
+                    </issuers>
+                    <required-claims>
+                        <claim name="tid" match="any">
+                            <value>{{tenant-id}}</value>
+                        </claim>
+                    </required-claims>
+                </validate-jwt>
+                <choose>
+                    <when condition="@(((Jwt)context.Variables["jwt"]).Claims.GetValueOrDefault("appid", string.Empty) != "{{frontend-client-id}}" && ((Jwt)context.Variables["jwt"]).Claims.GetValueOrDefault("azp", string.Empty) != "{{frontend-client-id}}")">
+                        <return-response>
+                            <set-status code="403" reason="Forbidden" />
+                            <set-body>{"error":"Forbidden: client application not allowed"}</set-body>
+                        </return-response>
+                    </when>
+                </choose>
+                <set-header name="X-Apim-Trusted" exists-action="override">
+                    <value>{{trusted-auth-header-secret}}</value>
+                </set-header>
+            </when>
+            <!-- SPA 静的アセットには X-Apim-Trusted を付けない (defense-in-depth)。
+                 backend は /api/* 以外で trust boundary を消費しないため、
+                 ここでヘッダを注入する必要は無い。 -->
+        </choose>
+    </inbound>
+    <backend>
+        <forward-request timeout="600" buffer-response="false" />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>

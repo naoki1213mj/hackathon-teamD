@@ -9,6 +9,7 @@ import {
   type ModelSettings,
 } from '../components/SettingsPanel'
 import { getDelegatedApiAuth } from './api-auth'
+import { apiUrl } from './api-base'
 
 /** SSE タイムアウト（15 分 — 画像生成と動画待機を考慮） */
 const SSE_TIMEOUT_MS = 900_000
@@ -236,7 +237,7 @@ export async function connectSSE(
 
   let response: Response
   try {
-    response = await fetch('/api/chat', {
+    response = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -301,7 +302,7 @@ export async function sendApproval(
 
   let res: Response
   try {
-    res = await fetch(`/api/chat/${threadId}/approve`, {
+    res = await fetch(apiUrl(`/api/chat/${threadId}/approve`), {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),

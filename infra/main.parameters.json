@@ -76,6 +76,24 @@
     },
     "workIqTimeoutSeconds": {
       "value": "${WORK_IQ_TIMEOUT_SECONDS=}"
+    },
+    "trustedAuthHeaderName": {
+      "value": "${TRUSTED_AUTH_HEADER_NAME=}"
+    },
+    "trustedAuthHeaderSecret": {
+      "value": "${TRUSTED_AUTH_HEADER_SECRET=}"
+    },
+    "trustAuthHeaderClaims": {
+      "value": "${TRUST_AUTH_HEADER_CLAIMS=}"
+    },
+    "publicAppBaseUrl": {
+      "value": "${PUBLIC_APP_BASE_URL=}"
+    },
+    "frontendClientId": {
+      "value": "${FRONTEND_CLIENT_ID=}"
+    },
+    "expectedJwtAudience": {
+      "value": "${EXPECTED_JWT_AUDIENCE=https://ai.azure.com}"
     }
   }
 }
