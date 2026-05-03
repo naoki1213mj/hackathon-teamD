@@ -112,6 +112,25 @@ def _patch_common(monkeypatch) -> None:
     monkeypatch.setattr(module, "resolve_model_deployment", lambda name, **_: name)
 
 
+def _assert_pass2_payload_shape(call: dict[str, object]) -> None:
+    """Foundry 400 regression guard (`Not allowed when agent is specified.`).
+
+    rubber-duck `pass2-agent-ref-fix` Non-Blocking #2 反映: recoverable
+    failure 全 4 経路 (zero-fabric / 401 / 400 invalid_request / serialize
+    TypeError) で Pass 2 payload shape が壊れていないことを共通 helper で固定する。
+    """
+    assert call.get("tool_choice") == "required", "Pass 2 must force tool_choice=required"
+    assert call.get("tools"), "Pass 2 must pass function tools at top level"
+    extra_body = call.get("extra_body") or {}
+    assert isinstance(extra_body, dict)
+    assert (
+        "agent_reference" not in extra_body
+    ), "Pass 2 must NOT set extra_body.agent_reference (Foundry rejects agent + tools combination)"
+    assert call.get(
+        "instructions"
+    ), "Pass 2 must pass instructions directly when agent_reference is absent"
+
+
 def test_run_data_search_prompt_agent_pass1_success(monkeypatch) -> None:
     """Pass 1 で Fabric tool が呼ばれたら採用 (Pass 2 を発行しない)。"""
     _patch_common(monkeypatch)
@@ -155,8 +174,7 @@ def test_run_data_search_prompt_agent_pass1_zero_fabric_falls_back_to_pass2(monk
     assert result is pass2_response
     assert len(openai_client.responses.calls) == 2, "Pass 2 must be invoked after zero-fabric Pass 1"
     pass2_call = openai_client.responses.calls[1]
-    assert pass2_call["tool_choice"] == "required"
-    assert pass2_call["tools"], "function tools must be passed for Pass 2"
+    _assert_pass2_payload_shape(pass2_call)
 
 
 def test_run_data_search_prompt_agent_pass1_401_falls_back_to_pass2(monkeypatch) -> None:
@@ -181,6 +199,7 @@ def test_run_data_search_prompt_agent_pass1_401_falls_back_to_pass2(monkeypatch)
 
     assert result is pass2_response
     assert len(openai_client.responses.calls) == 2
+    _assert_pass2_payload_shape(openai_client.responses.calls[1])
 
 
 def test_run_data_search_prompt_agent_pass1_5xx_fails_loud(monkeypatch) -> None:
@@ -310,6 +329,7 @@ def test_run_data_search_prompt_agent_pass1_400_falls_back_to_pass2(monkeypatch)
 
     assert result is pass2_response
     assert len(openai_client.responses.calls) == 2, "Pass 2 must be invoked after 400 invalid_request_error"
+    _assert_pass2_payload_shape(openai_client.responses.calls[1])
 
 
 def test_pass1_extra_body_tool_choice_is_json_serializable_dict(monkeypatch) -> None:
@@ -379,6 +399,7 @@ def test_pass1_serialize_typeerror_falls_back_to_pass2(monkeypatch) -> None:
     assert len(openai_client.responses.calls) == 2, (
         "Pass 2 must be invoked after client-side serialize TypeError"
     )
+    _assert_pass2_payload_shape(openai_client.responses.calls[1])
 
 
 def test_detect_fabric_tool_invoked_handles_dict_and_object_outputs() -> None:

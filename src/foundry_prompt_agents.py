@@ -315,6 +315,17 @@ def _resolve_data_search_agent_name(model_name: str) -> str:
     return f"{base_name}-{_normalize_agent_name_token(model_name)}"
 
 
+def _build_data_search_instructions() -> str:
+    """data-search Prompt Agent 用の instructions 文字列を組み立てる。
+
+    rubber-duck `pass2-agent-ref-fix` Suggestion #1 反映: agent definition と
+    Pass 2 fallback の両方が同じ instructions を使うことを保証する (drift 防止)。
+    """
+    from src.agents.data_search import INSTRUCTIONS as DATA_SEARCH_INSTRUCTIONS
+
+    return f"{DATA_SEARCH_INSTRUCTIONS}{_DATA_SEARCH_BASELINE_GUIDANCE}"
+
+
 def _build_data_search_function_tools() -> list[dict[str, object]]:
     """Foundry Responses API 用の function tool 定義を返す（Pass 2 fallback）。"""
     return [
@@ -368,8 +379,6 @@ def build_data_search_agent_definition(
     rubber-duck v2 落とし穴 #5: preview SDK class (MicrosoftFabricPreviewTool) を
     関数内で lazy import し、preview API の import 失敗で app 全体起動失敗にしない。
     """
-    from src.agents.data_search import INSTRUCTIONS as DATA_SEARCH_INSTRUCTIONS
-
     tools: list[object] = []
     if fabric_connection_id.strip():
         try:
@@ -404,7 +413,7 @@ def build_data_search_agent_definition(
 
     return PromptAgentDefinition(
         model=model_name,
-        instructions=f"{DATA_SEARCH_INSTRUCTIONS}{_DATA_SEARCH_BASELINE_GUIDANCE}",
+        instructions=_build_data_search_instructions(),
         tools=tools,
     )
 
@@ -894,14 +903,22 @@ async def run_data_search_prompt_agent(
         if not pass1_failed_recoverable:
             return pass1_response
 
+        # rubber-duck round 3 (live App Insights 2026-05-03 12:41 UTC) 反映:
+        # Foundry Responses API は extra_body.agent_reference (agent specified) と
+        # top-level `tools` の併用を禁止する (`'Not allowed when agent is specified.'`,
+        # code 'invalid_payload', param 'tools', HTTP 400)。Pass 2 では agent_reference
+        # を bypass し、agent definition と同等の instructions / function tools を
+        # kwargs に直接渡す。Pass 1 (agent_reference 経由 Fabric only) との役割分担は
+        # 変わらない。
+        # 副作用 (rubber-duck non-blocking #1): agent definition に登録された
+        # CodeInterpreterTool は Pass 2 では使えない。fallback path は SQL endpoint
+        # 経由の function tools のみで完結させる仕様とする。
         pass2_kwargs = {
             "model": model_name,
             "input": user_input,
+            "instructions": _build_data_search_instructions(),
             "tools": _build_data_search_function_tools(),
             "tool_choice": "required",
-            "extra_body": {
-                "agent_reference": {"name": agent.name, "type": "agent_reference"},
-            },
         }
         with original_user_prompt_context(user_input):
             pass2_initial = await asyncio.to_thread(openai_client.responses.create, **pass2_kwargs)
