@@ -10,12 +10,15 @@
         <set-header name="X-Apim-Trusted" exists-action="override">
             <value>{{trusted-auth-header-secret}}</value>
         </set-header>
-        <!-- API base path 配下の /api/* だけ JWT 検証する。
+        <!-- /api/* に Authorization ヘッダがある場合のみ JWT 検証する。
+             - 匿名 demo: Authorization なし → 検証スキップ → backend が anonymous identity で処理
+             - 認証済み: Authorization あり → validate-jwt が enforce → appid/azp 一致のみ通す
              APIM の context.Request.Url.Path は API base path (/app) を strip した
              相対パス (/api/health 等) を返すため、ここでは /api 直接 match で OK。 -->
         <set-variable name="reqPath" value="@(context.Request.Url.Path.ToLower())" />
+        <set-variable name="hasAuthHeader" value="@(!string.IsNullOrEmpty(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;, string.Empty)))" />
         <choose>
-            <when condition="@(((string)context.Variables[&quot;reqPath&quot;]).Equals(&quot;/api&quot;) || ((string)context.Variables[&quot;reqPath&quot;]).StartsWith(&quot;/api/&quot;))">
+            <when condition="@((((string)context.Variables[&quot;reqPath&quot;]).Equals(&quot;/api&quot;) || ((string)context.Variables[&quot;reqPath&quot;]).StartsWith(&quot;/api/&quot;)) &amp;&amp; (bool)context.Variables[&quot;hasAuthHeader&quot;])">
                 <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: invalid or missing token." require-expiration-time="true" require-scheme="Bearer" require-signed-tokens="true" output-token-variable-name="jwt">
                     <openid-config url="https://login.microsoftonline.com/{{tenant-id}}/v2.0/.well-known/openid-configuration" />
                     <audiences>
@@ -40,8 +43,9 @@
                     </when>
                 </choose>
             </when>
-            <!-- SPA 静的アセットも X-Apim-Trusted を持つが、backend の static handler は
-                 trust boundary を消費しないため secret 流出にはならない。 -->
+            <!-- SPA 静的アセット (/, /assets/*, /auth-redirect.html) と匿名 /api/* も
+                 X-Apim-Trusted を持つが、backend は Authorization なしを anonymous として
+                 扱うため (REQUIRE_AUTHENTICATED_OWNER=false)、secret 流出にはならない。 -->
         </choose>
     </inbound>
     <backend>
