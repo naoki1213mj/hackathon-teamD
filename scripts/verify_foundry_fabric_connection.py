@@ -41,6 +41,40 @@ _CONNECTION_ID_PATTERN = re.compile(
 )
 
 
+def _extract_metadata_type(metadata: object) -> str:
+    """connection.metadata から `type` を文字列で取り出す (dict / オブジェクトどちらにも対応)。"""
+    if metadata is None:
+        return ""
+    if isinstance(metadata, dict):
+        return str(metadata.get("type", "")).lower()
+    return str(getattr(metadata, "type", "")).lower()
+
+
+def _classify_fabric_da_shape(*, metadata_type: str, category: str, target: str) -> tuple[str, str]:
+    """connection の各 field から Fabric Data Agent shape を判定する。
+
+    - 戻り値の `kind` は `"metadata"` / `"category"` / `"target"` / `"none"` のいずれか
+    - `none` は production への昇格コマンドを表示しない (fail-closed)
+    - rubber-duck 指摘 (verify-script-fix-rubber-duck blocking #1) を反映:
+      `fabric_workspace` / `fabric_lakehouse` などの非 Data Agent connection を弾くため、
+      metadata は `fabric_dataagent` prefix、category は `fabricdataagent` 完全一致系のみ accept。
+    """
+    metadata_type_norm = (metadata_type or "").strip().lower()
+    category_norm = re.sub(r"\s+", "", (category or "").lower())
+    target_norm = (target or "").lower()
+
+    if metadata_type_norm.startswith("fabric_dataagent"):
+        return "metadata", f"metadata.type={metadata_type_norm}"
+    if "fabricdataagent" in category_norm:
+        return "category", f"category={category}"
+    if "/dataagents/" in target_norm:
+        return "target", "target に `/dataagents/` を含む (legacy shape)"
+    return "none", (
+        f"Fabric Data Agent discriminator 未検出: "
+        f"metadata.type=`{metadata_type or '-'}` category=`{category}` target=`{target[:60]}`"
+    )
+
+
 def _print_check(label: str, status: str, detail: str = "") -> None:
     """[OK] / [WARN] / [FAIL] 形式の進捗を stdout に出す。"""
     icon = {"ok": "[OK]", "warn": "[WARN]", "fail": "[FAIL]"}.get(status, "[INFO]")
@@ -154,34 +188,30 @@ def main(argv: list[str] | None = None) -> int:
             category = getattr(conn, "category", None) or getattr(conn, "type", None) or ""
             auth_type = getattr(conn, "auth_type", None) or ""
             resolved_id = getattr(conn, "id", "") or ""
+            metadata = getattr(conn, "metadata", None)
+            # Foundry SDK は Fabric DA を ConnectionType.CUSTOM として表現するが、
+            # metadata.type に `fabric_dataagent_preview` が入る (実機 2026-05-03 確認)。
+            metadata_type = _extract_metadata_type(metadata)
             _print_check(
                 f"connection `{connection_name}` 取得",
                 "ok",
-                f"target={target[:80]}",
+                f"target={target[:80]} metadata.type={metadata_type or '-'}",
             )
             # Fabric Data Agent 専用 sanity check (false-green 防止)
-            category_str = str(category).lower()
-            target_str = str(target).lower()
-            shape_ok = False
-            if category_str and "fabric" not in category_str:
-                _print_check(
-                    "connection.category",
-                    "warn",
-                    f"category=`{category}` (Fabric ではない可能性。MicrosoftFabricPreviewTool が消費できないかも)",
-                )
-            elif "/dataagents/" not in target_str and "fabric" not in target_str:
-                _print_check(
-                    "connection.target",
-                    "warn",
-                    f"target に `/dataagents/` が含まれない: {target[:120]}",
-                )
+            kind, shape_detail = _classify_fabric_da_shape(
+                metadata_type=metadata_type,
+                category=str(category),
+                target=str(target),
+            )
+            shape_ok = kind != "none"
+            if shape_ok:
+                # auth_type は legacy category shape のときだけ追加情報として詳細に含める
+                detail = shape_detail
+                if kind == "category" and auth_type:
+                    detail = f"{shape_detail} auth={auth_type}"
+                _print_check("Fabric DA shape 検証", "ok", detail)
             else:
-                _print_check(
-                    "Fabric DA shape 検証",
-                    "ok",
-                    f"category={category} auth={auth_type}",
-                )
-                shape_ok = True
+                _print_check("connection shape", "warn", shape_detail)
 
             # ポータル作成直後モード: shape OK + resolved resource ID 検証 OK のときだけ
             # 推奨コマンドを表示する (fail-closed; rubber-duck pr3-portal-followup-impl-review blocking #2)
