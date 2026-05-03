@@ -125,7 +125,85 @@ Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ
 | Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel. The signed manager trigger URL sync in `deploy.yml` has also been revalidated against the live Container App secret |
 | Container Apps VNet integration | **Cutover complete (2026-05-01)**. The new VNet-integrated CAE `cae-wmbvhdhcsuyb2-pn` (default domain `wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`) and Container App `ca-wmbvhdhcsuyb2-pn` are the only live environment in `snet-container-apps`; both connect to Cosmos DB and Key Vault private endpoints over the VNet (`publicNetworkAccess` stays `Disabled`). The pre-migration `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` resources were deleted on 2026-05-01 after stability verification |
 | Approval security | `/api/chat/{id}/approve` is bound to a per-conversation `approval_token` (32-byte urlsafe) that `chat()` mints after Agent2 succeeds and emits in the `approval_request` SSE event. Anonymous external `/approve` requests must echo the token; missing / mismatched tokens return `APPROVAL_CONTEXT_NOT_FOUND`. The token rotates per `_refine_events()` revision, is stored in Cosmos `metadata.pending_approval_token` while in `awaiting_approval` / `awaiting_manager_approval`, and is constant-time compared via `hmac.compare_digest`. Authenticated users (Entra Bearer) keep working on owner_id match alone. See [`approval-security.md`](approval-security.md) for the full security model |
-| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback. Microsoft Fabric P13 / P14 prompts (`円安後の海外売上回復の度合い` / `インバウンド比率の四半期推移`) hit a Fabric platform-side `submit_tool_outputs` BadRequest and need a Microsoft support escalation; Phase 10 `aiInstructions` cannot fix it |
+| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback. Microsoft Fabric P13 / P14 prompts (`円安後の海外売上回復の度合い` / `インバウンド比率の四半期推移`) hit a Fabric platform-side `submit_tool_outputs` BadRequest and need a Microsoft support escalation; Phase 10 `aiInstructions` cannot fix it. **PR 3 (data-search → Foundry Prompt Agent + Fabric DA built-in tool) — Foundry Portal で `travel-fabric-da` connection を作成 → `gh variable set` → data-search Agent 再同期** が user-action として残っています (詳細は次節 §5.x) |
+
+### PR 3 (data-search → Foundry Prompt Agent) アクティベーション (portal-only setup)
+
+PR 3 は Agent1 (data-search) を Foundry Prompt Agent + `MicrosoftFabricPreviewTool` (preview, `fabric_dataagent_preview`) に移行しました。default `DATA_SEARCH_RUNTIME=foundry_preprovisioned` ですが、`FOUNDRY_FABRIC_CONNECTION_ID` 未設定のときは legacy fall-through するので、live は無事に動作中。ただし Fabric DA の **User identity (OBO) audit + 3IQ デモ価値** を有効化するには、以下の手動セットアップが必要です。
+
+**Foundry portal でしかできない**: Fabric Data Agent connection は management plane API (`projects/connections` の category allow-list) に **Microsoft Fabric カテゴリが含まれない** ため、必ずポータルで作成する必要があります ([Microsoft Learn — Set up the Microsoft Fabric connection](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric#set-up-the-microsoft-fabric-connection))。
+
+#### 手順
+
+1. **Foundry Portal で connection 作成**
+   - https://ai.azure.com を開く (subscription `579c2abd-eb77-48fe-a8a4-e7d29b0a8105` / tenant `e4ab0278-982f-4ccf-9750-baafdd16727f`)
+   - Project `aip-wmbvhdhcsuyb2` を選択
+   - 左ペイン **Management center** → **Connected resources** → **+ New connection**
+   - Resource type: **Microsoft Fabric**
+   - Workspace ID: `096ff72a-6174-4aba-8f0c-140454fa6c3f` (`ws-3iq-demo`)
+   - Artifact ID: `b85b67a4-bac4-4852-95e1-443c02032844` (`Travel_Ontology_DA_v2`)
+   - Connection name: `travel-fabric-da`
+   - Authentication: **User identity (OBO)** — Fabric DA は service principal をサポートしていない
+   - **Save**
+
+2. **Resource ID を確認** (one-off env vars でローカル `.env` を上書き)
+   ```powershell
+   $env:AZURE_AI_PROJECT_ENDPOINT="https://aiswmbvhdhcsuyb2.services.ai.azure.com/api/projects/aip-wmbvhdhcsuyb2"
+   uv run python scripts/verify_foundry_fabric_connection.py --connection-name travel-fabric-da
+   ```
+   このスクリプトが標準出力に `FOUNDRY_FABRIC_CONNECTION_ID:` と次の `gh variable set` コマンドを表示します。
+
+3. **GitHub Actions production env に登録** (production scope 必須 — repo scope では効かない)
+   ```bash
+   gh variable set FOUNDRY_FABRIC_CONNECTION_ID --env production --body "<step 2 で得た resource ID>"
+   gh variable set DATA_SEARCH_RUNTIME --env production --body "foundry_preprovisioned"
+   ```
+
+4. **Prompt Agent 定義に Fabric tool を attach するため再同期** ⚠️ **必須**
+   - `sync_data_search_agent` は `FOUNDRY_FABRIC_CONNECTION_ID` を **同期時に** 読んで Fabric tool を attach するため、connection を作っただけでは Prompt Agent 定義に反映されない
+   - **deploy.yml は postprovision を実行しない** (`azd provision/up` だけが実行する) ため、deploy ワークフローを走らせても Fabric tool は attach されない。**narrow sync を必ず実行する**:
+     ```powershell
+     $env:AZURE_AI_PROJECT_ENDPOINT="https://aiswmbvhdhcsuyb2.services.ai.azure.com/api/projects/aip-wmbvhdhcsuyb2"
+     $env:FOUNDRY_FABRIC_CONNECTION_ID="<step 2 の resource ID>"
+     uv run python -m scripts.sync_data_search_agent
+     ```
+
+5. **Container App env vars を即時反映** (deploy を待たずに動作確認したい場合)
+   ```bash
+   az containerapp update -n ca-wmbvhdhcsuyb2-pn -g rg-workiq-dev \
+     --set-env-vars FOUNDRY_FABRIC_CONNECTION_ID="<resource ID>" \
+                    DATA_SEARCH_RUNTIME=foundry_preprovisioned
+   ```
+   (注: `--set-env-vars` は新 revision を作成するため厳密には即時ではないが、deploy.yml を待つよりは早い)
+
+6. **End-to-end 検証** (MSAL ログイン後の認証付きトラフィックで)
+   - **必須**: `https://ai.azure.com/user_impersonation` の delegated token を持つ MSAL サインイン状態で実行する。匿名トラフィックは fail-closed で legacy 経路に直行するため、Fabric tool は呼ばれない (`src/api/chat.py` の `auth_mode` gate)。
+   - Web UI から「夏のハワイ学生旅行向けプランを企画して」を送信
+   - data-search phase で **Fabric IQ chip** が出ることを確認
+   - App Insights `traces` で `fabric_data_agent_invocation` telemetry の `pass=pass1` が success=true で記録されること
+   - Fabric workspace `ws-3iq-demo` audit log で実 user の UPN が記録されていること
+
+#### Rollback
+
+問題が発生した場合は traffic 切替で即時復旧:
+```bash
+# 旧 revision に traffic を戻す
+az containerapp revision list -n ca-wmbvhdhcsuyb2-pn -g rg-workiq-dev --query "[].{name:name,active:properties.active,fqdn:properties.fqdn,image:properties.template.containers[0].image}" -o table
+az containerapp ingress traffic set -n ca-wmbvhdhcsuyb2-pn -g rg-workiq-dev --revision-weight "<old-revision>=100"
+```
+
+または env で legacy 強制 (新 revision が作られる、即時ではない):
+```bash
+gh variable set DATA_SEARCH_RUNTIME --env production --body "legacy"
+```
+
+#### RBAC 要件 (end user)
+
+認証付きデモを実施する全ユーザーに以下が必要:
+- Foundry project `aip-wmbvhdhcsuyb2` で `Azure AI User` role
+- Fabric workspace `ws-3iq-demo` の Read role
+- Fabric Data Agent `Travel_Ontology_DA_v2` への Read access
+- 下位データソース (lakehouse `lh_travel_marketing_v2`) の Read/Build
 
 ### Container Apps VNet integration migration runbook (historical reference)
 
