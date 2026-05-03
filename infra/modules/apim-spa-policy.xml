@@ -2,15 +2,20 @@
     <inbound>
         <base />
         <rate-limit-by-key calls="600" renewal-period="60" counter-key="@((string)(context.Request.IpAddress ?? &quot;anonymous&quot;))" />
+        <!-- All requests get the trusted header so backend can detect APIM transit
+             (used to short-circuit the / -> APIM redirect loop and to consume the
+             delegated auth boundary on /api/*). The secret value is identical for
+             both branches; only /api/* is JWT-validated below. SPA static handlers
+             do not consume the header, so wider injection is functionally safe. -->
+        <set-header name="X-Apim-Trusted" exists-action="override">
+            <value>{{trusted-auth-header-secret}}</value>
+        </set-header>
         <!-- API base path 配下の /api/* だけ JWT 検証する。
-             context.Api.Path から動的に算出することで、Bicep 側で API path を変えても
-             policy が壊れないようにする。一致条件は base + "/api" 完全一致と
-             base + "/api/..." prefix の両方をカバーする。 -->
-        <set-variable name="apiBasePath" value="@(&quot;/&quot; + context.Api.Path)" />
+             APIM の context.Request.Url.Path は API base path (/app) を strip した
+             相対パス (/api/health 等) を返すため、ここでは /api 直接 match で OK。 -->
         <set-variable name="reqPath" value="@(context.Request.Url.Path.ToLower())" />
-        <set-variable name="apiPrefix" value="@(((string)context.Variables[&quot;apiBasePath&quot;]).ToLower() + &quot;/api&quot;)" />
         <choose>
-            <when condition="@(((string)context.Variables[&quot;reqPath&quot;]).Equals((string)context.Variables[&quot;apiPrefix&quot;]) || ((string)context.Variables[&quot;reqPath&quot;]).StartsWith(((string)context.Variables[&quot;apiPrefix&quot;]) + &quot;/&quot;))">
+            <when condition="@(((string)context.Variables[&quot;reqPath&quot;]).Equals(&quot;/api&quot;) || ((string)context.Variables[&quot;reqPath&quot;]).StartsWith(&quot;/api/&quot;))">
                 <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: invalid or missing token." require-expiration-time="true" require-scheme="Bearer" require-signed-tokens="true" output-token-variable-name="jwt">
                     <openid-config url="https://login.microsoftonline.com/{{tenant-id}}/v2.0/.well-known/openid-configuration" />
                     <audiences>
@@ -34,13 +39,9 @@
                         </return-response>
                     </when>
                 </choose>
-                <set-header name="X-Apim-Trusted" exists-action="override">
-                    <value>{{trusted-auth-header-secret}}</value>
-                </set-header>
             </when>
-            <!-- SPA 静的アセットには X-Apim-Trusted を付けない (defense-in-depth)。
-                 backend は /api/* 以外で trust boundary を消費しないため、
-                 ここでヘッダを注入する必要は無い。 -->
+            <!-- SPA 静的アセットも X-Apim-Trusted を持つが、backend の static handler は
+                 trust boundary を消費しないため secret 流出にはならない。 -->
         </choose>
     </inbound>
     <backend>
