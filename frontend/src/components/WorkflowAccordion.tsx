@@ -413,7 +413,7 @@ export function WorkflowAccordion({
             {hasFoundryWorkIqTool && (
               <span
                 data-step-source="workiq-foundry"
-                className="rounded-full border border-violet-400 bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100"
+                className="rounded-full border border-sky-400 bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-900 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-100"
               >
                 {t('tool.source.foundry')} {t('tool.source.workiq')}
               </span>

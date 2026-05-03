@@ -36,9 +36,9 @@ export const IQ_BRANDS: Record<IQBrand, IQBrandMeta> = {
     brand: 'work_iq',
     defaultLabel: 'Work IQ',
     chipClass:
-      'border-violet-300/70 bg-violet-100/80 text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200',
+      'border-sky-300/70 bg-sky-100/80 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200',
     tileClass:
-      'border-violet-400 bg-violet-100 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100',
+      'border-sky-400 bg-sky-100 text-sky-900 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-100',
     descriptionKey: 'iq.work_iq.description',
     iconName: 'Sparkles',
   },
@@ -56,9 +56,9 @@ export const IQ_BRANDS: Record<IQBrand, IQBrandMeta> = {
     brand: 'foundry_iq',
     defaultLabel: 'Foundry IQ',
     chipClass:
-      'border-sky-300/70 bg-sky-100/80 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200',
+      'border-violet-300/70 bg-violet-100/80 text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200',
     tileClass:
-      'border-sky-400 bg-sky-100 text-sky-900 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-100',
+      'border-violet-400 bg-violet-100 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-100',
     descriptionKey: 'iq.foundry_iq.description',
     iconName: 'BookOpen',
   },
