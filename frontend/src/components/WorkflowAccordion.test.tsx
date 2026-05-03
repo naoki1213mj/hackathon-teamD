@@ -351,4 +351,62 @@ describe('WorkflowAccordion', () => {
     expect(container.querySelector('img[src="broken-chart.png"]')).toBeNull()
     expect(container.querySelector('img[src^="data:image/png;base64,"]')).not.toBeNull()
   })
+
+  it('marks every step with content as completed when pipelineStatus is completed (Bug 3 safety net)', () => {
+    // pipelineStatus が完了済みかつ各ステップに content がある状況。
+    // 通常は各 step ごとの terminal `agent_progress completed` を受信して 'completed' になるが、
+    // backend が何らかの理由で agent_progress を取りこぼした場合でも、ここで pipeline 完了を
+    // 信頼して 'completed' に振り戻すのが Bug 3 の防御層。
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={textContents}
+        images={images}
+        toolEvents={toolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+        pipelineStatus="completed"
+      />,
+    )
+
+    const stepsWithContent = ['data-search-agent', 'marketing-plan-agent', 'regulation-check-agent', 'brochure-gen-agent']
+    for (const stepKey of stepsWithContent) {
+      const stepEls = container.querySelectorAll(`[data-step-key="${stepKey}"]`)
+      expect(stepEls.length).toBeGreaterThan(0)
+      // 最新ラウンドの step は必ず 'completed' になっていること。
+      const last = stepEls[stepEls.length - 1] as HTMLElement
+      expect(last.dataset.stepStatus).toBe('completed')
+    }
+  })
+
+  it('does NOT override step status when pipelineStatus is running and the step has no content yet', () => {
+    // 防御層は pipelineStatus === 'completed' のときだけ働く。
+    // 実行中の場合は通常の getStatusForRound ロジックを尊重する。
+    const partialContents: TextContent[] = [
+      { agent: 'data-search-agent', content: '分析中の暫定結果です。' },
+    ]
+
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={partialContents}
+        images={[]}
+        toolEvents={[]}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+        pipelineStatus="running"
+      />,
+    )
+
+    const videoStep = container.querySelector('[data-step-key="video-gen-agent"]') as HTMLElement | null
+    expect(videoStep).not.toBeNull()
+    // content がない video-gen-agent は 'pending' のままであるべき (regression guard)。
+    expect(videoStep!.dataset.stepStatus).toBe('pending')
+  })
 })

@@ -508,6 +508,7 @@ function App() {
               t={t}
               locale={locale}
               conversationKey={state.conversationId ?? 'draft'}
+              pipelineStatus={state.status}
             />
           </div>
 

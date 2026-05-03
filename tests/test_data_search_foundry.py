@@ -482,3 +482,234 @@ def _make_fake_function_call_loop(final_response: Any):
         return final_response
 
     return _fake
+
+
+# ---------- Bug #1 regression: stuck `fabric_data_agent_invocation` chip ----------
+#
+# Live smoke test 2026-05-03 では UI 上で `fabric_data_agent_invocation` chip が
+# spinner のまま残り続ける現象が発生していた。原因は `success`/`no_op`/`fallback`
+# という非 canonical な status が emit され、frontend `tool-events.ts:124-129` の
+# `toolStatusRank()` で rank 0 (terminal でない) と判定されていたため。
+#
+# 修正方針: backend telemetry はもともと `auxiliary backend telemetry` 目的だった
+# ので、SSE event ではなく `logger.info` で AppTraces に記録する設計に統一。
+# UI は canonical な `query_data_agent` の running → completed/failed lifecycle
+# だけで完結する。
+
+def test_run_data_search_prompt_agent_does_not_emit_fabric_data_agent_invocation_event(
+    monkeypatch,
+) -> None:
+    """`fabric_data_agent_invocation` event は SSE に emit してはいけない。
+
+    Bug #1 regression: 旧実装では Pass 1 success / no_op / Pass 2 success / no_op
+    で `success` / `no_op` / `fallback` という非 canonical status を emit して
+    いた → frontend chip が spinner のまま残る。修正後は `logger.info` のみ。
+    """
+    _patch_common(monkeypatch)
+    captured: list[Any] = []
+
+    def _capture(payload: Any) -> None:
+        captured.append(payload)
+
+    # `emit_tool_event` is imported lazily inside `run_data_search_prompt_agent`,
+    # so patch the source module rather than the consumer module.
+    import src.tool_telemetry as tool_telemetry
+
+    monkeypatch.setattr(tool_telemetry, "emit_tool_event", _capture)
+    pass1_response = _build_response_with_fabric()
+    openai_client = _FakeOpenAIClient([pass1_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+
+    asyncio.run(
+        module.run_data_search_prompt_agent(
+            "夏のハワイ売上",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    emitted_tools = [
+        (payload.get("tool") if isinstance(payload, dict) else None) for payload in captured
+    ]
+    assert "fabric_data_agent_invocation" not in emitted_tools, (
+        "fabric_data_agent_invocation must NOT be emitted as SSE tool_event "
+        f"(got: {emitted_tools}). Use logger.info instead so the UI doesn't "
+        "show a stuck spinner chip."
+    )
+    # canonical lifecycle chip は出ていること
+    assert "query_data_agent" in emitted_tools
+
+
+# rubber-duck `bug1-fix-critique` non-blocking #2 反映: 旧実装は Pass 1 success /
+# Pass 1 zero-fabric / Pass 1 recoverable / Pass 2 の **4 path** で
+# `fabric_data_agent_invocation` SSE event を emit していた。各 path で event が
+# emit されない事を個別に保証する (将来 1 path だけ regress した場合の検出)。
+@pytest.mark.parametrize(
+    "scenario",
+    ["pass1_success", "pass1_zero_fabric", "pass1_recoverable", "pass2_success"],
+)
+def test_run_data_search_prompt_agent_no_fabric_data_agent_invocation_event_in_any_path(
+    monkeypatch, scenario: str
+) -> None:
+    """4 path 全てで `fabric_data_agent_invocation` SSE event は emit されない。"""
+    _patch_common(monkeypatch)
+
+    captured: list[Any] = []
+
+    def _capture(payload: Any) -> None:
+        captured.append(payload)
+
+    import src.tool_telemetry as tool_telemetry
+
+    monkeypatch.setattr(tool_telemetry, "emit_tool_event", _capture)
+
+    pass2_response = SimpleNamespace(
+        id=f"resp_pass2_for_{scenario}",
+        output=[SimpleNamespace(type="fabric_dataagent_preview"), SimpleNamespace(type="message")],
+    )
+    if scenario == "pass1_success":
+        responses = [_build_response_with_fabric()]
+    elif scenario == "pass1_zero_fabric":
+        responses = [_build_response_without_fabric(), pass2_response]
+    elif scenario == "pass1_recoverable":
+        responses = [RuntimeError("401 Unauthorized OBO failure"), pass2_response]
+    else:  # pass2_success — Pass 1 で zero-fabric → Pass 2 で fabric 呼ばれる
+        responses = [_build_response_without_fabric(), pass2_response]
+
+    openai_client = _FakeOpenAIClient(responses)
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    asyncio.run(
+        module.run_data_search_prompt_agent(
+            "夏のハワイ売上",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    emitted_tools = [
+        (payload.get("tool") if isinstance(payload, dict) else None) for payload in captured
+    ]
+    assert "fabric_data_agent_invocation" not in emitted_tools, (
+        f"[{scenario}] fabric_data_agent_invocation must NOT be emitted as SSE event. "
+        f"Got: {emitted_tools}"
+    )
+
+
+def test_run_data_search_prompt_agent_pass1_success_logs_canonical_telemetry(
+    monkeypatch, caplog
+) -> None:
+    """Pass 1 成功時に AppTraces 用の structured log が出ること。"""
+    import logging
+
+    _patch_common(monkeypatch)
+    pass1_response = _build_response_with_fabric()
+    openai_client = _FakeOpenAIClient([pass1_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+
+    with caplog.at_level(logging.INFO, logger=module.logger.name):
+        asyncio.run(
+            module.run_data_search_prompt_agent(
+                "夏のハワイ売上",
+                None,
+                delegated_user_access_token="delegated-token",
+                fabric_connection_id="conn-id-123",
+            )
+        )
+
+    fabric_logs = [r.getMessage() for r in caplog.records if "fabric_data_agent_invocation" in r.getMessage()]
+    assert any("pass=pass1" in msg and "fabric_tool_invoked=True" in msg and "status=completed" in msg for msg in fabric_logs), (
+        f"Expected canonical Pass 1 success log line; got: {fabric_logs}"
+    )
+
+
+def test_run_data_search_prompt_agent_pass1_zero_fabric_logs_no_op(monkeypatch, caplog) -> None:
+    """Pass 1 で Fabric tool が呼ばれなかったときは AppTraces に no_op を記録する。"""
+    import logging
+
+    _patch_common(monkeypatch)
+    pass2_response = SimpleNamespace(id="resp_pass2_zero_fabric_log", output=[])
+    openai_client = _FakeOpenAIClient([_build_response_without_fabric(), pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    with caplog.at_level(logging.INFO, logger=module.logger.name):
+        asyncio.run(
+            module.run_data_search_prompt_agent(
+                "夏のハワイ売上",
+                None,
+                delegated_user_access_token="delegated-token",
+                fabric_connection_id="conn-id-123",
+            )
+        )
+
+    fabric_logs = [r.getMessage() for r in caplog.records if "fabric_data_agent_invocation" in r.getMessage()]
+    assert any("pass=pass1" in msg and "fabric_tool_invoked=False" in msg and "status=no_op" in msg for msg in fabric_logs), (
+        f"Expected canonical Pass 1 no_op log line; got: {fabric_logs}"
+    )
+
+
+def test_run_data_search_prompt_agent_pass1_recoverable_logs_fallback(monkeypatch, caplog) -> None:
+    """Pass 1 recoverable failure 時は AppTraces に fallback を記録する。"""
+    import logging
+
+    _patch_common(monkeypatch)
+    pass2_response = SimpleNamespace(id="resp_pass2_recoverable_log", output=[])
+    openai_client = _FakeOpenAIClient(
+        [RuntimeError("401 Unauthorized OBO failure"), pass2_response]
+    )
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    with caplog.at_level(logging.INFO, logger=module.logger.name):
+        asyncio.run(
+            module.run_data_search_prompt_agent(
+                "夏のハワイ売上",
+                None,
+                delegated_user_access_token="delegated-token",
+                fabric_connection_id="conn-id-123",
+            )
+        )
+
+    fabric_logs = [r.getMessage() for r in caplog.records if "fabric_data_agent_invocation" in r.getMessage()]
+    assert any("pass=pass1" in msg and "status=fallback" in msg for msg in fabric_logs), (
+        f"Expected canonical Pass 1 fallback log line; got: {fabric_logs}"
+    )
+
+
+def test_run_data_search_prompt_agent_pass2_logs_canonical_telemetry(monkeypatch, caplog) -> None:
+    """Pass 2 完了時にも AppTraces に completed/no_op を記録する。"""
+    import logging
+
+    _patch_common(monkeypatch)
+    pass2_response = SimpleNamespace(
+        id="resp_pass2_with_fabric",
+        output=[SimpleNamespace(type="fabric_dataagent_preview"), SimpleNamespace(type="message")],
+    )
+    openai_client = _FakeOpenAIClient([_build_response_without_fabric(), pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    with caplog.at_level(logging.INFO, logger=module.logger.name):
+        asyncio.run(
+            module.run_data_search_prompt_agent(
+                "夏のハワイ売上",
+                None,
+                delegated_user_access_token="delegated-token",
+                fabric_connection_id="conn-id-123",
+            )
+        )
+
+    fabric_logs = [r.getMessage() for r in caplog.records if "fabric_data_agent_invocation" in r.getMessage()]
+    assert any("pass=pass2" in msg and "status=completed" in msg for msg in fabric_logs), (
+        f"Expected canonical Pass 2 completed log line; got: {fabric_logs}"
+    )

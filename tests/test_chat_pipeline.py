@@ -502,19 +502,19 @@ class TestMarketingPlanRuntimeSettings:
         assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
 
     def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
-        """env で大きすぎる timeout 値が来ても 150 秒で頭打ちにする。"""
+        """env で大きすぎる timeout 値が来ても 200 秒で頭打ちにする。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "300"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 200.0
 
     def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_unparseable(self, monkeypatch) -> None:
-        """env 値が数値でない場合は安全側の既定 150 秒を返す。"""
+        """env 値が数値でない場合は安全側の既定 200 秒を返す。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "not-a-number"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 200.0
 
     def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_zero_or_negative(self, monkeypatch) -> None:
-        """env 値が 0 以下なら既定 150 秒に戻す。"""
+        """env 値が 0 以下なら既定 200 秒に戻す。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "0"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 200.0
 
     def test_resolve_work_iq_timeout_seconds_honors_lower_value(self, monkeypatch) -> None:
         """cap 未満の env 値は尊重する。"""
@@ -1264,6 +1264,121 @@ class TestConversationStatusFromEvents:
     def test_error_event(self):
         events = [{"event": "error"}]
         assert chat_module._conversation_status_from_events(events) == "error"
+
+    def test_error_followed_by_terminal_agent_progress_still_error(self):
+        """failure path で terminal agent_progress が error の後ろに append されても error 判定を維持する。"""
+        events = [
+            {"event": "error", "data": {"code": "WORKIQ_TIMEOUT"}},
+            {"event": "agent_progress", "data": {"status": "completed", "success": False}},
+        ]
+        assert chat_module._conversation_status_from_events(events) == "error"
+
+    def test_done_followed_by_agent_progress_still_completed(self):
+        """post-completion で agent_progress が後続しても completed 判定を維持する。"""
+        events = [
+            {"event": "done"},
+            {"event": "agent_progress", "data": {"status": "completed"}},
+        ]
+        assert chat_module._conversation_status_from_events(events) == "completed"
+
+    def test_approval_request_followed_by_agent_progress_still_awaiting(self):
+        """approval_request 後の agent_progress (post-completion update) でも awaiting を維持する。"""
+        events = [
+            {"event": "approval_request"},
+            {"event": "agent_progress", "data": {"status": "completed"}},
+        ]
+        assert chat_module._conversation_status_from_events(events) == "awaiting_approval"
+
+    def test_only_non_control_events_defaults_completed(self):
+        """control event が一つもない event 列は completed フォールバック。"""
+        events = [
+            {"event": "text"},
+            {"event": "agent_progress"},
+            {"event": "tool_event"},
+        ]
+        assert chat_module._conversation_status_from_events(events) == "completed"
+
+
+class TestManagerContinuationStatusFromEvents:
+    """_manager_continuation_status_from_events のテスト"""
+
+    def test_empty_events_completed(self):
+        assert chat_module._manager_continuation_status_from_events([]) == "completed"
+
+    def test_only_progress_events_no_approval_completed(self):
+        """approval_request が無ければ通常の status 推定にフォールバック。"""
+        events = [
+            {"event": "agent_progress", "data": {"status": "running"}},
+            {"event": "text"},
+        ]
+        assert chat_module._manager_continuation_status_from_events(events) == "completed"
+
+    def test_post_manager_approval_progress_event_running(self):
+        """manager approval_request 直後の running 進捗で running を返す。"""
+        events = [
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "agent_progress", "data": {"status": "running"}},
+        ]
+        assert chat_module._manager_continuation_status_from_events(events) == "running"
+
+    def test_post_manager_approval_done_completed(self):
+        events = [
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "agent_progress", "data": {"status": "running"}},
+            {"event": "done"},
+        ]
+        assert chat_module._manager_continuation_status_from_events(events) == "completed"
+
+    def test_post_manager_approval_error_followed_by_terminal_progress_still_error(self):
+        """failure path: error の後ろに terminal agent_progress を append しても error を維持。"""
+        events = [
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "agent_progress", "data": {"status": "running"}},
+            {"event": "error", "data": {"code": "WORKIQ_TIMEOUT"}},
+            {"event": "agent_progress", "data": {"status": "completed", "success": False}},
+        ]
+        assert chat_module._manager_continuation_status_from_events(events) == "error"
+
+    def test_user_scope_approval_does_not_trigger_running_branch(self):
+        """user-scope approval は manager continuation の trigger ではない。"""
+        events = [
+            {"event": "approval_request"},
+            {"event": "agent_progress", "data": {"status": "running"}},
+        ]
+        # manager approval が無いので _conversation_status_from_events に委譲
+        # backwards scan: agent_progress (skip) → approval_request → "awaiting_approval"
+        assert chat_module._manager_continuation_status_from_events(events) == "awaiting_approval"
+
+    def test_repeated_manager_approval_uses_latest(self):
+        """リファイン round で manager approval が再発火したとき、最新の trigger 後の状態を採用。"""
+        events = [
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "done"},
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "agent_progress", "data": {"status": "running"}},
+        ]
+        assert chat_module._manager_continuation_status_from_events(events) == "running"
+
+    def test_mixed_user_scope_approval_after_manager_returns_awaiting(self):
+        """manager approval 後に user-scope approval_request が来たら awaiting_approval。"""
+        events = [
+            {"event": "approval_request", "data": {"approval_scope": "manager"}},
+            {"event": "agent_progress", "data": {"status": "running"}},
+            {"event": "approval_request"},
+        ]
+        # post_approval = [agent_progress, approval_request(user)]
+        # backward scan: approval_request (no manager scope) → "awaiting_approval"
+        assert chat_module._manager_continuation_status_from_events(events) == "awaiting_approval"
+
+    def test_malformed_approval_data_is_skipped_safely(self):
+        """approval_request の data が dict でなくても crash しない。"""
+        events = [
+            {"event": "approval_request", "data": "unexpected_string_payload"},
+            {"event": "agent_progress", "data": {"status": "running"}},
+        ]
+        # data が dict でないので manager scope と判定されない → fallback
+        # _conversation_status_from_events backward scan finds approval_request → "awaiting_approval"
+        assert chat_module._manager_continuation_status_from_events(events) == "awaiting_approval"
 
 
 def test_build_public_base_url_prefers_configured_setting(monkeypatch):
@@ -4291,4 +4406,74 @@ async def test_workflow_event_generator_agent1_failure(monkeypatch) -> None:
 
     assert any(event_name == "error" for event_name, _ in parsed)
     assert not any(event_name == "approval_request" for event_name, _ in parsed)
+
+
+class TestBuildAgentFailureOutcome:
+    """_build_agent_failure_outcome ヘルパーのテスト (Bug #3)。
+
+    UI の workflow stepper は terminal ``agent_progress completed`` を受信しない限り
+    spinner を停止しない。失敗パスでも必ず terminal イベントを送ることで、UI が
+    「実行中」のまま固まる Bug #3 を防ぐ。
+    """
+
+    def test_appends_terminal_agent_progress_completed(self) -> None:
+        events: list[str] = []
+        outcome = chat_module._build_agent_failure_outcome(
+            events,
+            agent_name="video-gen-agent",
+            step=5,
+            total_steps=5,
+            start_time=time.monotonic(),
+        )
+
+        assert outcome["success"] is False
+        assert outcome["text"] == ""
+        assert outcome["tool_calls"] == 0
+        assert outcome["total_tokens"] == 0
+        assert outcome["latency_seconds"] >= 0
+        assert outcome["events"] is events
+        assert len(events) == 1
+
+        event_name, payload = _parse_sse(events[0])
+        assert event_name == "agent_progress"
+        assert payload["agent"] == "video-gen-agent"
+        assert payload["status"] == "completed"
+        assert payload["step"] == 5
+        assert payload["total_steps"] == 5
+
+    def test_preserves_existing_events(self) -> None:
+        existing = chat_module.format_sse(
+            chat_module.SSEEventType.ERROR,
+            {"message": "boom", "code": "AGENT_RUNTIME_ERROR"},
+        )
+        events: list[str] = [existing]
+
+        outcome = chat_module._build_agent_failure_outcome(
+            events,
+            agent_name="data-search-agent",
+            step=1,
+            total_steps=5,
+            start_time=time.monotonic(),
+        )
+
+        assert len(events) == 2
+        assert events[0] is existing
+        assert outcome["events"] is events
+
+        event_name, payload = _parse_sse(events[1])
+        assert event_name == "agent_progress"
+        assert payload["status"] == "completed"
+
+    def test_optional_text_payload_is_propagated(self) -> None:
+        events: list[str] = []
+        outcome = chat_module._build_agent_failure_outcome(
+            events,
+            agent_name="marketing-plan-agent",
+            step=2,
+            total_steps=5,
+            start_time=time.monotonic(),
+            text="部分結果の説明",
+        )
+
+        assert outcome["text"] == "部分結果の説明"
 

@@ -207,6 +207,27 @@ export function collapseToolEvents(events: ToolEvent[]): ToolEvent[] {
   })
 }
 
+function normalizeLegacyToolStatus(rawStatus: string): string {
+  // rubber-duck `bug1-fix-critique` non-blocking #1 反映:
+  // 旧バージョンの backend (commit `c97b811` 以前) では `fabric_data_agent_invocation`
+  // などの auxiliary telemetry event に `success` / `no_op` / `fallback` という
+  // 非 canonical な status を emit していた。replay されると `toolStatusRank` が
+  // rank 0 (running 未満) と判定し chip が spinner のまま固定される。
+  // restore 時に canonical な terminal status へ正規化する。
+  switch (rawStatus) {
+    case 'success':
+    case 'succeeded':
+    case 'ok':
+      return 'completed'
+    case 'no_op':
+    case 'noop':
+    case 'fallback':
+      return 'failed'
+    default:
+      return rawStatus
+  }
+}
+
 export function normalizeToolEventData(
   data: Record<string, unknown>,
   options: {
@@ -222,7 +243,7 @@ export function normalizeToolEventData(
   return {
     event_id: String(data.event_id || '').trim() || undefined,
     tool,
-    status: String(data.status || ''),
+    status: normalizeLegacyToolStatus(String(data.status || '')),
     agent,
     source,
     provider,

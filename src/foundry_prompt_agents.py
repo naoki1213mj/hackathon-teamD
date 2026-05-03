@@ -776,7 +776,8 @@ async def run_data_search_prompt_agent(
         # Pass 1: Fabric tool only via ToolChoiceAllowed
         # rubber-duck `pr3-impl-review` Blocking #2 反映: UI 互換のため canonical
         # `query_data_agent` の running → completed/failed lifecycle event を発火する。
-        # 補助として `fabric_data_agent_invocation` event は backend telemetry 用に残す。
+        # 補助 telemetry は `logger.info` で AppTraces に記録する (event 重複で UI に
+        # spinner が残るのを防ぐ — `fabric_data_agent_invocation` event は廃止)。
         pass1_response = None
         pass1_failed_recoverable = False
         if fabric_connection_id.strip():
@@ -825,15 +826,10 @@ async def run_data_search_prompt_agent(
                     pass1_response = await asyncio.to_thread(openai_client.responses.create, **pass1_kwargs)
 
                 fabric_invoked = _detect_fabric_tool_invoked(pass1_response)
-                emit_tool_event(
-                    build_tool_event_data(
-                        "fabric_data_agent_invocation",
-                        "success" if fabric_invoked else "no_op",
-                        agent_name="data-search-agent",
-                        source="fabric_data_agent",
-                        provider="foundry",
-                        phase="pass1",
-                    )
+                logger.info(
+                    "fabric_data_agent_invocation pass=pass1 fabric_tool_invoked=%s status=%s",
+                    fabric_invoked,
+                    "completed" if fabric_invoked else "no_op",
                 )
                 if fabric_invoked:
                     emit_tool_event(
@@ -867,16 +863,9 @@ async def run_data_search_prompt_agent(
                         "data-search Pass 1: recoverable 失敗 → Pass 2 に降格: %s",
                         exc,
                     )
-                    emit_tool_event(
-                        build_tool_event_data(
-                            "fabric_data_agent_invocation",
-                            "fallback",
-                            agent_name="data-search-agent",
-                            source="fabric_data_agent",
-                            provider="foundry",
-                            phase="pass1",
-                            error_message=str(exc)[:200],
-                        )
+                    logger.info(
+                        "fabric_data_agent_invocation pass=pass1 fabric_tool_invoked=False status=fallback error=%s",
+                        str(exc)[:200],
                     )
                     emit_tool_event(
                         build_tool_event_data(
@@ -939,15 +928,10 @@ async def run_data_search_prompt_agent(
             )
 
         fabric_invoked_in_pass2 = _detect_fabric_tool_invoked(pass2_final)
-        emit_tool_event(
-            build_tool_event_data(
-                "fabric_data_agent_invocation",
-                "success" if fabric_invoked_in_pass2 else "no_op",
-                agent_name="data-search-agent",
-                source="fabric_data_agent",
-                provider="foundry",
-                phase="pass2",
-            )
+        logger.info(
+            "fabric_data_agent_invocation pass=pass2 fabric_tool_invoked=%s status=%s",
+            fabric_invoked_in_pass2,
+            "completed" if fabric_invoked_in_pass2 else "no_op",
         )
         return pass2_final
     finally:

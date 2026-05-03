@@ -1,6 +1,6 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentProgress, ErrorData, ImageContent, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
+import type { AgentProgress, ErrorData, ImageContent, PipelineMetrics, PipelineStatus, TextContent, ToolEvent } from '../hooks/useSSE'
 import type { ChartSpec, DebugEvent, EvidenceItem, TraceEvent } from '../lib/event-schemas'
 import { collapseToolEvents, isFoundryWorkIqToolEvent, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
@@ -182,6 +182,7 @@ interface Props {
   t: (key: string) => string
   locale: string
   conversationKey?: string
+  pipelineStatus?: PipelineStatus
 }
 
 export function WorkflowAccordion({
@@ -195,6 +196,7 @@ export function WorkflowAccordion({
   t,
   locale,
   conversationKey = 'default',
+  pipelineStatus,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null)
 
@@ -277,10 +279,22 @@ export function WorkflowAccordion({
     activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [currentAgent])
 
-  const getStatusForRound = (stepKey: string, stepNum: number, isPastRound: boolean, roundContents: TextContent[]) => {
+  const getStatusForRound = (
+    stepKey: string,
+    stepNum: number,
+    isPastRound: boolean,
+    roundContents: TextContent[],
+    stepHasNonTextContent: boolean = false,
+  ) => {
     if (isPastRound) return 'completed'
+    const hasContent = stepHasNonTextContent || roundContents.some(c => c.agent === stepKey)
+    // Defensive safety net (Bug 3): if the pipeline reached terminal completion
+    // but the backend missed emitting a terminal `agent_progress completed` for
+    // this step, the step would otherwise stay 'pending' or 'active' forever.
+    // Trust the pipeline-level completion signal as long as we have content
+    // (text, image, or any other artifact for this step).
+    if (pipelineStatus === 'completed' && hasContent) return 'completed'
     if (!agentProgress) return 'pending'
-    const hasContent = roundContents.some(c => c.agent === stepKey)
 
     if (stepKey === 'regulation-check-agent' && agentProgress.agent === 'plan-revision-agent') {
       return agentProgress.status === 'running' ? 'active' : 'completed'
@@ -312,14 +326,15 @@ export function WorkflowAccordion({
     roundContents: TextContent[],
     isPastRound: boolean,
   ) => {
-    const status = getStatusForRound(step.key, step.step, isPastRound, roundContents)
+    const stepImages = images.filter(image => resolveToolStepKey(image.agent) === step.key)
+    const stepHasNonTextContent = stepImages.length > 0
+    const status = getStatusForRound(step.key, step.step, isPastRound, roundContents, stepHasNonTextContent)
     const content = roundContents.findLast(c => c.agent === step.key)
     const sectionKey = `${roundNumber}:${step.key}`
     const fallbackCollapsed = isPastRound ? true : (autoCollapsed[step.key] ?? false)
     const sectionCollapsed = isSectionCollapsed(sectionKey, fallbackCollapsed)
     const isActive = status === 'active'
     const stepTools = getToolEvents(step.key, roundNumber)
-    const stepImages = images.filter(image => resolveToolStepKey(image.agent) === step.key)
     const stepPayload = collectGroundedPayload({
       textContents: roundContents.filter(item => item.agent === step.key),
       images: stepImages,
@@ -351,6 +366,8 @@ export function WorkflowAccordion({
       <div
         key={step.key}
         ref={isActive ? activeRef : undefined}
+        data-step-key={step.key}
+        data-step-status={status}
         className={`rounded-2xl border transition-all duration-300 ${
           isActive
             ? 'border-[var(--accent)] bg-[var(--accent-soft)] shadow-md'

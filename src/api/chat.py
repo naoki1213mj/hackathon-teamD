@@ -72,7 +72,11 @@ router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 _BROCHURE_AGENT_MAX_WAIT_SECONDS = 240.0
-_WORK_IQ_TIMEOUT_CAP_SECONDS = 150.0
+# Container Apps ingress timeout is 240s. Keep some headroom under that so the
+# Foundry Work IQ tool has a chance to recover before the platform aborts the
+# stream. Smoke testing on 2026-05-03 showed 150s was tight for cold-start
+# WorkIQ runs; bumping to 200s gives ~40s margin.
+_WORK_IQ_TIMEOUT_CAP_SECONDS = 200.0
 
 _APPROVAL_KEYWORDS = {
     "approve",
@@ -294,6 +298,45 @@ def _build_video_submission_timeout_outcome() -> AgentExecutionOutcome:
         "text": _VIDEO_SUBMISSION_TIMEOUT_MESSAGE,
         "success": False,
         "latency_seconds": float(_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS),
+        "tool_calls": 0,
+        "total_tokens": 0,
+    }
+
+
+def _build_agent_failure_outcome(
+    events: list[str],
+    *,
+    agent_name: str,
+    step: int,
+    total_steps: int,
+    start_time: float,
+    text: str = "",
+) -> AgentExecutionOutcome:
+    """エージェント失敗時の outcome を一貫した形で組み立てる。
+
+    UI の workflow stepper は ``agent_progress`` の ``completed`` ステータスを受け取って
+    初めてその step の spinner を停止する。失敗パスで terminal ``agent_progress`` を
+    送らないと、video-gen-agent などで例外が起きたときに UI が永遠に "実行中" 表示
+    のままになる (Bug #3)。本ヘルパーを通すことで、success / failure いずれの経路でも
+    必ず terminal ``agent_progress`` が SSE ストリームに乗ることを保証する。
+    """
+    events.append(
+        format_sse(
+            SSEEventType.AGENT_PROGRESS,
+            {
+                "agent": agent_name,
+                "status": "completed",
+                "step": step,
+                "total_steps": total_steps,
+            },
+        )
+    )
+    elapsed = round(time.monotonic() - start_time, 1)
+    return {
+        "events": events,
+        "text": text,
+        "success": False,
+        "latency_seconds": elapsed,
         "tool_calls": 0,
         "total_tokens": 0,
     }
@@ -2546,30 +2589,78 @@ async def _build_brochure_fallback_outcome(
 
 
 def _conversation_status_from_events(events: list[dict]) -> str:
-    """保存対象イベント列から会話ステータスを推定する。"""
+    """保存対象イベント列から会話ステータスを推定する。
+
+    末尾の event だけでなく、後ろから最も近い control event
+    (`done` / `approval_request` / `error`) を探して判定する。
+    これにより、failure path で error の後に terminal `agent_progress`
+    を append しても会話が誤って `completed` 判定されない。
+    """
     if not events:
         return "completed"
 
-    last_event = events[-1].get("event")
-    if last_event in {SSEEventType.DONE, SSEEventType.DONE.value}:
-        return "completed"
-    if last_event in {SSEEventType.APPROVAL_REQUEST, SSEEventType.APPROVAL_REQUEST.value}:
-        last_data = events[-1].get("data", {})
-        if isinstance(last_data, dict) and last_data.get("approval_scope") == "manager":
-            return "awaiting_manager_approval"
-        return "awaiting_approval"
-    if last_event in {SSEEventType.ERROR, SSEEventType.ERROR.value}:
-        return "error"
+    control_event_keys = {
+        SSEEventType.DONE,
+        SSEEventType.DONE.value,
+        SSEEventType.APPROVAL_REQUEST,
+        SSEEventType.APPROVAL_REQUEST.value,
+        SSEEventType.ERROR,
+        SSEEventType.ERROR.value,
+    }
+    for event in reversed(events):
+        event_name = event.get("event")
+        if event_name not in control_event_keys:
+            continue
+        if event_name in {SSEEventType.DONE, SSEEventType.DONE.value}:
+            return "completed"
+        if event_name in {
+            SSEEventType.APPROVAL_REQUEST,
+            SSEEventType.APPROVAL_REQUEST.value,
+        }:
+            last_data = event.get("data", {})
+            if isinstance(last_data, dict) and last_data.get("approval_scope") == "manager":
+                return "awaiting_manager_approval"
+            return "awaiting_approval"
+        if event_name in {SSEEventType.ERROR, SSEEventType.ERROR.value}:
+            return "error"
     return "completed"
 
 
 def _manager_continuation_status_from_events(events: list[dict]) -> str:
-    """上司承認後のバックグラウンド継続中ステータスを推定する。"""
-    status = _conversation_status_from_events(events)
+    """上司承認後のバックグラウンド継続中ステータスを推定する。
+
+    上司承認 (`approval_request` with `approval_scope=manager`) はこの継続処理の
+    トリガーであり、それ以降の event 列から状態を判定する。trigger 直後の
+    `agent_progress` 等の非 control event しか無ければ `running`、
+    `done` / `error` / 別の `approval_request` が来ていればそれを採用する。
+    failure path で `error` の後に terminal `agent_progress` を append した場合も
+    `error` が正しく維持される。
+    """
     if not events:
-        return status
-    last_event = events[-1].get("event")
-    terminal_events = {
+        return "completed"
+
+    approval_event_keys = {
+        SSEEventType.APPROVAL_REQUEST,
+        SSEEventType.APPROVAL_REQUEST.value,
+    }
+    last_manager_approval_idx = -1
+    for idx in range(len(events) - 1, -1, -1):
+        event = events[idx]
+        if event.get("event") not in approval_event_keys:
+            continue
+        data = event.get("data", {})
+        if isinstance(data, dict) and data.get("approval_scope") == "manager":
+            last_manager_approval_idx = idx
+            break
+
+    if last_manager_approval_idx < 0:
+        return _conversation_status_from_events(events)
+
+    post_approval = events[last_manager_approval_idx + 1:]
+    if not post_approval:
+        return _conversation_status_from_events(events)
+
+    control_event_keys = {
         SSEEventType.DONE,
         SSEEventType.DONE.value,
         SSEEventType.ERROR,
@@ -2577,9 +2668,9 @@ def _manager_continuation_status_from_events(events: list[dict]) -> str:
         SSEEventType.APPROVAL_REQUEST,
         SSEEventType.APPROVAL_REQUEST.value,
     }
-    if last_event not in terminal_events:
-        return "running"
-    return status
+    if any(event.get("event") in control_event_keys for event in post_approval):
+        return _conversation_status_from_events(post_approval)
+    return "running"
 
 
 _TOOL_CALL_TYPE_MAP = {
@@ -3229,14 +3320,13 @@ async def _execute_agent(
                     tool_events=attempt_tool_events,
                     error_code="MODEL_DEPLOYMENT_UNAVAILABLE",
                 )
-                return {
-                    "events": events,
-                    "text": "",
-                    "success": False,
-                    "latency_seconds": round(time.monotonic() - start_time, 1),
-                    "tool_calls": 0,
-                    "total_tokens": 0,
-                }
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
 
             if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
                 attempt_tool_events.append(
@@ -3283,14 +3373,13 @@ async def _execute_agent(
                         latency_seconds=round(time.monotonic() - start_time, 1),
                         error_code="WORKIQ_OBO_TOKEN_FAILED",
                     )
-                    return {
-                        "events": events,
-                        "text": "",
-                        "success": False,
-                        "latency_seconds": round(time.monotonic() - start_time, 1),
-                        "tool_calls": 0,
-                        "total_tokens": 0,
-                    }
+                    return _build_agent_failure_outcome(
+                        events,
+                        agent_name=agent_name,
+                        step=step,
+                        total_steps=total_steps,
+                        start_time=start_time,
+                    )
                 if _is_foundry_work_iq_timeout_error(exc):
                     logger.warning("Foundry Work IQ connector がタイムアウトしました: %s", exc)
                     if isinstance(work_iq_session, dict):
@@ -3323,14 +3412,13 @@ async def _execute_agent(
                         latency_seconds=round(time.monotonic() - start_time, 1),
                         error_code="WORKIQ_TIMEOUT",
                     )
-                    return {
-                        "events": events,
-                        "text": "",
-                        "success": False,
-                        "latency_seconds": round(time.monotonic() - start_time, 1),
-                        "tool_calls": 0,
-                        "total_tokens": 0,
-                    }
+                    return _build_agent_failure_outcome(
+                        events,
+                        agent_name=agent_name,
+                        step=step,
+                        total_steps=total_steps,
+                        start_time=start_time,
+                    )
                 # Foundry 設定・プロビジョニング不備の場合は初回のみ
                 # Agent Framework にフォールバックしてリトライ回数を消費しない
                 if attempt == 1 and _is_foundry_prompt_agent_unavailable(exc):
@@ -3420,14 +3508,13 @@ async def _execute_agent(
                     tool_events=attempt_tool_events,
                     error_code=exc.__class__.__name__,
                 )
-                return {
-                    "events": events,
-                    "text": "",
-                    "success": False,
-                    "latency_seconds": round(time.monotonic() - start_time, 1),
-                    "tool_calls": 0,
-                    "total_tokens": 0,
-                }
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
 
             logger.warning(
                 "エージェント(%s)で一時エラーが発生。%d 回目を %.1f 秒後に再試行します: %s",
@@ -3488,14 +3575,13 @@ async def _execute_agent(
                     tool_events=[consent_payload],
                     error_code="WORKIQ_CONSENT_REQUIRED",
                 )
-                return {
-                    "events": events,
-                    "text": "",
-                    "success": False,
-                    "latency_seconds": round(time.monotonic() - start_time, 1),
-                    "tool_calls": 0,
-                    "total_tokens": 0,
-                }
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
             mcp_approval_request = _find_output_item_by_type(result, "mcp_approval_request")
             if mcp_approval_request is not None:
                 approval_payload = _build_agent_tool_event(
@@ -3527,14 +3613,13 @@ async def _execute_agent(
                     tool_events=[approval_payload],
                     error_code="WORKIQ_APPROVAL_REQUIRED",
                 )
-                return {
-                    "events": events,
-                    "text": "",
-                    "success": False,
-                    "latency_seconds": round(time.monotonic() - start_time, 1),
-                    "tool_calls": 0,
-                    "total_tokens": 0,
-                }
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
             work_iq_mcp_calls = _extract_mcp_calls(result, server_label=_WORK_IQ_MCP_SERVER_LABEL)
             if not work_iq_mcp_calls:
                 events.append(
@@ -3567,14 +3652,13 @@ async def _execute_agent(
                     latency_seconds=round(time.monotonic() - start_time, 1),
                     error_code="WORKIQ_NOT_USED",
                 )
-                return {
-                    "events": events,
-                    "text": "",
-                    "success": False,
-                    "latency_seconds": round(time.monotonic() - start_time, 1),
-                    "tool_calls": 0,
-                    "total_tokens": 0,
-                }
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
             collected_tool_events.append(
                 _build_agent_tool_event(
                     "workiq_foundry_tool",
@@ -3617,14 +3701,13 @@ async def _execute_agent(
             tool_events=collected_tool_events,
             error_code="TOOL_RESPONSE_BLOCKED",
         )
-        return {
-            "events": events,
-            "text": "",
-            "success": False,
-            "latency_seconds": round(time.monotonic() - start_time, 1),
-            "tool_calls": 0,
-            "total_tokens": 0,
-        }
+        return _build_agent_failure_outcome(
+            events,
+            agent_name=agent_name,
+            step=step,
+            total_steps=total_steps,
+            start_time=start_time,
+        )
 
     events.extend(_build_content_events(agent_name, result_text))
 
@@ -5136,6 +5219,19 @@ async def _append_post_completion_updates(
     snapshot_messages = update_context.get("base_messages_snapshot")
     snapshot_user_input = update_context.get("base_user_input")
     snapshot_user_messages = update_context.get("base_user_messages")
+    artifact_version_hint = _coerce_artifact_version(update_context.get("artifact_version"))
+    video_job_id_hint = _sanitize_optional_text(update_context.get("video_job_id"))
+    review_input_hint = _sanitize_optional_text(update_context.get("review_input"))
+    logger.info(
+        "post_completion_updates start: conversation_id=%s artifact_version=%s "
+        "has_video_job=%s has_review_input=%s has_snapshot=%s owner_kind=%s",
+        conversation_id,
+        artifact_version_hint,
+        bool(video_job_id_hint),
+        bool(review_input_hint),
+        snapshot_messages is not None,
+        "anon" if owner_id and owner_id.startswith("anon-") else ("auth" if owner_id else "none"),
+    )
     existing_conversation: dict | None = None
     base_messages: list[dict] = []
     base_user_input = ""
@@ -5189,6 +5285,17 @@ async def _append_post_completion_updates(
 
     final_messages = [*base_messages, *appended_events]
     conversation_status = _conversation_status_from_events(final_messages)
+    logger.info(
+        "post_completion_updates appended: conversation_id=%s appended=%d "
+        "base=%d total=%d derived_status=%s video_job=%s review_input=%s",
+        conversation_id,
+        len(appended_events),
+        len(base_messages),
+        len(final_messages),
+        conversation_status,
+        bool(video_job_id),
+        bool(review_input),
+    )
 
     # Resolve owner_id with sensible fallback if the snapshot path didn't
     # include the existing conversation doc.
@@ -5216,6 +5323,14 @@ async def _append_post_completion_updates(
         metrics=metadata_for_save,
         status=conversation_status,
         owner_id=effective_owner_id,
+    )
+    logger.info(
+        "post_completion_updates saved: conversation_id=%s status=%s "
+        "appended_events=%d total_messages=%d",
+        conversation_id,
+        conversation_status,
+        len(appended_events),
+        len(final_messages),
     )
 
 
@@ -6015,6 +6130,14 @@ async def approve(
                 task = asyncio.create_task(_append_post_completion_updates_safe(thread_id, update_job))
                 _BACKGROUND_TASK_REGISTRY.add(task)
                 task.add_done_callback(_BACKGROUND_TASK_REGISTRY.discard)
+            if background_update_jobs:
+                logger.info(
+                    "background_update_jobs scheduled: conversation_id=%s job_count=%d "
+                    "registry_size=%d",
+                    thread_id,
+                    len(background_update_jobs),
+                    len(_BACKGROUND_TASK_REGISTRY),
+                )
 
         if not shield_result.is_safe:
             yield format_sse(

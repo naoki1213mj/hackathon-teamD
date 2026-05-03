@@ -180,7 +180,7 @@ PR 3 は Agent1 (data-search) を Foundry Prompt Agent + `MicrosoftFabricPreview
    - **必須**: `https://ai.azure.com/user_impersonation` の delegated token を持つ MSAL サインイン状態で実行する。匿名トラフィックは fail-closed で legacy 経路に直行するため、Fabric tool は呼ばれない (`src/api/chat.py` の `auth_mode` gate)。
    - Web UI から「夏のハワイ学生旅行向けプランを企画して」を送信
    - data-search phase で **Fabric IQ chip** が出ることを確認
-   - App Insights `traces` で `fabric_data_agent_invocation` telemetry の `pass=pass1` が success=true で記録されること
+   - App Insights `AppTraces` で `Message contains "fabric_data_agent_invocation"` を検索し、`pass=pass1 fabric_tool_invoked=True status=completed` の log line が記録されていることを確認 (`logger.info` 経由、`_run_data_search_prompt_agent` から emit)
    - Fabric workspace `ws-3iq-demo` audit log で実 user の UPN が記録されていること
 
 #### Rollback
@@ -248,7 +248,7 @@ gh variable set DATA_SEARCH_RUNTIME --env production --body "legacy"
    - `curl https://apim-<token>.azure-api.net/app/api/health` → 401 (JWT 必須化済みの想定経路)
    - ブラウザで `https://apim-<token>.azure-api.net/app/` → MSAL login → SPA 表示 → チャット送信 → SSE 200
    - ブラウザで `https://ca-<token>-pn.<region>.azurecontainerapps.io/` → 302 redirect to APIM URL (loop 防止のため再帰なし)
-   - App Insights `traces` で `fabric_data_agent_invocation` SSE event が emit されること (PR 3 の Foundry path 起動の最終証跡)
+   - App Insights `AppTraces` で `Message contains "fabric_data_agent_invocation"` の log line が emit されること (PR 3 の Foundry path 起動の最終証跡)
 
 **rollback** (APIM 経由 trust が壊れた / production が落ちた場合):
 - **主**: `azd env set TRUSTED_AUTH_HEADER_NAME ''` で env から **NAME を消す** (空文字)。Container App revision で `TRUSTED_AUTH_HEADER_NAME` env が unset になり、`_has_trusted_auth_boundary()` が常に False に戻り、anonymous fallback (legacy path) が再開される
