@@ -88,12 +88,33 @@ def _settings() -> dict[str, str]:
 
 
 def _build_response_with_fabric() -> SimpleNamespace:
-    """Pass 1 で Fabric tool が呼ばれた response を模擬する。"""
+    """Pass 1 で Fabric tool が呼ばれ grounded answer が返った response を模擬する。
+
+    rubber-duck `pass1-polite-refusal-impl-review` blocking #1 反映: 既存テストでも
+    grounded text を含めるよう更新 (空応答は新しい defense-in-depth により Pass 2 に
+    降格されるため)。
+    """
+    message_item = SimpleNamespace(
+        type="message",
+        content=[
+            SimpleNamespace(
+                type="output_text",
+                text=(
+                    "Fabric Data Agent から夏のハワイ売上 ¥38,926,615 / 予約 39件 / "
+                    "旅行者 131名 / 平均評価 4.0 を取得しました。"
+                ),
+            )
+        ],
+    )
     return SimpleNamespace(
         id="resp_pass1_ok",
+        output_text=(
+            "Fabric Data Agent から夏のハワイ売上 ¥38,926,615 / 予約 39件 / "
+            "旅行者 131名 / 平均評価 4.0 を取得しました。"
+        ),
         output=[
             SimpleNamespace(type="fabric_dataagent_preview"),
-            SimpleNamespace(type="message"),
+            message_item,
         ],
     )
 
@@ -712,4 +733,277 @@ def test_run_data_search_prompt_agent_pass2_logs_canonical_telemetry(monkeypatch
     fabric_logs = [r.getMessage() for r in caplog.records if "fabric_data_agent_invocation" in r.getMessage()]
     assert any("pass=pass2" in msg and "status=completed" in msg for msg in fabric_logs), (
         f"Expected canonical Pass 2 completed log line; got: {fabric_logs}"
+    )
+
+
+# ---------- Pass 1 polite-refusal detection (2026-05-04) ----------
+#
+# `Travel_Ontology_DA_v2` の NL2Ontology は GQL を生成できないとき
+# 「該当データは見つかりませんでした」等の polite refusal を返す
+# (live web smoke 2026-05-03 で 4 demo prompts のうち春・沖縄・ファミリー
+# で再現)。実際には沖縄 spring family は 379 bookings · ¥232M のデータが
+# lakehouse に存在するため、polite refusal を検出して Pass 2 (function tool
+# fallback) に降格させ、SQL endpoint から実集計値を返す。
+
+
+def test_extract_responses_api_text_uses_output_text_first() -> None:
+    """SDK convenience の output_text を優先して取り出せる。"""
+    response = SimpleNamespace(output_text="¥232,485,000 / 379件 / 平均 4.3", output=[])
+    assert module._extract_responses_api_text(response) == "¥232,485,000 / 379件 / 平均 4.3"
+
+
+def test_extract_responses_api_text_falls_back_to_message_content() -> None:
+    """output_text 不在時は message item の content[*].text を結合する。"""
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="fabric_dataagent_preview"),
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(text="該当データは見つかりませんでした。")],
+            ),
+        ],
+    )
+    text = module._extract_responses_api_text(response)
+    assert "見つかりませんでした" in text
+
+
+def test_extract_responses_api_text_handles_dict_message_content() -> None:
+    """dict shape の message item でも text を抽出できる。"""
+    response = {
+        "output": [
+            {"type": "message", "content": [{"text": "0件"}]},
+        ],
+    }
+    response_obj = SimpleNamespace(output=response["output"])
+    assert module._extract_responses_api_text(response_obj) == "0件"
+
+
+def test_extract_responses_api_text_returns_empty_for_empty_response() -> None:
+    """text が無ければ空文字を返す (None response も安全に処理)。"""
+    assert module._extract_responses_api_text(None) == ""
+    assert module._extract_responses_api_text(SimpleNamespace(output=[])) == ""
+    assert (
+        module._extract_responses_api_text(
+            SimpleNamespace(output=[SimpleNamespace(type="fabric_dataagent_preview")])
+        )
+        == ""
+    )
+
+
+def _build_pass1_response_with_text(text: str) -> SimpleNamespace:
+    """Fabric tool が呼ばれて assistant 本文 `text` を返す Pass 1 response を組み立てる。"""
+    return SimpleNamespace(
+        id="resp_pass1_with_text",
+        output_text=text,
+        output=[
+            SimpleNamespace(type="fabric_dataagent_preview"),
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(text=text)],
+            ),
+        ],
+    )
+
+
+def test_pass1_polite_refusal_falls_back_to_pass2(monkeypatch) -> None:
+    """Pass 1 で Fabric tool は呼ばれたが polite refusal の場合は Pass 2 に降格する。
+
+    Live regression: 「春の沖縄ファミリー向けプランを企画して」で
+    Foundry Fabric DA NL2Ontology が
+    「春・沖縄・ファミリー条件での売上、予約数、平均単価、顧客評価の該当データは
+    見つかりませんでした」と返すケース。沖縄 spring family は実際には 379 bookings ·
+    ¥232M の grounded data が lakehouse に存在するため、Pass 2 SQL endpoint で
+    実集計値を取得すべき。
+    """
+    _patch_common(monkeypatch)
+    pass1_response = _build_pass1_response_with_text(
+        "春・沖縄・ファミリー条件での売上、予約数、平均単価、顧客評価の該当データは"
+        "見つかりませんでした。条件に合致する予約や評価が登録されていないためです。"
+    )
+    pass2_response = SimpleNamespace(id="resp_pass2_after_polite_refusal", output=[])
+    openai_client = _FakeOpenAIClient([pass1_response, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    result = asyncio.run(
+        module.run_data_search_prompt_agent(
+            "春の沖縄ファミリー向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    assert result is pass2_response, "Pass 2 result must be returned when Pass 1 was a polite refusal"
+    assert len(openai_client.responses.calls) == 2, (
+        "Pass 2 must be invoked after Pass 1 polite refusal "
+        f"(calls={len(openai_client.responses.calls)})"
+    )
+    _assert_pass2_payload_shape(openai_client.responses.calls[1])
+
+
+def test_pass1_grounded_response_returns_directly(monkeypatch) -> None:
+    """Pass 1 で Fabric tool が呼ばれ grounded metrics を返した場合 Pass 2 は呼ばない。"""
+    _patch_common(monkeypatch)
+    pass1_response = _build_pass1_response_with_text(
+        "夏のハワイ・学生条件で売上 ¥38,926,615 / 予約 39件 / 旅行者 131名 / 平均評価 4.0 を取得しました。"
+    )
+    openai_client = _FakeOpenAIClient([pass1_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+
+    result = asyncio.run(
+        module.run_data_search_prompt_agent(
+            "夏のハワイ学生旅行向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    assert result is pass1_response
+    assert len(openai_client.responses.calls) == 1, (
+        "Pass 2 must NOT be invoked when Pass 1 returned a grounded answer"
+    )
+
+
+def test_pass1_empty_text_falls_back_to_pass2(monkeypatch) -> None:
+    """rubber-duck blocking #1: Fabric tool 成功 + 抽出本文が空の場合は false-success を
+    避けるため Pass 2 に降格する (SDK shape drift / streaming truncation 防御)。"""
+    _patch_common(monkeypatch)
+
+    fabric_call = SimpleNamespace(type="fabric_dataagent_preview", id="fab_empty")
+    pass1_response = SimpleNamespace(
+        id="resp_pass1_empty",
+        output_text="",
+        output=[fabric_call],
+    )
+    pass2_response = SimpleNamespace(id="resp_pass2_after_empty", output=[])
+    openai_client = _FakeOpenAIClient([pass1_response, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    result = asyncio.run(
+        module.run_data_search_prompt_agent(
+            "春の沖縄ファミリー向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    assert result is pass2_response, (
+        "Pass 1 で本文が空のとき false-success を避けて Pass 2 に降格すべき"
+    )
+    assert len(openai_client.responses.calls) == 2, (
+        "Pass 1 + Pass 2 の 2 回呼ばれているはず"
+    )
+
+
+def test_pass1_whitespace_only_text_falls_back_to_pass2(monkeypatch) -> None:
+    """空白のみの応答も empty 同様に Pass 2 に降格する。"""
+    _patch_common(monkeypatch)
+
+    pass1_response = _build_pass1_response_with_text("   \n  \t  \n")
+    pass2_response = SimpleNamespace(id="resp_pass2_after_ws", output=[])
+    openai_client = _FakeOpenAIClient([pass1_response, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    result = asyncio.run(
+        module.run_data_search_prompt_agent(
+            "春の沖縄ファミリー向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    assert result is pass2_response
+    assert len(openai_client.responses.calls) == 2
+
+
+def test_pass1_empty_text_emits_empty_assistant_text_reason(monkeypatch) -> None:
+    """空応答 fallback event は `reason=empty_assistant_text` を含む。"""
+    _patch_common(monkeypatch)
+
+    fabric_call = SimpleNamespace(type="fabric_dataagent_preview", id="fab_empty2")
+    pass1_response = SimpleNamespace(id="resp_pass1_empty2", output_text="", output=[fabric_call])
+    pass2_response = SimpleNamespace(id="resp_pass2_after_empty2", output=[])
+    openai_client = _FakeOpenAIClient([pass1_response, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    captured: list[dict[str, Any]] = []
+
+    def _capture(event_data: dict[str, Any]) -> None:
+        captured.append(event_data)
+
+    import src.tool_telemetry as _telemetry
+    monkeypatch.setattr(_telemetry, "emit_tool_event", _capture)
+
+    asyncio.run(
+        module.run_data_search_prompt_agent(
+            "春の沖縄ファミリー向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    pass1_failed_events = [
+        ev for ev in captured
+        if ev.get("tool") == "query_data_agent"
+        and ev.get("status") == "failed"
+        and ev.get("phase") == "pass1"
+    ]
+    assert pass1_failed_events, f"Expected Pass 1 failed event; got: {captured}"
+    error_messages = " | ".join(ev.get("error_message", "") for ev in pass1_failed_events)
+    assert "no extractable assistant text" in error_messages, (
+        f"Expected empty_assistant_text marker in error_message; got: {error_messages}"
+    )
+
+
+def test_pass1_polite_refusal_emits_low_confidence_fallback_event(monkeypatch) -> None:
+    """polite refusal 時に SSE timeline 用の failed event が
+    `pass2_function_tools_low_confidence` fallback で emit される。"""
+    _patch_common(monkeypatch)
+    pass1_response = _build_pass1_response_with_text("該当データは見つかりませんでした。")
+    pass2_response = SimpleNamespace(id="resp_pass2_low_conf_event", output=[])
+    openai_client = _FakeOpenAIClient([pass1_response, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    captured: list[dict[str, Any]] = []
+
+    def _capture(event_data: dict[str, Any]) -> None:
+        captured.append(event_data)
+
+    import src.tool_telemetry as _telemetry
+    monkeypatch.setattr(_telemetry, "emit_tool_event", _capture)
+
+    asyncio.run(
+        module.run_data_search_prompt_agent(
+            "春の沖縄ファミリー向けプランを企画して",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    pass1_failed_events = [
+        ev for ev in captured
+        if ev.get("tool") == "query_data_agent"
+        and ev.get("status") == "failed"
+        and ev.get("phase") == "pass1"
+    ]
+    assert pass1_failed_events, f"Expected Pass 1 failed event; got: {captured}"
+    fallback_reasons = {ev.get("fallback") for ev in pass1_failed_events}
+    assert "pass2_function_tools_low_confidence" in fallback_reasons, (
+        f"Expected low_confidence fallback marker; got: {fallback_reasons}"
     )

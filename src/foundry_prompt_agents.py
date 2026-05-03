@@ -561,6 +561,44 @@ def _detect_fabric_tool_invoked(response: Any) -> bool:
     return False
 
 
+def _extract_responses_api_text(response: Any) -> str:
+    """OpenAI Responses API の response object からアシスタント本文を取り出す。
+
+    優先順位:
+      1) `output_text` (SDK convenience aggregate)
+      2) `output[*].content[*].text` を走査（message item のみ）
+
+    Pass 1 polite-refusal 検出 (例「該当データは見つかりませんでした」) のために
+    Fabric tool が呼ばれた後の assistant 本文を抜き出す。tool_call output は
+    対象外（type=message の item だけ参照する）。
+    """
+    if response is None:
+        return ""
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+    output = getattr(response, "output", None)
+    if not output:
+        return ""
+    parts: list[str] = []
+    for item in output:
+        item_type = getattr(item, "type", None) or (item.get("type") if isinstance(item, dict) else None)
+        if item_type != "message":
+            continue
+        content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
+        if not content:
+            continue
+        for chunk in content:
+            text_value = getattr(chunk, "text", None)
+            if text_value is None and isinstance(chunk, dict):
+                text_value = chunk.get("text")
+            if isinstance(text_value, str) and text_value.strip():
+                parts.append(text_value)
+    return "".join(parts)
+
+
 def _is_recoverable_pass1_failure(exc: Exception) -> bool:
     """Pass 1 で recoverable な失敗（→ Pass 2 へ降格）かを判定する。
 
@@ -828,7 +866,10 @@ async def run_data_search_prompt_agent(
     - Pass 2 (Pass 1 zero-fabric / 401 / 403 / connection misconfig 時のみ): function tool fallback
     - 5xx / 一般 exception: fail loud (Pass 2 に降格しない)
     """
-    from src.agents.data_search import original_user_prompt_context
+    from src.agents.data_search import (
+        _is_low_confidence_data_agent_answer,
+        original_user_prompt_context,
+    )
     from src.tool_telemetry import build_tool_event_data, emit_tool_event
 
     settings = get_settings()
@@ -912,31 +953,89 @@ async def run_data_search_prompt_agent(
                     "completed" if fabric_invoked else "no_op",
                 )
                 if fabric_invoked:
+                    # rubber-duck `pass1-polite-refusal-fix` 反映:
+                    # Foundry Pass 1 は Fabric tool が呼ばれただけで成功扱いしていたが、
+                    # Fabric Data Agent NL2Ontology が GQL を生成できないと
+                    # 「該当データは見つかりませんでした」等の polite refusal を返す
+                    # ことがある (live web smoke 2026-05-03 で 4 demo prompts 中
+                    # 春・沖縄・ファミリーで再現)。実際には沖縄 spring family は
+                    # 379 bookings · ¥232M のデータが lakehouse に存在する。
+                    # → assistant 本文に対して `_is_low_confidence_data_agent_answer`
+                    #   を実行し、polite refusal を検出したら recoverable failure と
+                    #   して Pass 2 (function tool fallback) に降格する。
+                    # rubber-duck `pass1-polite-refusal-impl-review` blocking #1 反映:
+                    # 抽出本文が空/空白のみの場合は SDK shape drift / streaming
+                    # truncation 等で実体不明 → false-success を避けるため fail-safe で
+                    # Pass 2 に降格する (`_is_low_confidence_data_agent_answer("")` は
+                    # True を返すが、`if pass1_text and ...` で短絡していたため修正)。
+                    pass1_text = _extract_responses_api_text(pass1_response)
+                    pass1_text_stripped = pass1_text.strip() if pass1_text else ""
+                    if not pass1_text_stripped or _is_low_confidence_data_agent_answer(pass1_text):
+                        if not pass1_text_stripped:
+                            truncated_preview = "<empty assistant text>"
+                            fallback_reason = "empty_assistant_text"
+                            error_message = (
+                                "Fabric DA returned no extractable assistant text "
+                                "(possible SDK shape drift) — falling back to SQL function tools"
+                            )
+                        else:
+                            truncated_preview = pass1_text_stripped.replace("\n", " ")[:160]
+                            fallback_reason = "low_confidence_answer"
+                            error_message = (
+                                "Fabric DA returned a polite refusal (no grounded metrics) "
+                                "— falling back to SQL function tools"
+                            )
+                        logger.warning(
+                            "data-search Pass 1: Fabric tool は呼ばれたが non-grounded "
+                            "応答を検出 (reason=%s) → Pass 2 に降格: %s",
+                            fallback_reason,
+                            truncated_preview,
+                        )
+                        logger.info(
+                            "fabric_data_agent_invocation pass=pass1 fabric_tool_invoked=True "
+                            "status=fallback reason=%s",
+                            fallback_reason,
+                        )
+                        emit_tool_event(
+                            build_tool_event_data(
+                                "query_data_agent",
+                                "failed",
+                                agent_name="data-search-agent",
+                                source="fabric_data_agent",
+                                provider="foundry",
+                                phase="pass1",
+                                fallback="pass2_function_tools_low_confidence",
+                                error_message=error_message,
+                            )
+                        )
+                        pass1_failed_recoverable = True
+                    else:
+                        emit_tool_event(
+                            build_tool_event_data(
+                                "query_data_agent",
+                                "completed",
+                                agent_name="data-search-agent",
+                                source="fabric_data_agent",
+                                provider="foundry",
+                                phase="pass1",
+                            )
+                        )
+                        return pass1_response
+                if not pass1_failed_recoverable:
+                    logger.info("data-search Pass 1: Fabric tool が呼ばれませんでした → Pass 2 に降格")
                     emit_tool_event(
                         build_tool_event_data(
                             "query_data_agent",
-                            "completed",
+                            "failed",
                             agent_name="data-search-agent",
                             source="fabric_data_agent",
                             provider="foundry",
                             phase="pass1",
+                            fallback="pass2_function_tools",
+                            error_message="Fabric tool was not invoked by the model in Pass 1",
                         )
                     )
-                    return pass1_response
-                logger.info("data-search Pass 1: Fabric tool が呼ばれませんでした → Pass 2 に降格")
-                emit_tool_event(
-                    build_tool_event_data(
-                        "query_data_agent",
-                        "failed",
-                        agent_name="data-search-agent",
-                        source="fabric_data_agent",
-                        provider="foundry",
-                        phase="pass1",
-                        fallback="pass2_function_tools",
-                        error_message="Fabric tool was not invoked by the model in Pass 1",
-                    )
-                )
-                pass1_failed_recoverable = True
+                    pass1_failed_recoverable = True
             except Exception as exc:
                 if _is_recoverable_pass1_failure(exc):
                     logger.warning(
