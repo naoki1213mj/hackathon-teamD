@@ -7,7 +7,8 @@ A grade requires:
 
 Previous grader's problem: matched any number+(円/万/%/件) — so '1ドル＝150円' or 'Q1: 8%' counted.
 """
-import json, re
+import json
+import re
 from pathlib import Path
 
 # Only count yen amounts of substantial magnitude (millions+)
@@ -85,42 +86,51 @@ FILES = [
     "smoke_after_phase10_tune.json",
 ]
 
-best = {}
-runs_per_prompt = {}
-for fn in FILES:
-    p = Path(fn)
-    if not p.exists():
-        print(f"skip {fn}")
-        continue
-    arr = json.loads(p.read_text(encoding="utf-8"))
-    for r in arr:
-        qid = r["qid"]
-        # Re-grade
-        g, reason = grade2(r.get("answer"))
-        # Override if status was non-completed
-        if r.get("status") != "completed":
-            g, reason = "C", f"run.{r.get('status')}"
-        r2 = {**r, "grade2": g, "reason2": reason, "_source": fn}
-        runs_per_prompt.setdefault(qid, []).append(r2)
-        prev = best.get(qid)
-        if prev is None or (g == "A" and prev["grade2"] != "A"):
-            best[qid] = r2
 
-print(f"\n{'qid':4} {'old->new':12} {'reason':40} {'src':35} runs")
-print("-" * 120)
-counts_a = 0
-for qid in sorted(best.keys()):
-    r = best[qid]
-    runs = runs_per_prompt.get(qid, [])
-    aa = sum(1 for x in runs if x["grade2"] == "A")
-    cc = sum(1 for x in runs if x["grade2"] == "C")
-    bb = sum(1 for x in runs if x["grade2"] == "B")
-    if r["grade2"] == "A":
-        counts_a += 1
-    src = r["_source"][:35]
-    old = r.get("grade", "?")
-    print(f"{qid:4} {old}->{r['grade2']:8} {r.get('reason2','')[:40]:40} {src:35} {aa}A/{bb}B/{cc}C ({len(runs)})")
+def _bestof_main() -> None:
+    best: dict = {}
+    runs_per_prompt: dict = {}
+    for fn in FILES:
+        p = Path(fn)
+        if not p.exists():
+            print(f"skip {fn}")
+            continue
+        arr = json.loads(p.read_text(encoding="utf-8"))
+        for r in arr:
+            qid = r["qid"]
+            # Re-grade
+            g, reason = grade2(r.get("answer"))
+            # Override if status was non-completed
+            if r.get("status") != "completed":
+                g, reason = "C", f"run.{r.get('status')}"
+            r2 = {**r, "grade2": g, "reason2": reason, "_source": fn}
+            runs_per_prompt.setdefault(qid, []).append(r2)
+            prev = best.get(qid)
+            if prev is None or (g == "A" and prev["grade2"] != "A"):
+                best[qid] = r2
 
-print(f"\nStrict best-of: {counts_a}/{len(best)} grade A")
-never_a = [qid for qid in sorted(best.keys()) if best[qid]["grade2"] != "A"]
-print(f"Never-A under strict grading: {never_a}")
+    print(f"\n{'qid':4} {'old->new':12} {'reason':40} {'src':35} runs")
+    print("-" * 120)
+    counts_a = 0
+    for qid in sorted(best.keys()):
+        r = best[qid]
+        runs = runs_per_prompt.get(qid, [])
+        aa = sum(1 for x in runs if x["grade2"] == "A")
+        cc = sum(1 for x in runs if x["grade2"] == "C")
+        bb = sum(1 for x in runs if x["grade2"] == "B")
+        if r["grade2"] == "A":
+            counts_a += 1
+        src = r["_source"][:35]
+        old = r.get("grade", "?")
+        print(
+            f"{qid:4} {old}->{r['grade2']:8} {r.get('reason2','')[:40]:40} "
+            f"{src:35} {aa}A/{bb}B/{cc}C ({len(runs)})"
+        )
+
+    print(f"\nStrict best-of: {counts_a}/{len(best)} grade A")
+    never_a = [qid for qid in sorted(best.keys()) if best[qid]["grade2"] != "A"]
+    print(f"Never-A under strict grading: {never_a}")
+
+
+if __name__ == "__main__":
+    _bestof_main()
