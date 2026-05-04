@@ -798,7 +798,7 @@ INSTRUCTIONS = get_pipeline_header("**販促物生成エージェント**") + ""
 - **`generate_hero_image` で生成した画像のプレースホルダーとして、HTML 内に `<img src="HERO_IMAGE" alt="メインビジュアル" class="w-full rounded-lg" />` を配置すること**
 - **SNS バナー用のセクションを作り、HTML 内に `<img src="INSTAGRAM_BANNER_IMAGE" alt="Instagramバナー" />` と `<img src="X_BANNER_IMAGE" alt="Xバナー" />` を配置すること**
 - 視覚的に魅力的なデザイン（旅行の雰囲気が伝わるように）
-- **`</body>` 直前に `<!-- Phase12-Evidence: 修正版企画書 (Agent3b) + 画像生成モデル: [使用したモデル名] -->` を必ず挿入すること**（Gap 7）
+- **HTML コメント・メタデータを HTML 内に含めないこと**: 顧客が export してファイル開示する際に、内部情報が漏れないよう Phase12-Evidence や Agent 名等の内部識別子を出力に書かない
 
 ## ブローシャの対象読者: 旅行を検討している一般顧客
 **ブローシャは顧客向けの販促資料**です。以下のルールを厳守してください:

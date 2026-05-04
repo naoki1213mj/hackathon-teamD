@@ -1750,6 +1750,68 @@ class TestRegulationCheckTools:
         assert "検出されませんでした" in result
 
     @pytest.mark.asyncio
+    async def test_check_ng_expressions_does_not_flag_mandatory_passport(self):
+        """Phase 12 rubber-duck #3 修正検証:
+        「必ずパスポートをご持参ください」のような正当な mandatory 表現を
+        substring match で誤検知しないこと（"必ず" を NG list から除外したため）。
+        """
+        result = await check_ng_expressions(
+            "海外旅行ご参加にあたっては、必ずパスポートをご持参ください。"
+            "出発時刻の 60 分前までに集合してください。"
+        )
+        assert "検出されませんでした" in result
+
+    @pytest.mark.asyncio
+    async def test_check_ng_expressions_does_not_flag_actual_percentage(self):
+        """Phase 12 rubber-duck #3 修正検証:
+        「100% 自然由来素材」のような実態を表す 100% 表現を誤検知しないこと
+        （"100%" 単独語を NG list から除外したため）。
+        """
+        result = await check_ng_expressions("100% 自然由来素材を使用しています。")
+        assert "検出されませんでした" in result
+
+    @pytest.mark.asyncio
+    async def test_check_ng_expressions_still_flags_compound_marketing_claims(self):
+        """Phase 12 rubber-duck #3 修正検証:
+        単独語 "完全" は除外したが、複合語 "完全保証" は marketing claim として
+        引き続き NG 検出されること。
+        """
+        result = await check_ng_expressions("完全保証付きツアー")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
+        assert len(parsed) > 0
+        assert parsed[0]["expression"] == "完全保証"
+
+    def test_brochure_instructions_does_not_emit_phase12_evidence_html_comment(self):
+        """Phase 12 rubber-duck #1 修正検証:
+        Agent4 INSTRUCTIONS が Phase12-Evidence HTML コメントを書くよう
+        指示していないこと（顧客 export での内部情報漏洩防止）。
+
+        rubric: 「<!-- Phase12-Evidence:」のような *positive な template 指示* が
+        無ければ OK。「Phase12-Evidence は書かない」のような negative 文言は OK。
+        """
+        from src.agents.brochure_gen import INSTRUCTIONS
+
+        assert "<!-- Phase12-Evidence" not in INSTRUCTIONS, (
+            "brochure HTML output に Phase12-Evidence コメントを書き込む positive 指示が"
+            "残っていると frontend export で顧客に内部情報が漏洩する。"
+            "Phase 12 rubber-duck #1 で削除済"
+        )
+        # Negative 指示 (＝ 書かないルール) として "Phase12-Evidence" の文字列が
+        # INSTRUCTIONS に残っていることは許容。「書かない」とだけ書いてあれば OK。
+        if "Phase12-Evidence" in INSTRUCTIONS:
+            assert "書かない" in INSTRUCTIONS or "含めない" in INSTRUCTIONS
+
+    def test_video_instructions_does_not_require_evidence_trailing_line(self):
+        """Phase 12 rubber-duck #1 修正検証:
+        Agent5 INSTRUCTIONS が Evidence 行の追記を要求していないこと
+        （video_gen 出力にはテキスト本文が無いため）。
+        """
+        from src.agents.video_gen import INSTRUCTIONS
+
+        assert "> Evidence:" not in INSTRUCTIONS
+
+    @pytest.mark.asyncio
     async def test_local_regulation_checks_emit_evidence(self):
         """ローカル規制チェックは evidence / chart を tool_event に追加する"""
         events = []

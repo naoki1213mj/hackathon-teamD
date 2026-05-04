@@ -209,13 +209,8 @@ NG_EXPRESSIONS = [
     {"expression": "業界No.1", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "多くのお客様に選ばれている"},
     {"expression": "絶対安全", "reason": "景品表示法 - 断定的表現（安全性の過大表示）", "suggestion": "徹底した安全対策"},
     {"expression": "永久", "reason": "景品表示法 - 断定的表現（期間の過大表示）", "suggestion": "長期にわたる"},
-    {"expression": "完全", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "充実した"},
-    {"expression": "100%", "reason": "景品表示法 - 断定的表現（根拠が必要）", "suggestion": "ほぼ全員が"},
-    {"expression": "確実に", "reason": "景品表示法 - 断定的表現", "suggestion": "多くの場合"},
-    {"expression": "必ず", "reason": "景品表示法 - 断定的表現", "suggestion": "できる限り"},
     {"expression": "比類なき", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "特別な"},
     {"expression": "唯一無二", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "他にはない（実証データを明記）"},
-    {"expression": "絶対", "reason": "景品表示法 - 断定的表現", "suggestion": "きっと（推量表現に変更）"},
     {"expression": "完全保証", "reason": "景品表示法 - 有利誤認のおそれ", "suggestion": "充実のサポート体制"},
     {
         "expression": "今だけ",
@@ -223,6 +218,12 @@ NG_EXPRESSIONS = [
         "suggestion": "期間限定（具体的な期日を明記）",
     },
 ]
+# 注: Phase 12 rubber-duck 指摘により以下を NG list から除外（誤検知防止）:
+#   "完全" "100%" "確実に" "必ず" "絶対" は単純 substring match では文脈を判別できず、
+#   「必ずパスポートをご持参ください」「100% 自然由来素材」等の正当な mandatory / 実態表現を
+#   誤検知して逆にコンプライアンスを悪化させる懸念があるため除外。
+#   Marketing claim としての誇大表現は "最安値" "業界No.1" "絶対安全" 等の複合語に集約し、
+#   単独語の禁止は将来的に文脈解析ベースの NG 検知に置き換える方針。
 
 TRAVEL_LAW_CHECKLIST = [
     "書面交付義務: 取引条件を書面で明示しているか",
