@@ -2230,7 +2230,7 @@ class TestBrochureGenTools:
 
         result = await bg._generate_image("test prompt")
 
-        assert result == "data:image/png;base64,abc123"
+        assert result == "data:image/jpeg;base64,abc123"
         assert captured["account_endpoint"] == "https://example.services.ai.azure.com"
         mock_client.images.generate.assert_called_once_with(
             model="gpt-image-2-custom",
@@ -2238,7 +2238,8 @@ class TestBrochureGenTools:
             n=1,
             size="1024x1024",
             quality="high",
-            output_format="png",
+            output_format="jpeg",
+            output_compression=85,
         )
 
     def test_extract_retry_after_seconds_returns_float(self):
@@ -2313,7 +2314,7 @@ class TestBrochureGenTools:
 
         result = await bg._generate_image("test prompt")
 
-        assert result == "data:image/png;base64,abc123"
+        assert result == "data:image/jpeg;base64,abc123"
         assert sleep_calls == [1.0]
         assert mock_client.images.generate.call_count == 2
 
@@ -2360,7 +2361,7 @@ class TestBrochureGenTools:
 
         result = await bg._generate_image("test prompt")
 
-        assert result == "data:image/png;base64,xyz789"
+        assert result == "data:image/jpeg;base64,xyz789"
         assert sleep_calls == [2.0]
         assert mock_client.images.generate.call_count == 2
 
@@ -2456,6 +2457,92 @@ class TestBrochureGenTools:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "許可されていません" in parsed["error"]
+
+    @pytest.mark.asyncio
+    async def test_generate_image_gpt_uses_jpeg_output_format(self, monkeypatch):
+        """rubber-duck `image-jpeg-fix-plan`: GPT-Image は JPEG @ 85 で生成し data URL 接頭辞を整合させる。
+        Cosmos 永続化時の placeholder 化を抑え、cold reload で実画像が出るようにする。
+        """
+        import src.agents.brochure_gen as bg
+
+        class _ResponseItem:
+            b64_json = "jpeg-bytes"
+
+        class _Response:
+            data = [_ResponseItem()]
+
+        captured: dict[str, object] = {}
+        mock_client = MagicMock()
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return _Response()
+
+        mock_client.images.generate.side_effect = _capture
+
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: mock_client,
+        )
+        bg.set_current_image_settings({"image_model": "gpt-image-2", "image_quality": "medium"})
+
+        result = await bg._generate_image("test prompt")
+
+        assert result == "data:image/jpeg;base64,jpeg-bytes"
+        assert captured["output_format"] == "jpeg"
+        assert captured["output_compression"] == 85
+
+    @pytest.mark.asyncio
+    async def test_generate_image_gpt_warns_on_anomalous_size(self, monkeypatch, caplog):
+        """rubber-duck `image-jpeg-fix-plan` SHOULD-FIX #2: 5 MB+ の異常サイズを観測可能にする。
+        将来 PNG 33-43 MB のような事象が再発しても App Insights `traces` に warn として残る。
+        """
+        import logging
+
+        import src.agents.brochure_gen as bg
+
+        class _ResponseItem:
+            # 6 MB の base64 (warn 閾値 5 MB を超える)
+            b64_json = "X" * (6 * 1024 * 1024)
+
+        class _Response:
+            data = [_ResponseItem()]
+
+        mock_client = MagicMock()
+        mock_client.images.generate.return_value = _Response()
+
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: mock_client,
+        )
+        bg.set_current_image_settings({"image_model": "gpt-image-2", "image_quality": "medium"})
+
+        with caplog.at_level(logging.WARNING, logger=bg.logger.name):
+            result = await bg._generate_image("test prompt")
+
+        assert result.startswith("data:image/jpeg;base64,")
+        warn_records = [r for r in caplog.records if "GPT 画像サイズが想定上限を超過" in r.getMessage()]
+        assert warn_records, "anomalous size warn log was not emitted"
 
     @pytest.mark.asyncio
     async def test_analyze_existing_brochure_rejects_sibling_data_prefix(self, tmp_path, monkeypatch):

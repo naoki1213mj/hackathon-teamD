@@ -199,3 +199,94 @@ describe('exportAllAsJson', () => {
     ])
   })
 })
+
+describe('deriveImageExtension', () => {
+  // rubber-duck `image-jpeg-fix-plan` SHOULD-FIX #1: GPT-Image を JPEG に
+  // 切替えたあとダウンロード時の拡張子が嘘にならないこと。
+  it('derives jpg from data:image/jpeg', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('data:image/jpeg;base64,abc')).toBe('jpg')
+  })
+
+  it('derives png from data:image/png', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('data:image/png;base64,abc')).toBe('png')
+  })
+
+  it('derives webp from data:image/webp', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('data:image/webp;base64,abc')).toBe('webp')
+  })
+
+  it('derives jpg from .jpeg URL path', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('https://example.com/foo.jpeg?token=abc')).toBe('jpg')
+  })
+
+  it('falls back to png for unknown formats', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('data:image/svg+xml;charset=utf-8,%3Csvg/%3E')).toBe('png')
+    expect(deriveImageExtension('https://example.com/no-ext')).toBe('png')
+    expect(deriveImageExtension(null)).toBe('png')
+    expect(deriveImageExtension('')).toBe('png')
+  })
+
+  it('handles uppercase JPEG and mixed case extensions', async () => {
+    // rubber-duck `image-jpeg-fix-impl-review` non-blocking #3 boundary case
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('https://example.com/foo.JPEG')).toBe('jpg')
+    expect(deriveImageExtension('https://example.com/foo.JPG')).toBe('jpg')
+    expect(deriveImageExtension('data:image/JPEG;base64,abc')).toBe('jpg')
+    expect(deriveImageExtension('data:image/PNG;base64,abc')).toBe('png')
+  })
+
+  it('strips query and hash before extracting extension', async () => {
+    const { deriveImageExtension } = await import('../export')
+    expect(deriveImageExtension('https://example.com/foo.png?sig=abc&v=2#anchor')).toBe('png')
+    expect(deriveImageExtension('https://example.com/foo.webp#frag')).toBe('webp')
+  })
+})
+
+describe('exportImage', () => {
+  it('uses jpg extension for JPEG data URLs', async () => {
+    const { exportImage } = await import('../export')
+    const downloadAttrs: string[] = []
+    const originalAppend = document.body.appendChild.bind(document.body)
+    vi.spyOn(document.body, 'appendChild').mockImplementation(function (this: HTMLElement, child) {
+      if (child instanceof HTMLAnchorElement) {
+        downloadAttrs.push(child.download)
+      }
+      return originalAppend(child)
+    })
+
+    const image: ImageContent = {
+      url: 'data:image/jpeg;base64,abc',
+      alt: 'hero',
+      agent: 'brochure-gen-agent',
+    }
+    exportImage(image, 0)
+
+    expect(downloadAttrs[0]).toBe('image-1.jpg')
+  })
+
+  it('uses png extension for legacy PNG data URLs (rollback safety)', async () => {
+    const { exportImage } = await import('../export')
+    const downloadAttrs: string[] = []
+    const originalAppend = document.body.appendChild.bind(document.body)
+    vi.spyOn(document.body, 'appendChild').mockImplementation(function (this: HTMLElement, child) {
+      if (child instanceof HTMLAnchorElement) {
+        downloadAttrs.push(child.download)
+      }
+      return originalAppend(child)
+    })
+
+    const image: ImageContent = {
+      url: 'data:image/png;base64,abc',
+      alt: 'hero',
+      agent: 'brochure-gen-agent',
+    }
+    exportImage(image, 2)
+
+    expect(downloadAttrs[0]).toBe('image-3.png')
+  })
+})

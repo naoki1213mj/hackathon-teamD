@@ -1,6 +1,7 @@
 import { Download } from 'lucide-react'
 import type { ImageContent } from '../hooks/useSSE'
 import { sanitizeImageUrl } from '../lib/safe-url'
+import { deriveImageExtension } from '../lib/export'
 import { EvidenceChartPanel } from './EvidenceChartPanel'
 
 interface ImageGalleryProps {
@@ -39,7 +40,7 @@ export function ImageGallery({ images, t }: ImageGalleryProps) {
             <EvidenceChartPanel evidence={img.evidence} charts={img.charts} t={t} compact />
             <a
               href={img.safeUrl}
-              download={`travel-image-${i + 1}.png`}
+              download={`travel-image-${i + 1}.${deriveImageExtension(img.safeUrl)}`}
               className="mt-2 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
             >
               <Download className="h-3.5 w-3.5" /> {t('export.image')}

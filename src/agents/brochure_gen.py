@@ -139,6 +139,11 @@ _GPT_IMAGE_TIMEOUT_SECONDS = 120
 _GPT_IMAGE_MAX_ATTEMPTS = 3
 _GPT_IMAGE_RETRY_BACKOFF_SECONDS = 2.0
 _GPT_IMAGE_MAX_RETRY_DELAY_SECONDS = 30.0
+
+# 画像サイズ telemetry: base64 が ~5MB を超えたら異常 (medium quality は通常 1MB 以下)。
+# rubber-duck `image-jpeg-fix-plan` SHOULD-FIX #2: 33-43 MB PNG の root-cause を
+# 観測可能にしておく (再発時に App Insights `traces` で warn が出る)。
+_IMAGE_SIZE_WARN_BYTES = 5 * 1024 * 1024
 _MAI_REQUEST_TIMEOUT_SECONDS = 90
 _MAI_TOTAL_TIMEOUT_SECONDS = 240
 _MAI_RATE_LIMIT_INTERVAL_SECONDS = 65.0
@@ -391,13 +396,20 @@ async def _generate_image_gpt(
             return _FALLBACK_IMAGE
 
         def _sync_generate():
+            # JPEG @ 85 で base64 サイズを 1/10 程度 (~150-540KB) まで縮め、
+            # Cosmos 永続化レイヤの placeholder 化を回避する。透過は不要 (販促画像)。
+            # rubber-duck `image-jpeg-fix-plan` の root-cause: PNG だと
+            # gpt-image-2 medium が 25-32 MB の異常サイズを返すケースがあり、
+            # `_MAX_PERSISTED_IMAGE_DATA_URL_BYTES` で SVG placeholder に
+            # 置換されて cold reload で実画像が出ない。
             return client.images.generate(
                 model=deployment,
                 prompt=prompt,
                 n=1,
                 size=size,
                 quality=quality,
-                output_format="png",
+                output_format="jpeg",
+                output_compression=85,
             )
 
         for attempt in range(1, _GPT_IMAGE_MAX_ATTEMPTS + 1):
@@ -413,15 +425,31 @@ async def _generate_image_gpt(
                     logger.warning("GPT 画像データなし。deployment=%s, response_type=%s", deployment, type(response).__name__)
                     return _FALLBACK_IMAGE
 
+                # サイズ telemetry: 異常サイズ (~5 MB+ base64) を検知できるよう記録。
+                # rubber-duck SHOULD-FIX #2: 33-43 MB の root-cause を観測可能にする。
+                b64_bytes = len(b64_data)
+                approx_binary_kb = (b64_bytes * 3 // 4) // 1024
                 logger.info(
-                    "GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s, attempt=%d",
+                    "GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s, attempt=%d, b64_bytes=%d, approx_binary_kb=%d",
                     image_model,
                     deployment,
                     size,
                     quality,
                     attempt,
+                    b64_bytes,
+                    approx_binary_kb,
                 )
-                return f"data:image/png;base64,{b64_data}"
+                if b64_bytes > _IMAGE_SIZE_WARN_BYTES:
+                    logger.warning(
+                        "GPT 画像サイズが想定上限を超過: b64_bytes=%d (%.1f MB), threshold=%d, model=%s, size=%s, quality=%s",
+                        b64_bytes,
+                        b64_bytes / (1024 * 1024),
+                        _IMAGE_SIZE_WARN_BYTES,
+                        image_model,
+                        size,
+                        quality,
+                    )
+                return f"data:image/jpeg;base64,{b64_data}"
             except (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError) as exc:
                 if attempt < _GPT_IMAGE_MAX_ATTEMPTS:
                     wait_seconds = _compute_gpt_retry_delay(exc, attempt)
@@ -480,6 +508,13 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
 
     API: POST /mai/v1/images/generations
     認証: Azure AD トークン（https://cognitiveservices.azure.com/.default）
+
+    TODO (rubber-duck `image-jpeg-fix-impl-review` non-blocking #2):
+        MAI path は今のところ PNG を返す。GPT path は JPEG @ 85 化済み (~50-100x 縮小)
+        だが、UI から MAI-Image-2 を選択された場合は再び 30+ MB PNG が
+        Cosmos 永続化 placeholder に置換されるリスクが残る。MAI API の
+        body に `format` / `compression` が公式追加されたら同等の JPEG 化を
+        適用すること。それまでは UI 側で MAI 選択時に注意喚起するのが望ましい。
     """
     try:
         settings = get_settings()

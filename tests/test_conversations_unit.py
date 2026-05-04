@@ -187,7 +187,7 @@ class TestImageTruncationForPersistence:
     def test_truncates_large_base64_image_url(self):
         from src.conversations import _truncate_large_images_for_persistence
 
-        large_payload = "A" * 200_000  # 200KB > 64KB threshold
+        large_payload = "A" * 300_000  # 300KB > 256KB threshold
         events = [
             {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero", "agent": "brochure-gen-agent"}},
         ]
@@ -197,7 +197,7 @@ class TestImageTruncationForPersistence:
         assert result[0]["event"] == "image"
         assert result[0]["data"]["url"].startswith("data:image/svg+xml")
         assert result[0]["data"]["truncated"] is True
-        assert result[0]["data"]["original_size_bytes"] >= 200_000
+        assert result[0]["data"]["original_size_bytes"] >= 300_000
         assert result[0]["data"]["alt"] == "hero"
         assert result[0]["data"]["agent"] == "brochure-gen-agent"
         # original event は破壊されない (引数 list の元 dict は不変)
@@ -229,7 +229,7 @@ class TestImageTruncationForPersistence:
     def test_keeps_text_and_tool_events_untouched(self):
         from src.conversations import _truncate_large_images_for_persistence
 
-        large_text = "B" * 200_000
+        large_text = "B" * 300_000
         events = [
             {"event": "text", "data": {"content": large_text, "agent": "brochure-gen-agent"}},
             {"event": "tool_event", "data": {"tools": ["search"], "agent": "data-search-agent"}},
@@ -242,7 +242,7 @@ class TestImageTruncationForPersistence:
     def test_truncates_multiple_images_independently(self):
         from src.conversations import _truncate_large_images_for_persistence
 
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         events = [
             {"event": "image", "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero"}},
             {"event": "text", "data": {"content": "ok"}},
@@ -278,7 +278,7 @@ class TestImageTruncationForPersistence:
 
     async def test_save_conversation_truncates_large_images_in_cosmos_doc(self):
         """save_conversation 経由で Cosmos doc 上の大きな画像が切り詰められる (E2E)."""
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         await save_conversation(
             conversation_id="test-truncation-e2e",
             user_input="ハワイプラン",
@@ -299,7 +299,7 @@ class TestImageTruncationForPersistence:
         """rubber-duck blocking #1: brochure HTML の inline `<img src="data:...">` も切り詰める。"""
         from src.conversations import _truncate_large_images_for_persistence
 
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         html = (
             "<section class='brochure'>"
             f'<img src="data:image/png;base64,{large_payload}" alt="hero" />'
@@ -335,7 +335,7 @@ class TestImageTruncationForPersistence:
     def test_html_truncation_skipped_when_content_type_not_html(self):
         from src.conversations import _truncate_large_images_for_persistence
 
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         text_with_data_uri = f'see <img src="data:image/png;base64,{large_payload}">'
         events = [
             # content_type missing or != 'html' → text event must NOT be HTML-scanned
@@ -350,7 +350,7 @@ class TestImageTruncationForPersistence:
         """rubber-duck pr1-final-review blocking #1: `src = "data:..."` も切り詰める。"""
         from src.conversations import _truncate_inline_data_urls_in_html
 
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         html = f'<img src = "data:image/png;base64,{large_payload}" alt="hero">'
 
         truncated, count = _truncate_inline_data_urls_in_html(html)
@@ -363,7 +363,7 @@ class TestImageTruncationForPersistence:
         """rubber-duck pr1-final-review blocking #1: `src=data:...` (no quotes) も切り詰める。"""
         from src.conversations import _truncate_inline_data_urls_in_html
 
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         # Note: large payload contains no whitespace / quotes so unquoted is parser-valid
         html = f'<img src=data:image/png;base64,{large_payload} alt="hero">'
 
@@ -379,7 +379,7 @@ class TestImageTruncationForPersistence:
         """rubber-duck blocking #2: 既存 doc の truncated event と incoming full-image
         event は truncate 後に同じ placeholder JSON になるので dedupe で 1 個にまとまる。
         """
-        large_payload = "A" * 200_000
+        large_payload = "A" * 300_000
         full_image_event = {
             "event": "image",
             "data": {"url": f"data:image/png;base64,{large_payload}", "alt": "hero", "agent": "brochure-gen-agent"},
@@ -410,6 +410,81 @@ class TestImageTruncationForPersistence:
         image_events = [m for m in second_doc["messages"] if m.get("event") == "image"]
         assert len(image_events) == 1
         assert image_events[0]["data"]["truncated"] is True
+
+    def test_truncates_large_jpeg_data_url(self):
+        """rubber-duck `image-jpeg-fix-plan` SHOULD-FIX: JPEG data URL も同じく truncate される。"""
+        from src.conversations import _truncate_large_images_for_persistence
+
+        large_payload = "Q" * 300_000  # > 256KB threshold
+        events = [
+            {"event": "image", "data": {"url": f"data:image/jpeg;base64,{large_payload}", "alt": "hero"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["url"].startswith("data:image/svg+xml")
+        assert result[0]["data"]["truncated"] is True
+
+    def test_truncates_inline_jpeg_data_url_in_html(self):
+        """JPEG inline data URL も HTML scan で truncate される。"""
+        from src.conversations import _truncate_inline_data_urls_in_html
+
+        large_payload = "Q" * 300_000
+        html = f'<img src="data:image/jpeg;base64,{large_payload}" alt="hero">'
+
+        truncated, count = _truncate_inline_data_urls_in_html(html)
+
+        assert count == 1
+        assert "data:image/svg+xml" in truncated
+        assert f"base64,{large_payload}" not in truncated
+
+    def test_keeps_jpeg_below_threshold_untouched(self):
+        """256KB 未満の JPEG (典型的な banner サイズ) はそのまま保存される。
+        rubber-duck `image-jpeg-fix-plan` の主目的: JPEG 圧縮で大半の画像を
+        whole 保存できるようにする。
+        """
+        from src.conversations import _truncate_large_images_for_persistence
+
+        # 200KB JPEG (~150KB binary 相当): 256KB threshold 未満
+        small_payload = "Q" * 200_000
+        events = [
+            {"event": "image", "data": {"url": f"data:image/jpeg;base64,{small_payload}", "alt": "banner"}},
+        ]
+        result = _truncate_large_images_for_persistence(events)
+
+        assert result[0]["data"]["url"].startswith("data:image/jpeg;base64,")
+        assert "truncated" not in result[0]["data"]
+
+    def test_threshold_exact_boundary(self):
+        """rubber-duck `image-jpeg-fix-impl-review` non-blocking #3 boundary case:
+        data URL が exactly 256KB のとき (border) は truncate されない (`>` 比較)。
+        境界 + 1 byte で truncate されることも確認する。
+        """
+        from src.conversations import (
+            _MAX_PERSISTED_IMAGE_DATA_URL_BYTES,
+            _truncate_large_images_for_persistence,
+        )
+
+        prefix = "data:image/jpeg;base64,"
+        # exactly threshold: payload を threshold - len(prefix) で揃えると total が
+        # ちょうど threshold になる
+        exact_payload = "Q" * (_MAX_PERSISTED_IMAGE_DATA_URL_BYTES - len(prefix))
+        url_exact = f"{prefix}{exact_payload}"
+        assert len(url_exact) == _MAX_PERSISTED_IMAGE_DATA_URL_BYTES
+
+        events_exact = [{"event": "image", "data": {"url": url_exact, "alt": "edge"}}]
+        result_exact = _truncate_large_images_for_persistence(events_exact)
+        assert result_exact[0]["data"]["url"] == url_exact, "境界値ぴったりは truncate されない"
+        assert "truncated" not in result_exact[0]["data"]
+
+        # +1 byte over threshold: truncate される
+        over_payload = exact_payload + "Q"
+        url_over = f"{prefix}{over_payload}"
+        assert len(url_over) > _MAX_PERSISTED_IMAGE_DATA_URL_BYTES
+
+        events_over = [{"event": "image", "data": {"url": url_over, "alt": "edge"}}]
+        result_over = _truncate_large_images_for_persistence(events_over)
+        assert result_over[0]["data"]["url"].startswith("data:image/svg+xml")
+        assert result_over[0]["data"]["truncated"] is True
 
 
 # --- 新規テスト ---

@@ -67,6 +67,32 @@ function downloadImageUrl(imageUrl: string, filename: string) {
   document.body.removeChild(a)
 }
 
+/**
+ * data URL や http URL から画像拡張子を導出する。
+ * rubber-duck `image-jpeg-fix-plan` SHOULD-FIX #1: GPT-Image を JPEG に
+ * 切替えたあとも `.png` 固定でダウンロードすると拡張子が嘘になる。
+ * 既知拡張子 (png/jpeg/jpg/gif/webp) のみ採用。未知は png にフォールバック。
+ */
+export function deriveImageExtension(url: string | null | undefined): string {
+  if (!url) return 'png'
+  const dataMatch = /^data:image\/([a-z0-9]+)[;,]/i.exec(url)
+  if (dataMatch) {
+    const mime = dataMatch[1].toLowerCase()
+    if (mime === 'jpeg' || mime === 'jpg') return 'jpg'
+    if (mime === 'png' || mime === 'gif' || mime === 'webp') return mime
+    return 'png'
+  }
+  // http(s) URL: クエリ前のパスから拡張子を抽出
+  const pathOnly = url.split('?')[0].split('#')[0]
+  const extMatch = /\.([a-z0-9]+)$/i.exec(pathOnly)
+  if (extMatch) {
+    const ext = extMatch[1].toLowerCase()
+    if (ext === 'jpeg') return 'jpg'
+    if (ext === 'png' || ext === 'jpg' || ext === 'gif' || ext === 'webp') return ext
+  }
+  return 'png'
+}
+
 /** 企画書を Markdown ファイルとしてダウンロード */
 export function exportPlanMarkdown(contents: TextContent[]) {
   const revised = findLastContent(contents, c => c.agent === 'plan-revision-agent')
@@ -82,9 +108,10 @@ export function exportBrochureHtml(contents: TextContent[]) {
   downloadBlob(sanitizeHtmlForExport(brochure.content), 'brochure.html', 'text/html;charset=utf-8')
 }
 
-/** 画像を PNG としてダウンロード */
+/** 画像をダウンロード (拡張子は MIME / URL から自動導出) */
 export function exportImage(image: ImageContent, index: number) {
-  downloadImageUrl(image.url, `image-${index + 1}.png`)
+  const ext = deriveImageExtension(image.url)
+  downloadImageUrl(image.url, `image-${index + 1}.${ext}`)
 }
 
 /** 全成果物を JSON で一括エクスポート */

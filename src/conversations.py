@@ -229,10 +229,19 @@ async def append_conversation_events(
 # `<img src={url}>` で何も変えずにレンダリングできる。
 #
 # 注: brochure HTML は `text` event に `content_type=html` で書かれ、
-# その中に `<img src="data:image/png;base64,...">` が inline で含まれる
+# その中に `<img src="data:image/jpeg;base64,...">` が inline で含まれる
 # ため、`image` event だけでなく HTML inline data URL も同じ閾値で
 # 置換する必要がある (rubber-duck `pr1-impl-critique` blocking #1)。
-_MAX_PERSISTED_IMAGE_DATA_URL_BYTES = 64 * 1024  # 64KB
+#
+# 閾値 256KB の根拠 (rubber-duck `image-jpeg-fix-plan`):
+#   - JPEG @ compression=85 で gpt-image-2 medium は base64 で
+#     ~200-540KB 程度 (1024x1024 / 1536x1024)
+#   - 256KB threshold で大半の banner / 中サイズ hero は whole 保存
+#   - hero (1536x1024 高密度) のみ truncate される可能性あり (許容)
+#   - 4 images × 256KB = 1MB / version: refine v2 含めると 2MB Cosmos
+#     doc 制限 borderline。HTML inline 重複が乗ると超過リスクがあるため、
+#     閾値を上げすぎない (将来 backend cache + rescue endpoint で抜本対応)
+_MAX_PERSISTED_IMAGE_DATA_URL_BYTES = 256 * 1024  # 256KB
 _TRUNCATED_IMAGE_PLACEHOLDER_TEMPLATE = (
     "data:image/svg+xml;charset=utf-8,"
     "%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E"
