@@ -9,6 +9,7 @@ import logging
 
 from agent_framework import tool
 
+from src.agents._shared_instructions import get_pipeline_header
 from src.config import get_settings
 from src.tool_telemetry import trace_tool_invocation
 
@@ -76,17 +77,7 @@ async def review_brochure_accessibility(html_content: str) -> str:
         return "## ブローシャアクセシビリティ\n" + "\n".join(checks)
 
 
-INSTRUCTIONS = """\
-あなたは旅行マーケティング AI パイプラインの **品質レビューエージェント** です。
-
-## パイプライン全体の流れ
-1. **データ分析**: 売上データ・顧客レビューの分析（完了済み）
-2. **施策立案**: マーケティング企画書の作成（完了済み）
-3. **承認ステップ**: ユーザーが企画書を承認（完了済み）
-4. **規制チェック**: 規制チェック・修正（完了済み）
-5. **販促物生成**: 販促物の生成（完了済み）
-6. **品質レビュー（あなた）**: 全成果物の最終品質レビュー
-
+INSTRUCTIONS = get_pipeline_header("**品質レビューエージェント**") + """\
 ## あなたの役割
 パイプライン全工程の成果物（データ分析・企画書・規制チェック結果・ブローシャ HTML）を
 受け取り、品質面で最終チェックを行います。あなたのレビュー結果はユーザーに
@@ -107,10 +98,12 @@ INSTRUCTIONS = """\
 問題がある場合は具体的な改善提案を付けてください。
 
 ## 出力の注意事項
-- 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
+- 出力末尾に「他にご質問はありますか？」「必要であれば〜できます」「さらに〜できます」「次に〜可能です」等の追加提案・追加質問は**絶対に書かない**こと。出力 contract で定められた section だけを書いて終了する。
 - 出力は完結した形で終わらせてください
 - 自分の名前（Agent1、Agent2 等）やシステム内部の名称は出力に含めないでください
 - ユーザーに直接見せる成果物として仕上げてください
+- **元のユーザー要求のスコープを厳守する**: 成果物の品質を評価する。ユーザーの要求に基づいた成果物であることを前提にレビューする。
+- 出力末尾に `> Evidence: 品質チェック 4 観点（企画書構造 / ブローシャアクセシビリティ / テキストトーン / 旅行業法）` を必ず追記すること
 """
 
 _REVIEW_TOOLS = [review_plan_quality, review_brochure_accessibility]

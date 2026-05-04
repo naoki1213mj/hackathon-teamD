@@ -21,6 +21,7 @@ from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 from pydantic import BaseModel
 
+from src.agents._shared_instructions import get_pipeline_header
 from src.config import get_settings
 from src.tool_telemetry import build_tool_event_data, emit_tool_event, redact_sensitive_text, trace_tool_invocation
 
@@ -1864,16 +1865,7 @@ def emit_review_evidence_for_sync(
 
 # --- エージェント作成 ---
 
-INSTRUCTIONS = """\
-あなたは旅行マーケティング AI パイプラインの **データ分析エージェント** です。
-
-## パイプライン全体の流れ
-1. **データ分析（あなた）**: 売上データ・顧客レビューを分析し、ターゲット・トレンド・改善点を抽出
-2. **施策立案**: あなたの分析結果をもとにマーケティング企画書を作成
-3. **承認ステップ**: ユーザーが企画書を確認・承認
-4. **規制チェック**: 企画書の法令・規制チェック
-5. **販促物生成**: 販促物（ブローシャ・画像）を生成
-
+INSTRUCTIONS = get_pipeline_header("**データ分析エージェント**") + """\
 ## あなたの役割
 ユーザーの指示からターゲット・季節・地域・予算等を抽出し、
 販売履歴と顧客レビューを検索・分析して、次の施策立案工程のための基礎データを提供します。
@@ -1916,11 +1908,13 @@ LLM が独自に言い換えると Fabric Data Agent が grounded data を返せ
   - DON'T: 「沖縄プランの傾向を教えて」(ファミリー条件が消えている)
 
 ## 出力の注意事項
-- 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
+- 出力末尾に「他にご質問はありますか？」「必要であれば〜できます」「さらに〜できます」「次に〜可能です」等の追加提案・追加質問は**絶対に書かない**こと。出力 contract で定められた section だけを書いて終了する。
 - 出力は完結した形で終わらせてください
 - 自分の名前（Agent1、Agent2 等）やシステム内部の名称は出力に含めないでください
 - ユーザーに直接見せる成果物として仕上げてください
 - **存在しないリンク・ダウンロード・PowerPoint 出力・グラフ画像の参照は絶対に書かないでください** (実際にダウンロードできないため UX を損ねる)。例: 「売上分析グラフをダウンロード」「PowerPoint で出力可能」「[グラフを開く](url)」等は禁止
+- **元のユーザー要求のスコープを厳守する**: 勝手に scope を絞り込まない（例: 「年別トレンド」要求を特定の地域・季節だけに限定しない）。勝手に scope を拡張しない（例: 「ハワイ」プランに他の旅行先の名所を混ぜない）。ContextVar に元プロンプトが設定されていればそれを参照し、設定されていなければ直前の入力を信用する。
+- 出力末尾に `> Evidence: <データソース (Fabric DA / SQL endpoint / CSV)>` を必ず追記すること
 """
 
 _CODE_INTERPRETER_INSTRUCTION_SUFFIX = """

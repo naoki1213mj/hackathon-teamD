@@ -11,6 +11,7 @@ from agent_framework import tool
 from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import DefaultAzureCredential
 
+from src.agents._shared_instructions import get_pipeline_header
 from src.config import get_settings
 from src.tool_telemetry import build_tool_event_data, emit_tool_event, redact_sensitive_text, trace_tool_invocation
 
@@ -206,6 +207,14 @@ def _get_search_credentials() -> tuple[str, str]:
 NG_EXPRESSIONS = [
     {"expression": "最安値", "reason": "景品表示法 - 有利誤認のおそれ", "suggestion": "お得な価格帯"},
     {"expression": "業界No.1", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "多くのお客様に選ばれている"},
+    {"expression": "絶対安全", "reason": "景品表示法 - 断定的表現（安全性の過大表示）", "suggestion": "徹底した安全対策"},
+    {"expression": "永久", "reason": "景品表示法 - 断定的表現（期間の過大表示）", "suggestion": "長期にわたる"},
+    {"expression": "完全", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "充実した"},
+    {"expression": "100%", "reason": "景品表示法 - 断定的表現（根拠が必要）", "suggestion": "ほぼ全員が"},
+    {"expression": "確実に", "reason": "景品表示法 - 断定的表現", "suggestion": "多くの場合"},
+    {"expression": "必ず", "reason": "景品表示法 - 断定的表現", "suggestion": "できる限り"},
+    {"expression": "比類なき", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "特別な"},
+    {"expression": "唯一無二", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "他にはない（実証データを明記）"},
     {"expression": "絶対", "reason": "景品表示法 - 断定的表現", "suggestion": "きっと（推量表現に変更）"},
     {"expression": "完全保証", "reason": "景品表示法 - 有利誤認のおそれ", "suggestion": "充実のサポート体制"},
     {
@@ -513,16 +522,7 @@ async def check_travel_law_compliance(document: str) -> str:
         return json.dumps(results, ensure_ascii=False)
 
 
-INSTRUCTIONS = """\
-あなたは旅行マーケティング AI パイプラインの **規制チェックエージェント** です。
-
-## パイプライン全体の流れ
-1. **データ分析**: 売上データ・顧客レビューの分析（完了済み）
-2. **施策立案**: マーケティング企画書の作成（完了済み）
-3. **承認ステップ**: ユーザーが企画書を承認（完了済み）
-4. **規制チェック（あなた）**: 承認された企画書の法令・規制適合性を検証
-5. **販促物生成**: あなたの修正提案を反映した販促物を生成
-
+INSTRUCTIONS = get_pipeline_header("**規制チェックエージェント**") + """\
 ## あなたの役割
 提出された企画書を受け取り、日本の旅行業関連法令・規制に適合しているかを
 徹底的にチェックします。違反があれば具体的な修正提案を行います。
@@ -542,10 +542,18 @@ INSTRUCTIONS = """\
 ## 重要: チェック結果のみ出力すること
 修正済みの企画書は出力しないでください（後続の修正エージェントが担当します）。
 
-## 出力フォーマット（Markdown）
+## 出力フォーマット（Markdown）— Gap 3: 構造化出力
 1. チェック結果一覧テーブル（✅ 適合 / ⚠️ 要修正 / ❌ 違反）
 2. 違反・要修正箇所の具体的な指摘
-3. 修正提案（元の表現 → 修正案）
+3. **修正提案（Gap 3 構造化形式 — 必須）**: 以下の bullet list 形式で出力すること
+
+```
+## 修正提案
+- **[指摘項目名]** (チェック結果: ✅/⚠️/❌): 具体的な修正内容（元の表現 → 修正案）
+```
+
+各項目は 1 行 × 1 提案。すべての ⚠️/❌ 項目を必ず網羅すること。
+✅ 項目も確認のために列挙してよいが、修正内容は不要。
 
 修正済み企画書は出力しないでください（後続の修正エージェントが担当します）。
 
@@ -557,10 +565,12 @@ INSTRUCTIONS = """\
 - Web Search で目的地の最新安全情報を確認すること
 
 ## 出力の注意事項
-- 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
+- 出力末尾に「他にご質問はありますか？」「必要であれば〜できます」「さらに〜できます」「次に〜可能です」等の追加提案・追加質問は**絶対に書かない**こと。出力 contract で定められた section だけを書いて終了する。
 - 出力は完結した形で終わらせてください
 - 自分の名前（Agent1、Agent2 等）やシステム内部の名称は出力に含めないでください
 - ユーザーに直接見せる成果物として仕上げてください
+- **元のユーザー要求のスコープを厳守する**: 企画書に記載された旅行先・プラン内容の範囲でチェックを行う。企画書にない情報を推測・補完してチェックしない。
+- 出力末尾に `> Evidence: ナレッジベース検索 + NG 表現スキャン ([ng_count] 件) + 旅行業法チェック + 安全情報` を必ず追記すること
 """
 
 

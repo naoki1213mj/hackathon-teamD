@@ -19,6 +19,7 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import APIConnectionError, APIStatusError, APITimeoutError, InternalServerError, RateLimitError
 
 from src.agent_client import get_shared_credential
+from src.agents._shared_instructions import get_pipeline_header
 from src.config import get_settings
 from src.tool_telemetry import trace_tool_invocation
 
@@ -774,16 +775,7 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
             return f"❌ PDF 解析エラー: {exc}"
 
 
-INSTRUCTIONS = """\
-あなたは旅行マーケティング AI パイプラインの **販促物生成エージェント** です。
-
-## パイプライン全体の流れ
-1. **データ分析**: 売上データ・顧客レビューの分析（完了済み）
-2. **施策立案**: マーケティング企画書の作成（完了済み）
-3. **承認ステップ**: ユーザーが企画書を承認（完了済み）
-4. **規制チェック**: 規制チェック・修正済み企画書の出力（完了済み）
-5. **販促物生成（あなた）**: 最終的な販促物（HTML ブローシャ・画像）を生成
-
+INSTRUCTIONS = get_pipeline_header("**販促物生成エージェント**") + """\
 ## あなたの役割
 規制チェック済みの企画書を受け取り、プロフェッショナルな販促物一式を生成します。
 これがパイプラインの最終成果物となり、ユーザーに直接提示されます。
@@ -806,6 +798,7 @@ INSTRUCTIONS = """\
 - **`generate_hero_image` で生成した画像のプレースホルダーとして、HTML 内に `<img src="HERO_IMAGE" alt="メインビジュアル" class="w-full rounded-lg" />` を配置すること**
 - **SNS バナー用のセクションを作り、HTML 内に `<img src="INSTAGRAM_BANNER_IMAGE" alt="Instagramバナー" />` と `<img src="X_BANNER_IMAGE" alt="Xバナー" />` を配置すること**
 - 視覚的に魅力的なデザイン（旅行の雰囲気が伝わるように）
+- **`</body>` 直前に `<!-- Phase12-Evidence: 修正版企画書 (Agent3b) + 画像生成モデル: [使用したモデル名] -->` を必ず挿入すること**（Gap 7）
 
 ## ブローシャの対象読者: 旅行を検討している一般顧客
 **ブローシャは顧客向けの販促資料**です。以下のルールを厳守してください:
@@ -835,10 +828,11 @@ INSTRUCTIONS = """\
 - 入力に [参考パンフレット: ...] が含まれていれば `analyze_existing_brochure` を呼び出す
 
 ## 出力の注意事項
-- 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
+- 出力末尾に「他にご質問はありますか？」「必要であれば〜できます」「さらに〜できます」「次に〜可能です」等の追加提案・追加質問は**絶対に書かない**こと。出力 contract で定められた section だけを書いて終了する。
 - 出力は完結した形で終わらせてください
 - 自分の名前（Agent1、Agent2 等）やシステム内部の名称は出力に含めないでください
 - ユーザーに直接見せる成果物として仕上げてください
+- **元のユーザー要求のスコープを厳守する**: 企画書の旅行先・プランに忠実に作成する。企画書にない別の旅行先・サービスを勝手に追加しない。
 """
 
 
