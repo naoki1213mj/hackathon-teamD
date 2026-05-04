@@ -9,6 +9,16 @@ description: >-
 
 # Microsoft Agent Framework パターン集（GA 1.0.0 準拠）
 
+## インストール
+
+```bash
+# GA 版は通常インストール（--prerelease 不要）
+uv add agent-framework-core==1.0.0 agent-framework-foundry==1.0.0
+
+# beta connector（Fabric Data Agent プレビューツール等）だけ prerelease を許容
+uv add agent-framework-fabric-connector --prerelease=allow
+```
+
 ## エージェント作成
 
 ```python
@@ -55,17 +65,24 @@ async def search_sales_history(
     ...
 ```
 
-## Sequential Workflow
+## Sequential Workflow（7 エージェントパイプライン）
+
+> **注**: `SequentialBuilder` は HITL（Human-in-the-Loop 承認中断）をサポートしない。
+> 承認フローが必要な場合は FastAPI 側で Agent1→Agent2→承認→Agent3a→Agent3b→Agent4→Agent5 を
+> 明示実行する（`src/api/chat.py` の `workflow_event_generator()` を参照）。
 
 ```python
 from agent_framework.orchestrations import SequentialBuilder
 
+# HITL なしの連続実行が必要な場合（Agent6 品質レビュー等）
 workflow = SequentialBuilder(
     participants=[
-        data_search_agent,    # Agent1
-        marketing_plan_agent, # Agent2
-        regulation_agent,     # Agent3
-        brochure_agent,       # Agent4
+        data_search_agent,     # Agent1: Fabric Lakehouse + Code Interpreter
+        marketing_plan_agent,  # Agent2: 施策生成 + Web Search
+        regulation_check_agent,# Agent3a: 規制チェック
+        plan_revision_agent,   # Agent3b: 企画書修正
+        brochure_gen_agent,    # Agent4: ブローシャ + 画像生成
+        video_gen_agent,       # Agent5: 動画生成（Photo Avatar）
     ]
 ).build()
 

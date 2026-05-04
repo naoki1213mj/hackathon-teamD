@@ -861,7 +861,40 @@ Work IQ の主な `status` 値:
 
 `ENABLE_COST_METRICS=true` かつ App Insights が設定済みの場合、`metrics.estimated_cost_usd` と `metrics.agent_estimated_costs_usd` が追加されることがあります。これは token usage からの概算で、Azure Cost Management の実課金値ではありません。`metrics.evidence` / `metrics.charts` / `metrics.source_ingestion` は安全 schema へ正規化された根拠・チャート・source ingestion 状態です。
 
-## 代表的な SSE フロー
+### `evaluation_result`
+
+> **注**: `evaluation_result` はライブ SSE ストリームでは送信されません。`done` 後にバックグラウンドで非同期に生成され、会話ドキュメント (`/api/conversations/{id}`) へ保存されます。フロントエンドは `done.background_updates_pending=true` を受けてポーリングし、`evaluation_result` を会話ドキュメントから取得します。
+
+```json
+{
+  "version": 1,
+  "round": 1,
+  "created_at": "2026-05-04T12:34:56Z",
+  "result": {
+    "overall_score": 0.87,
+    "criteria": {
+      "plan_quality": 0.90,
+      "regulation_compliance": 0.95,
+      "brochure_accessibility": 0.80,
+      "tone_consistency": 0.83
+    },
+    "comments": "キャッチコピーの語調が他セクションと微差あり"
+  },
+  "background_update": true
+}
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `version` | `integer` | 企画書バージョン（承認・修正ごとに increment） |
+| `round` | `integer` | 評価ラウンド（同バージョンで再評価した場合 increment） |
+| `created_at` | `string (ISO 8601)` | 評価完了時刻 |
+| `result` | `object` | 評価スコアと各観点の詳細 |
+| `background_update` | `boolean` | 常に `true`（ポーリング経由の update を示す） |
+
+フロントエンドでは `EvaluationPanel` コンポーネントが `evaluation_result` を表示します。バージョンセレクター切替時は対応バージョンの `evaluation_result` を表示します。
+
+
 
 ### Azure モードの新規会話
 

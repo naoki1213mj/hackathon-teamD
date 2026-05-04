@@ -32,3 +32,5 @@ scripts/fabric_data_overhaul/v2_artifacts/v1_agent_definition.json
 scripts/fabric_data_overhaul/v2_artifacts/v1_decoded/
 scripts/fabric_data_overhaul/v2_artifacts/smoke_demo_results.json
 scripts/fabric_data_overhaul/v2_artifacts/smoke_demo_results_post_lakehouse_run1.json
+# Phase 11d P10 re-smoke result (local evidence, not part of committed baseline)
+scripts/fabric_data_overhaul/v2_artifacts/smoke_results_v6_p10_rerun.json

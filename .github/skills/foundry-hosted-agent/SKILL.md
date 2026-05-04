@@ -27,18 +27,19 @@ description: >-
 
 ## デプロイ手順
 
-### 1. Docker イメージのビルド
+### 1. Docker イメージのビルド（az acr build でリモートビルド）
+
+> **注**: ローカルに Docker Engine は不要。`az acr build` でクラウドビルドする（Key Decision #9）。
 
 ```bash
-# マルチステージビルド
-docker build --platform linux/amd64 -t travel-agents:latest .
+# ACR でリモートビルド（マルチステージ、--platform 自動）
+az acr build \
+  --registry <ACR_NAME> \
+  --image travel-agents:latest \
+  .
 
-# ACR にタグ付け
-docker tag travel-agents:latest <ACR_NAME>.azurecr.io/travel-agents:latest
-
-# ACR にログイン＆push
-az acr login --name <ACR_NAME>
-docker push <ACR_NAME>.azurecr.io/travel-agents:latest
+# ビルド完了後に ACR でイメージが利用可能になる
+# <ACR_NAME>.azurecr.io/travel-agents:latest
 ```
 
 ### 2. Hosted Agent の作成（SDK）

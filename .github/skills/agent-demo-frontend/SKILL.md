@@ -16,19 +16,19 @@ description: >-
 明るく落ち着いた、余白の多いプロフェッショナルな操作画面。
 旅行会社のマーケ担当者が安心して使えるエンタープライズ品質。
 
-## コンポーネント構成（§6.2 準拠、16 コンポーネント）
+## コンポーネント構成（§6.2 準拠、28 コンポーネント）
 
 ```
 frontend/src/
 ├── components/
 │   ├── InputForm.tsx           # 自然言語入力・地域/季節/予算の選択
-│   ├── PipelineStepper.tsx     # 5 ステップの進捗表示（Agent1〜4 + 承認）
+│   ├── PipelineStepper.tsx     # 7 エージェント + 承認ステップの進捗表示（Agent1〜5, Agent6 オプショナル）
 │   ├── ToolEventBadges.tsx     # ツール使用状況のアニメーションバッジ
 │   ├── AnalysisView.tsx        # Agent1 の分析グラフ・サマリ表示
 │   ├── PlanApproval.tsx        # 企画書プレビュー + 承認/修正ボタン
 │   ├── RegulationResults.tsx   # 規制チェック結果のハイライト表示
 │   ├── BrochurePreview.tsx     # HTML ブローシャのプレビュー
-│   ├── ImageGallery.tsx        # GPT Image 1.5 の生成画像表示
+│   ├── ImageGallery.tsx        # GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 生成画像表示
 │   ├── ArtifactTabs.tsx        # 企画書/ブローシャ/画像のタブ切替
 │   ├── VersionSelector.tsx     # 成果物バージョンの切替
 │   ├── RefineChat.tsx          # マルチターン修正対話の入力
@@ -38,12 +38,15 @@ frontend/src/
 │   ├── ThemeToggle.tsx         # ダーク/ライト切替
 │   └── ErrorRetry.tsx          # エラー表示 + リトライボタン
 ├── hooks/
-│   ├── useSSE.ts              # SSE 接続管理
+│   ├── useSSE.ts              # SSE 接続管理（approval_token 保持を含む）
 │   ├── useTheme.ts            # テーマ管理（system 連動）
 │   └── useI18n.ts             # 多言語管理
 └── lib/
     ├── sse-client.ts          # SSE クライアント
-    └── i18n.ts                # 翻訳データ（ja/en/zh）
+    ├── i18n.ts                # 翻訳データ（ja/en/zh）
+    ├── export.ts              # 成果物エクスポート（PDF/HTML/画像）
+    ├── msal-auth.ts           # MSAL 認証（Work IQ 用 user_impersonation token）
+    └── voice-live.ts          # Voice Live API 統合（音声入力）
 ```
 
 ## 画面レイアウト
@@ -73,7 +76,7 @@ frontend/src/
 | `agent_progress` | PipelineStepper | ステップインジケーターを更新 |
 | `tool_event` | ToolEventBadges | ツール使用バッジをアニメーション表示 |
 | `text` | AnalysisView / RegulationResults / BrochurePreview | チャットに追記・成果物プレビュー反映 |
-| `approval_request` | PlanApproval | 承認/修正ボタンを表示 |
+| `approval_request` | PlanApproval | 承認/修正ボタンを表示（`approval_token` を useSSE state に保存し、POST `/api/chat/{id}/approve` に echo） |
 | `image` | ImageGallery | 画像をインライン表示（base64） |
 | `safety` | SafetyBadge | 4 カテゴリのスコアをバッジ表示 |
 | `error` | ErrorRetry | エラー内容 + リトライボタン |
@@ -94,4 +97,5 @@ frontend/src/
 ## 参照
 
 - 詳細なデザインルール・アンチパターン・Trust UX は `agent-demo-frontend` 汎用スキルを参照
-- 要件定義 §6: `docs/requirements_v3.md`
+- 要件定義 §6: `docs/requirements_v4.0.md`
+- 承認 token セキュリティ: `docs/approval-security.md`

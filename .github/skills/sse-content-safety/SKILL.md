@@ -20,7 +20,7 @@ class SSEEventType(StrEnum):
     TOOL_EVENT = "tool_event"             # ツール呼び出しの開始・完了
     TEXT = "text"                         # テキストチャンク
     IMAGE = "image"                       # 画像生成結果
-    APPROVAL_REQUEST = "approval_request" # Human-in-the-Loop 承認要求
+    APPROVAL_REQUEST = "approval_request" # Human-in-the-Loop 承認要求（approval_token を含む）
     SAFETY = "safety"                     # Content Safety 分析結果
     ERROR = "error"                       # エラー
     DONE = "done"                         # パイプライン完了
@@ -84,6 +84,10 @@ async def chat(request: Request):
 | 2. Content Filter（モデル） | gpt-5.4-mini 呼び出し時 | Foundry デプロイメント設定 | 有害コンテンツ（入出力両方） |
 | 3. Prompt Shield（ツール応答） | Web Search / MCP の応答 | Foundry ガードレール設定 | 間接プロンプトインジェクション |
 | 4. Text Analysis（出力） | パイプライン完了後 | FastAPI | Hate/SelfHarm/Sexual/Violence |
+
+> **承認エンドポイント**: `/api/chat/{conversation_id}/approve` (POST)。
+> `approval_request` SSE event に含まれる `approval_token`（32-byte urlsafe）を body に echo する。
+> backend は `hmac.compare_digest` で定数時間検証。詳細は `docs/approval-security.md`。
 
 ### Prompt Shield の呼び出し
 

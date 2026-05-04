@@ -15,7 +15,7 @@
 | 項目 | 確認方法 | 期待値 |
 |---|---|---|
 | Fabric capacity Active | Fabric portal → Admin portal → Capacity settings | `fcdemoeastus2001` が **Active** |
-| Travel_Ontology_DA_v2 公開済み | Fabric portal → ws-3iq-demo → Travel_Ontology_DA_v2 | Published / 最新 aiInstructions v6 |
+| Travel_Ontology_DA_v2 公開済み | Fabric portal → ws-3iq-demo → Travel_Ontology_DA_v2 | Published / Phase 11d aiInstructions 適用済み |
 | lh_travel_marketing_v2 上書きなし | Fabric portal → ws-3iq-demo → SQL endpoint で `SELECT COUNT(*) FROM booking` | 約 50,000 行 |
 | Container App env | `az containerapp show … query 'properties.template.containers[0].env'` | `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2` |
 
