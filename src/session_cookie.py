@@ -23,7 +23,7 @@ Design (rubber-duck audit `harden-plan` 2026-05-02):
 
 Migration: existing in-flight conversations keyed by `anon-{fingerprint}`
 become unreachable for cookie users. Per rubber-duck #11 we accept this
-break for hackathon scope; conversations are short-lived and the production
+break for personal-project scope; conversations are short-lived and the production
 demo doesn't have persistent multi-session anonymous users.
 
 Cookie size: ~50 bytes. No PII, no privileged data.

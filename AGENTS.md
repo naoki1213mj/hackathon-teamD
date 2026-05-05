@@ -4,7 +4,7 @@
 
 旅行会社のマーケ担当者が自然言語で指示すると、企画書・販促ブローシャ・バナー画像・動画を全自動生成するマルチエージェントパイプライン。Microsoft Foundry + Azure のフル PaaS 構成。
 
-- **チーム**: Team D (Tokunaga / Matsumoto / mmatsuzaki)
+- **オーナー**: 個人プロジェクト (元 Team D ハッカソンから継続)
 - **デプロイ先**: East US 2
 - 要件定義書: [docs/requirements_v4.0.md](docs/requirements_v4.0.md)
 

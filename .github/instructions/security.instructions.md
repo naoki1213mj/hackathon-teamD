@@ -36,7 +36,7 @@ applyTo: 'src/**,frontend/src/**,infra/**,scripts/**,Dockerfile,azure.yaml,.gith
 
 ### リポジトリ
 
-- Public リポジトリ（ハッカソン要件）
+- Public リポジトリ
 - Gitleaks でシークレット検出を CI/CD で自動実行
 - Trivy でコンテナ脆弱性スキャン
 - npm audit + pip-audit で依存関係監査

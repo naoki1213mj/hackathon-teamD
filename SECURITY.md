@@ -1,10 +1,10 @@
 # Security Policy
 
-Travel Marketing AI (Team D) のセキュリティポリシー。
+Travel Marketing AI のセキュリティポリシー。
 
 ## サポート対象
 
-ハッカソン期間中のためバージョン管理は流動的です。`main` ブランチの最新 commit のみがサポート対象です。production 想定の長期運用は別途検討が必要です。
+個人プロジェクト段階のためバージョン管理は流動的です。`main` ブランチの最新 commit のみがサポート対象です。production 想定の長期運用は別途検討が必要です。
 
 | バージョン | サポート |
 |-----------|---------|
@@ -16,7 +16,7 @@ Travel Marketing AI (Team D) のセキュリティポリシー。
 セキュリティ脆弱性を発見した場合、**public な GitHub issue は作らないでください**。代わりに以下のいずれかで報告してください:
 
 - GitHub Security Advisory (推奨): [リポジトリ Security タブ](https://github.com/naoki1213mj/travel-marketing-ai/security/advisories/new)
-- Team D メンテナへの直接連絡 (社内 Teams / 内部メール)
+- リポジトリオーナーへの直接連絡 (GitHub プロフィール経由)
 
 報告内容に含めてほしい情報:
 

@@ -1,6 +1,6 @@
 # Contributing to Travel Marketing AI
 
-Team D ハッカソンプロジェクトへの貢献ガイド。社内引継ぎ / 後続オーナー向け。
+Travel Marketing AI 個人プロジェクトへの貢献ガイド。元 Team D ハッカソン (2026-03 開始) から個人 PJ に移行済。
 
 ## はじめに
 

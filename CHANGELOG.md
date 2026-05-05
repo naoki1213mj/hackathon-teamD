@@ -2,7 +2,7 @@
 
 このプロジェクトの主要な変更を記録します。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、バージョニングは [Semantic Versioning](https://semver.org/lang/ja/) を採用します。
 
-ハッカソン段階のため `0.x.y` を維持し、デモブロッカー級の変更を Minor、セキュリティ / バグ修正を Patch として扱います。
+初期開発段階のため `0.x.y` を維持し、デモブロッカー級の変更を Minor、セキュリティ / バグ修正を Patch として扱います。
 
 ## [Unreleased]
 
@@ -15,6 +15,8 @@
 - **Phase 12 エージェント instructions tuning** — Gap 1/2/3/5/6/7 全対応。`src/agents/_shared_instructions.py` で SHARED_PREFIX + NO_FOLLOWUP_RULE + SCOPE_RESPECT_RULE を共有化 ([122601d](https://github.com/naoki1213mj/travel-marketing-ai/commit/122601d), [a3f3b38](https://github.com/naoki1213mj/travel-marketing-ai/commit/a3f3b38))
 
 ### Changed
+
+- **個人プロジェクトへの移行** — 元 Team D ハッカソン (2026-03 開始) から個人プロジェクトへ移行済み。`AGENTS.md` / `CONTRIBUTING.md` / `SECURITY.md` / `docs/requirements_v4.0.md` 等の現在進行系の表現を `個人プロジェクト` に置換。改版履歴 / 初版担当 / 第三者ハッカソンへの参照は史実として保持。`LICENSE` の Copyright を `Travel Marketing AI` に更新
 
 - **Work IQ ソース別ステータスパネルを auto-hide** — `foundry_tool` runtime で全ソースが `connector_used` のみ・件数 / プレビュー / サマリ無しの場合、UI ノイズになるため非表示。runtime 表示と Settings の "この会話で有効" バッジで activation は別途可視化される ([79016b0](https://github.com/naoki1213mj/travel-marketing-ai/commit/79016b0))
 - **ブローシャ画像出力を JPEG @ 85 に変更** — gpt-image-2 medium PNG が 25–43 MB で Cosmos 永続化 threshold を超過し cold reload で SVG placeholder 化していた問題を解消 (~50–100x size reduction) ([0c0eb40](https://github.com/naoki1213mj/travel-marketing-ai/commit/0c0eb40))
@@ -73,4 +75,4 @@
 ## メモ
 
 - 詳細な commit log は `git log --oneline` で参照
-- ハッカソン期間中は破壊的変更も含む実験的更新を頻繁に行うため、production 利用は非推奨
+- 個人プロジェクト段階のため破壊的変更も含む実験的更新を頻繁に行うことがある。production 利用は非推奨

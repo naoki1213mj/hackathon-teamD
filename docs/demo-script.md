@@ -2,7 +2,7 @@
 
 旅行マーケ担当者向け AI パイプラインのデモを Microsoft IQ 三位一体（**Work IQ + Foundry IQ + Fabric IQ**）の価値で示すための台本。
 
-> ターゲット: ハッカソン審査員 / 社内 PoC レビューア
+> ターゲット: 社内 PoC レビューア / デモ視聴者
 > 所要時間: 8〜12 分
 > 前提環境: Azure Container Apps `ca-wmbvhdhcsuyb2-pn` (East US 2, VNet 統合 CAE `cae-wmbvhdhcsuyb2-pn`) / Fabric workspace `ws-3iq-demo` / Fabric capacity `fcdemoeastus2001` / 公開 FQDN `https://ca-wmbvhdhcsuyb2-pn.wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`
 
