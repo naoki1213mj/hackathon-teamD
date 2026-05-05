@@ -84,8 +84,8 @@ describe('WorkIqSourceStatus', () => {
     expect(screen.getAllByText('オフ')).toHaveLength(3)
   })
 
-  it('renders connector_used status from foundry MCP without count or label', () => {
-    render(
+  it('hides the entire panel when foundry MCP returns only connector_used markers without count or preview', () => {
+    const { container } = render(
       <WorkIqSourceStatus
         enabled
         selectedSources={['meeting_notes', 'emails', 'teams_chats', 'documents_notes']}
@@ -100,11 +100,50 @@ describe('WorkIqSourceStatus', () => {
       />,
     )
 
-    // 4 sources should all show connector_used badge ("コネクタ実行")
+    // foundry_tool runtime: per-source previews are never available, so the panel is intentionally hidden
+    // to avoid 4 empty cards showing only "プレビューはまだありません".
+    expect(container.firstChild).toBeNull()
+    expect(screen.queryByText('コネクタ実行')).not.toBeInTheDocument()
+    expect(screen.queryByText('ソース別ステータス')).not.toBeInTheDocument()
+  })
+
+  it('keeps the panel visible when connector_used items also carry a preview or count', () => {
+    render(
+      <WorkIqSourceStatus
+        enabled
+        selectedSources={['meeting_notes', 'emails']}
+        status="enabled"
+        sourceMetadata={[
+          { source: 'meeting_notes', status: 'connector_used', count: 2 },
+          { source: 'emails', status: 'connector_used', preview: '安全な要約' },
+        ]}
+        t={t}
+      />,
+    )
+
+    expect(screen.getAllByText('コネクタ実行')).toHaveLength(2)
+    expect(screen.getByText('2 件')).toBeInTheDocument()
+    expect(screen.getByText('安全な要約')).toBeInTheDocument()
+  })
+
+  it('keeps the panel visible when briefSummary is present even if all items are connector_used', () => {
+    render(
+      <WorkIqSourceStatus
+        enabled
+        selectedSources={['meeting_notes', 'emails', 'teams_chats', 'documents_notes']}
+        status="enabled"
+        sourceMetadata={[
+          { source: 'meeting_notes', status: 'connector_used' },
+          { source: 'emails', status: 'connector_used' },
+          { source: 'teams_chats', status: 'connector_used' },
+          { source: 'documents_notes', status: 'connector_used' },
+        ]}
+        briefSummary="安全な集約サマリー"
+        t={t}
+      />,
+    )
+
+    expect(screen.getByText('安全な集約サマリー')).toBeInTheDocument()
     expect(screen.getAllByText('コネクタ実行')).toHaveLength(4)
-    // Should not show "確認待ち" (ready) anymore — bug previously stuck UI here
-    expect(screen.queryByText('確認待ち')).not.toBeInTheDocument()
-    // Should not overclaim as "使用済み"
-    expect(screen.queryByText('使用済み')).not.toBeInTheDocument()
   })
 })

@@ -92,6 +92,27 @@ export function WorkIqSourceStatus({
   const metadataBySource = new Map((sourceMetadata ?? []).map(item => [item.source, item]))
   const singleSourceSummary = sourceMetadata?.length === 1 ? sourceMetadata[0] : null
 
+  // foundry_tool runtime では Foundry MCP が per-source の count / preview を expose しないため、
+  // sourceMetadata が全件 connector_used (count/preview/summary 無し) かつ briefSummary も無い場合は、
+  // 4 つの空カードが「プレビューはまだありません」を並べるだけのノイズになる。
+  // ランタイム表示と "この会話で有効" バッジで Work IQ アクティブ状態は既に伝わっているので、その場合は描画自体を省略する。
+  const hasMeaningfulPreview = Boolean(briefSummary)
+    || (sourceMetadata ?? []).some(item => item.count !== undefined || Boolean(item.preview) || Boolean(item.summary))
+  const isConnectorUsedOnly = enabled
+    && Array.isArray(sourceMetadata)
+    && sourceMetadata.length > 0
+    && sourceMetadata.every(item => {
+      const normalized = String(item.status || '').trim().toLowerCase()
+      return (normalized === 'connector_used' || normalized === 'connector_completed')
+        && item.count === undefined
+        && !item.preview
+        && !item.summary
+    })
+
+  if (isConnectorUsedOnly && !hasMeaningfulPreview) {
+    return null
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
